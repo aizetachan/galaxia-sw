@@ -8,8 +8,24 @@ import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
 import { dmRespond, narrateOutcome } from './dm.js';
 
-// Ejecuta migraciones una vez al arranque (Neon/Postgres)
+// Migraciones (Neon) al arranque
 await migrate();
+
+// ---------- CORS robusto (evita redirects en preflight) ----------
+const app = express();
+const corsOptions = {
+  origin: true,
+  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+  credentials: false,
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+app.use(express.json());
+app.use(optionalAuth);
 
 // ---------- Helpers (gating de conocimiento) ----------
 function normalizeName(str) {
@@ -34,7 +50,7 @@ function reachScore(askerChar, targetChar, lastEvt) {
   }
   if (lastEvt) {
     const age = Date.now() - (new Date(lastEvt.ts).getTime() || 0);
-    if (age < 1000 * 60 * 60 * 72) score += 1; // <72h
+    if (age < 1000 * 60 * 60 * 72) score += 1;
   }
   return score;
 }
@@ -52,13 +68,7 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
   return `Datos verificados: ${bio}.`;
 }
 
-// ---------- App ----------
-const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(optionalAuth);
-
-// Ping opcional (útil para pruebas y healthchecks)
+// ---------- Health ----------
 app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /api/world'));
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -131,7 +141,6 @@ app.post('/api/world/ask-about', requireAuth, async (req, res) => {
   const lastEvt = pickLastPublicEvent(world, target.name);
   const score = reachScore(asker, target, lastEvt);
 
-  // deny | bio | rumor | full
   let level = 'deny';
   if (target.publicProfile) {
     if (score >= 2) level = 'full';

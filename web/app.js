@@ -1,5 +1,8 @@
 // === Config ===
-const API_BASE = 'https://galaxia-sw.vercel.app/';
+// LOCAL:
+// const API_BASE = 'http://localhost:3001';
+// PRODUCCIÓN (Vercel backend público):
+const API_BASE = 'https://TU-BACKEND.vercel.app'; // <-- cambia esto al tuyo
 
 // === State ===
 let AUTH = { token: null, user: null };
@@ -78,7 +81,17 @@ function classifyIntent(text){
 async function api(path, body){
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const res = await fetch(`${API_BASE}${path}`, { method:'POST', headers, body: JSON.stringify(body||{}) });
+  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`; // forzar barra final evita 308 en preflight
+  const res = await fetch(url, { method:'POST', headers, body: JSON.stringify(body||{}) });
+  if (!res.ok) throw new Error('api error');
+  return res.json();
+}
+
+async function apiGet(path){
+  const headers = {};
+  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`;
+  const res = await fetch(url, { method:'GET', headers });
   if (!res.ok) throw new Error('api error');
   return res.json();
 }
@@ -122,7 +135,6 @@ function updateRollCta(){
 async function send(){
   const value = inputEl.value.trim(); if (!value) return;
 
-  // Privacy commands
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
@@ -173,7 +185,7 @@ async function send(){
     inputEl.value = ''; return;
   }
 
-  // Conversación normal
+  // Conversación
   pushUser(value);
   const intent = classifyIntent(value);
   if (intent.required){
@@ -198,12 +210,10 @@ async function send(){
   inputEl.value = '';
 }
 
-// === Roll resolution ===
 let busy = false;
 async function resolveRoll(){
   if (!pendingRoll || busy) return;
-  busy = true;  // oops will cause error; fix to 'true'
-
+  busy = true;
   try{
     const res = await api('/api/roll', { skill: pendingRoll.skill, character });
     pushDM(res.text);
@@ -216,14 +226,6 @@ async function resolveRoll(){
   }
 }
 
-async function apiGet(path){
-  const headers = {};
-  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const res = await fetch(`${API_BASE}${path}`, { method:'GET', headers });
-  if (!res.ok) throw new Error('api error');
-  return res.json();
-}
-
 async function doAuth(kind){
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
@@ -233,14 +235,9 @@ async function doAuth(kind){
     const { token, user } = (await api(url, { username, pin }));
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
-    // Recompute keys per user
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-    // Intentar cargar personaje del servidor
     const me = await apiGet('/api/world/characters/me');
-    if (me?.character) {
-      save(KEY_CHAR, me.character);
-    }
-    // Recarga chat local del usuario
+    if (me?.character) save(KEY_CHAR, me.character);
     msgs = load(KEY_MSGS, []);
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
