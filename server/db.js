@@ -16,13 +16,13 @@ export async function sql(q, params = []) {
   }
 }
 
-// Evitar correr migraciones varias veces
+// Evita correr migraciones varias veces
 let migrated = false;
 export async function migrate() {
   if (migrated) return;
   migrated = true;
 
-  // 1) Tablas base
+  // Users
   await sql(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -32,6 +32,7 @@ export async function migrate() {
     );
   `);
 
+  // Sessions (opcional, por si quieres listar/invalidar tokens)
   await sql(`
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
@@ -41,6 +42,7 @@ export async function migrate() {
     );
   `);
 
+  // Characters
   await sql(`
     CREATE TABLE IF NOT EXISTS characters (
       id TEXT PRIMARY KEY,
@@ -54,7 +56,7 @@ export async function migrate() {
     );
   `);
 
-  // 2) Enum sin conflictos (NO usar "users" como tipo)
+  // Enum de visibilidad (evitar conflictos de nombre)
   await sql(`
     DO $$
     BEGIN
@@ -64,7 +66,7 @@ export async function migrate() {
     END $$;
   `);
 
-  // 3) Eventos del mundo
+  // World events
   await sql(`
     CREATE TABLE IF NOT EXISTS world_events (
       id BIGSERIAL PRIMARY KEY,
