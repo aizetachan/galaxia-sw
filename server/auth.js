@@ -12,9 +12,12 @@ export async function register(username, pin) {
   const exists = await sql('SELECT 1 FROM users WHERE lower(username)=lower($1)', [name]);
   if (exists.rowCount) throw new Error('user exists');
 
-  const id = nanoid();
   const pinHash = await bcrypt.hash(pin, 10);
-  await sql('INSERT INTO users (id, username, pin_hash) VALUES ($1,$2,$3)', [id, name, pinHash]);
+  const res = await sql(
+    'INSERT INTO users (username, pin_hash) VALUES ($1,$2) RETURNING id',
+    [name, pinHash]
+  );
+  const id = Number(res.rows[0].id);
   return { id, username: name };
 }
 
@@ -26,9 +29,10 @@ export async function login(username, pin) {
   const ok = await bcrypt.compare(pin || '', user.pin_hash);
   if (!ok) throw new Error('invalid credentials');
 
+  const userId = Number(user.id);
   const token = nanoid(48);
-  await sql('INSERT INTO sessions (token, user_id) VALUES ($1,$2)', [token, user.id]);
-  return { token, user: { id: user.id, username: name } };
+  await sql('INSERT INTO sessions (token, user_id) VALUES ($1,$2)', [token, userId]);
+  return { token, user: { id: userId, username: name } };
 }
 
 async function authFromHeader(req) {
@@ -41,7 +45,8 @@ async function authFromHeader(req) {
   );
   if (!row.rowCount) return null;
   const rowData = row.rows[0];
-  return { token: rowData.token, userId: rowData.user_id, username: rowData.username };
+  const userId = Number(rowData.user_id);
+  return { token: rowData.token, userId, username: rowData.username };
 }
 
 export async function requireAuth(req, res, next) {

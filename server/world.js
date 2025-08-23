@@ -9,7 +9,7 @@ function uuid() {
 export async function upsertCharacter(char) {
   const id = char.id || uuid();
   const now = new Date().toISOString();
-  const owner = char.ownerUserId;
+  const owner = Number(char.ownerUserId);
 
   // Upsert por owner_user_id (único)
   const { rows } = await sql(
@@ -23,10 +23,10 @@ export async function upsertCharacter(char) {
        last_location=EXCLUDED.last_location,
        updated_at=EXCLUDED.updated_at
      RETURNING *`,
-    [
-      id, owner, char.name, char.species || null, char.role || null,
-      char.publicProfile ?? true, char.lastLocation || null, now
-    ]
+      [
+        id, owner, char.name, char.species || null, char.role || null,
+        char.publicProfile ?? true, char.lastLocation || null, now
+      ]
   );
   return normalizeCharacter(rows[0]);
 }
@@ -34,7 +34,7 @@ export async function upsertCharacter(char) {
 export async function getCharacterByOwner(ownerUserId) {
   const { rows } = await sql(
     `SELECT * FROM characters WHERE owner_user_id=$1 LIMIT 1`,
-    [ownerUserId]
+    [Number(ownerUserId)]
   );
   return rows[0] ? normalizeCharacter(rows[0]) : null;
 }
@@ -66,8 +66,8 @@ export async function getWorld() {
 
 function normalizeCharacter(r) {
   return {
-    id: r.id,
-    ownerUserId: r.owner_user_id,
+    id: Number(r.id),
+    ownerUserId: r.owner_user_id === null ? null : Number(r.owner_user_id),
     name: r.name,
     species: r.species || '',
     role: r.role || '',
