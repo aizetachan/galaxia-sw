@@ -1,81 +1,87 @@
 // server/db.js
-import pkg from 'pg';
-const { Pool } = pkg;
+import pg from 'pg';
+const { Pool } = pg;
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error('DATABASE_URL is not set');
 
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Neon necesita SSL
+  connectionString,
+  ssl: { rejectUnauthorized: false },
 });
 
-export async function sql(q, params = []) {
-  const c = await pool.connect();
-  try {
-    return await c.query(q, params);
-  } finally {
-    c.release();
-  }
-}
+// Ejecuta todo de forma idempotente
+async function run(tx) {
+  await tx.query('BEGIN');
 
-// Evita correr migraciones varias veces
-let migrated = false;
-export async function migrate() {
-  if (migrated) return;
-  migrated = true;
+  // Extensión opcional; ignora si no se puede crear
+  await tx.query(`DO $$
+  BEGIN
+    BEGIN
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    EXCEPTION WHEN others THEN
+      NULL;
+    END;
+  END $$;`);
 
-  // Users
-  await sql(`
+  // Enum 'visibility' si no existe
+  await tx.query(`DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'visibility') THEN
+      CREATE TYPE visibility AS ENUM ('public','private');
+    END IF;
+  END $$;`);
+
+  await tx.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
+      id BIGSERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       pin_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
-  // Sessions (opcional, por si quieres listar/invalidar tokens)
-  await sql(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days')
-    );
-  `);
-
-  // Characters
-  await sql(`
+  await tx.query(`
     CREATE TABLE IF NOT EXISTS characters (
-      id TEXT PRIMARY KEY,
-      owner_user_id TEXT UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
       species TEXT,
       role TEXT,
-      public_profile BOOLEAN DEFAULT TRUE,
+      public_profile BOOLEAN NOT NULL DEFAULT TRUE,
       last_location TEXT,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
+      owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
-  // Enum de visibilidad (evitar conflictos de nombre)
-  await sql(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event_visibility') THEN
-        CREATE TYPE event_visibility AS ENUM ('public','rumor','private');
-      END IF;
-    END $$;
-  `);
-
-  // World events
-  await sql(`
-    CREATE TABLE IF NOT EXISTS world_events (
+  await tx.query(`
+    CREATE TABLE IF NOT EXISTS events (
       id BIGSERIAL PRIMARY KEY,
       ts TIMESTAMPTZ NOT NULL,
-      actor TEXT,
+      actor TEXT NOT NULL,
       location TEXT,
-      summary TEXT,
-      visibility event_visibility NOT NULL DEFAULT 'public',
-      user_id TEXT REFERENCES users(id)
+      summary TEXT NOT NULL,
+      visibility visibility NOT NULL DEFAULT 'public',
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL
     );
   `);
+
+  await tx.query(`CREATE INDEX IF NOT EXISTS idx_events_actor_ts ON events(actor, ts DESC);`);
+  await tx.query(`CREATE INDEX IF NOT EXISTS idx_characters_owner ON characters(owner_user_id);`);
+
+  await tx.query('COMMIT');
+}
+
+export async function migrate() {
+  const client = await pool.connect();
+  try {
+    await run(client);
+    console.log('DB migrate: ok');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('DB migrate error:', e);
+    throw e;
+  } finally {
+    client.release();
+  }
 }
