@@ -1,5 +1,5 @@
 // === Config ===
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'https://galaxia-sw.vercel.app/';
 
 // === State ===
 let AUTH = { token: null, user: null };
