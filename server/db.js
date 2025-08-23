@@ -1,18 +1,22 @@
-import pg from 'pg';
-const { Pool } = pg;
+// server/db.js
+import { Pool, neonConfig } from '@neondatabase/serverless';
+
+// Cachea la conexión entre invocaciones (recomendado en serverless)
+neonConfig.fetchConnectionCache = true;
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('DATABASE_URL is not set');
 
 export const pool = new Pool({
-  connectionString,
+  connectionString,            // usa la URL de Neon con ?sslmode=require
   ssl: { rejectUnauthorized: false },
 });
 
+// --- Migración idempotente ---
 async function run(tx) {
   await tx.query('BEGIN');
 
-  // Extensión opcional; ignora si falla por permisos
+  // Extensión opcional (si no hay permisos, se ignora)
   await tx.query(`DO $$
   BEGIN
     BEGIN
@@ -22,7 +26,7 @@ async function run(tx) {
     END;
   END $$;`);
 
-  // Enum 'visibility' si no existe
+  // Enum visibility si no existe
   await tx.query(`DO $$
   BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'visibility') THEN
