@@ -2,7 +2,8 @@
 // LOCAL:
 // const API_BASE = 'http://localhost:3001';
 // PRODUCCIÓN (Vercel backend público):
-const API_BASE = 'https://TU-BACKEND.vercel.app'; // <-- cambia esto al tuyo
+// Se puede sobreescribir con window.API_BASE en tiempo de despliegue
+const API_BASE = (typeof window !== 'undefined' && window.API_BASE) || '';
 
 // === State ===
 let AUTH = { token: null, user: null };
