@@ -3,11 +3,15 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
+import { migrate } from './db.js';
 import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
 import { dmRespond, narrateOutcome } from './dm.js';
 
-// --- Helpers: gating de conocimiento para preguntar por otros personajes ---
+// Ejecuta migraciones una vez al arranque (Neon/Postgres)
+await migrate();
+
+// ---------- Helpers (gating de conocimiento) ----------
 function normalizeName(str) {
   return (str || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
 }
@@ -48,15 +52,17 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
   return `Datos verificados: ${bio}.`;
 }
 
-// --- App ---
+// ---------- App ----------
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(optionalAuth);
 
-const PORT = process.env.PORT || 3001;
+// Ping opcional (útil para pruebas y healthchecks)
+app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /api/world'));
+app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// --- AUTH ---
+// ---------- AUTH ----------
 app.post('/api/auth/register', async (req, res) => {
   const { username, pin } = req.body || {};
   try {
@@ -83,13 +89,12 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ ok: true, user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-// --- WORLD (lectura) ---
+// ---------- WORLD ----------
 app.get('/api/world', async (_req, res) => {
   const world = await getWorld();
   res.json(world);
 });
 
-// --- PERSONAJE (crear/actualizar) ---
 app.post('/api/world/characters', requireAuth, async (req, res) => {
   const { character } = req.body || {};
   if (!character?.name) return res.status(400).json({ error: 'character.name required' });
@@ -98,7 +103,6 @@ app.post('/api/world/characters', requireAuth, async (req, res) => {
   res.json({ ok: true, character: saved });
 });
 
-// --- EVENTO (añadir al mundo) ---
 app.post('/api/world/events', requireAuth, async (req, res) => {
   const { actor, location = 'Ubicación desconocida', summary, visibility = 'public' } = req.body || {};
   if (!actor || !summary) return res.status(400).json({ error: 'actor and summary required' });
@@ -106,13 +110,11 @@ app.post('/api/world/events', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// --- MI PERSONAJE (por dueño) ---
 app.get('/api/world/characters/me', requireAuth, async (req, res) => {
   const me = await getCharacterByOwner(req.auth.userId);
   res.json({ ok: true, character: me || null });
 });
 
-// --- PREGUNTAR POR OTRO PERSONAJE (con gating) ---
 app.post('/api/world/ask-about', requireAuth, async (req, res) => {
   const { targetName } = req.body || {};
   if (!targetName) return res.status(400).json({ error: 'targetName required' });
@@ -145,7 +147,7 @@ app.post('/api/world/ask-about', requireAuth, async (req, res) => {
   res.json({ text, level, lastEvt });
 });
 
-// --- RESPUESTA DEL MÁSTER IA ---
+// ---------- DM (Máster IA) ----------
 app.post('/api/dm/respond', requireAuth, async (req, res) => {
   const { message, history = [], character } = req.body || {};
   try {
@@ -157,7 +159,7 @@ app.post('/api/dm/respond', requireAuth, async (req, res) => {
   }
 });
 
-// --- RESOLVER TIRADA ---
+// ---------- Tiradas ----------
 app.post('/api/roll', requireAuth, async (req, res) => {
   const { skill, character, location, visibility = 'public' } = req.body || {};
   const r = Math.random();
@@ -187,4 +189,10 @@ app.post('/api/roll', requireAuth, async (req, res) => {
   res.json({ outcome, text });
 });
 
-app.listen(PORT, () => console.log(`API http://localhost:${PORT}`));
+// ---------- Export para Vercel y listen local ----------
+export default app;
+
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`API http://localhost:${PORT}`));
+}
