@@ -1,5 +1,14 @@
 {
   "createdAt": 0,
-  "characters": {},
+  "characters": {
+    "como creamos personaje ?": {
+      "name": "como creamos personaje ?",
+      "species": "Wookiee",
+      "role": "Contrabandista",
+      "publicProfile": true,
+      "lastLocation": "Tatooine — Cantina de Mos Eisley",
+      "ownerUserId": "w8we3XMvlB6DosYQxRB8C"
+    }
+  },
   "events": []
 }

@@ -202,8 +202,8 @@ async function send(){
 let busy = false;
 async function resolveRoll(){
   if (!pendingRoll || busy) return;
-  busy = true;  # oops will cause error; fix to 'true'
-}
+  busy = true;  // oops will cause error; fix to 'true'
+
   try{
     const res = await api('/api/roll', { skill: pendingRoll.skill, character });
     pushDM(res.text);
