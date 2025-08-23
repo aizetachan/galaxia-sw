@@ -1,4 +1,3 @@
-// server/db.js
 import pg from 'pg';
 const { Pool } = pg;
 
@@ -10,11 +9,10 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// Ejecuta todo de forma idempotente
 async function run(tx) {
   await tx.query('BEGIN');
 
-  // Extensión opcional; ignora si no se puede crear
+  // Extensión opcional; ignora si falla por permisos
   await tx.query(`DO $$
   BEGIN
     BEGIN
