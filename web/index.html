@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Galaxia compartida — Star Wars</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>Galaxia compartida — Star Wars</h1>
+    <p class="muted">Un único mundo vivo. Tus actos quedan en el HoloNet y pueden afectar a otr@s jugadores.</p>
+  </header>
+
+  <section class="auth-panel">
+  <div class="auth-row">
+    <input id="auth-username" placeholder="Usuario" />
+    <input id="auth-pin" placeholder="PIN (4 dígitos)" maxlength="4" />
+    <button id="auth-login">Entrar / Continuar</button>
+    <button id="auth-register" class="outline">Crear usuario</button>
+    <span id="auth-status" class="muted"></span>
+  </div>
+</section>
+
+<main class="chat-wrap">
+    <section id="chat" class="chat"></section>
+
+    <section id="roll-cta" class="roll-cta hidden">
+      <div class="roll-cta__text"><strong>Tirada pendiente</strong><span id="roll-skill"></span>. Pulsa <strong>Resolver tirada</strong> cuando quieras.</div>
+      <div class="roll-cta__actions">
+        <button id="resolve-btn">Resolver tirada</button>
+        <button id="cancel-btn" class="outline">Cancelar</button>
+      </div>
+    </section>
+
+    <section class="composer">
+      <input id="input" type="text" placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)">
+      <button id="send">Enviar</button>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span class="muted">/privado o /publico para tu perfil. No hay dados en el front.</span>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
