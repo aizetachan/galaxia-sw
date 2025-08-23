@@ -12,6 +12,9 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+// Helper para ejecutar consultas sencillas
+export const sql = (text, params) => pool.query(text, params);
+
 // --- Migración idempotente ---
 async function run(tx) {
   await tx.query('BEGIN');
@@ -51,7 +54,7 @@ async function run(tx) {
       role TEXT,
       public_profile BOOLEAN NOT NULL DEFAULT TRUE,
       last_location TEXT,
-      owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      owner_user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
@@ -70,6 +73,16 @@ async function run(tx) {
 
   await tx.query(`CREATE INDEX IF NOT EXISTS idx_events_actor_ts ON events(actor, ts DESC);`);
   await tx.query(`CREATE INDEX IF NOT EXISTS idx_characters_owner ON characters(owner_user_id);`);
+
+  // Asegura unicidad de owner_user_id aunque la tabla exista previamente
+  await tx.query(`DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'characters_owner_user_id_key'
+    ) THEN
+      ALTER TABLE characters ADD CONSTRAINT characters_owner_user_id_key UNIQUE (owner_user_id);
+    END IF;
+  END $$;`);
 
   await tx.query('COMMIT');
 }

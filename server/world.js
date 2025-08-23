@@ -41,7 +41,7 @@ export async function getCharacterByOwner(ownerUserId) {
 
 export async function appendEvent(evt) {
   await sql(
-    `INSERT INTO world_events (ts, actor, location, summary, visibility, user_id)
+    `INSERT INTO events (ts, actor, location, summary, visibility, user_id)
      VALUES (to_timestamp($1/1000.0), $2, $3, $4, $5, $6)`,
     [evt.ts, evt.actor, evt.location, evt.summary, evt.visibility || 'public', evt.userId || null]
   );
@@ -49,7 +49,7 @@ export async function appendEvent(evt) {
 
 export async function getWorld() {
   const charsQ = sql(`SELECT * FROM characters ORDER BY updated_at ASC`);
-  const eventsQ = sql(`SELECT EXTRACT(EPOCH FROM ts)*1000 AS ts, actor, location, summary, visibility FROM world_events ORDER BY ts ASC`);
+  const eventsQ = sql(`SELECT EXTRACT(EPOCH FROM ts)*1000 AS ts, actor, location, summary, visibility FROM events ORDER BY ts ASC`);
   const [charsRes, eventsRes] = await Promise.all([charsQ, eventsQ]);
 
   const characters = {};
