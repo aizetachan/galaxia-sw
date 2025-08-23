@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 const BASE_URL = process.env.LLM_BASE_URL || 'http://localhost:11434/v1';
-const MODEL = process.env.LLM_MODEL || 'llama3.1';
+const MODEL = process.env.LLM_MODEL || 'gpt-oss';
 const API_KEY = process.env.LLM_API_KEY || '';
 
 export async function callLLM(messages, opts = {}) {
