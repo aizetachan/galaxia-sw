@@ -9,18 +9,18 @@
 .msg.dm{background:#000;border:1px solid #4091EA}
 .msg .meta{opacity:.6;font-size:12px;margin-bottom:2px}
 .composer{display:flex;gap:8px;margin:10px 0 18px}
-.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid #788596;background:rgba(255,255,255,.06);color:#e7e9ee}
+.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid #788596;background:#000;color:#e7e9ee}
 .composer button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:#4091EA;color:#e7e9ee;cursor:pointer}
 .composer button:hover{background:rgba(255,255,255,.12)}
 .roll-cta{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:10px 0;padding:10px 12px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:rgba(255,255,255,.06)}
 .roll-cta.hidden{display:none}
-.roll-cta__actions button{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#e7e9ee;cursor:pointer}
+.roll-cta__actions button{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#4091EA;color:#e7e9ee;cursor:pointer}
 .roll-cta__actions .outline{background:transparent}
 a,button{transition:.15s ease all}
 strong{font-weight:600}
 
 .auth-panel{max-width:920px;margin:0 auto 8px;padding:0 20px}
 .auth-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.auth-row input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e7e9ee}
+.auth-row input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:#000;color:#e7e9ee}
 .auth-row button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#e7e9ee;cursor:pointer}
 .auth-row button.outline{background:transparent}
