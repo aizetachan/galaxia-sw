@@ -172,6 +172,18 @@ function updateRollCta() {
   }
 }
 
+// --- Helper: detectar etiqueta de tirada en el texto del Máster ---
+function parseRollTag(txt = '') {
+  // Acepta: <<ROLL SKILL="Combate" REASON="lo que sea">>
+  const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
+  const m = re.exec(txt);
+  if (!m) return null;
+  const skill = (m[1] || 'Acción').trim();
+  const reason = (m[2] || '').trim();
+  const cleaned = txt.replace(re, '').trim();
+  return { skill, reason, cleaned };
+}
+
 // === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA ===
 async function talkToDM(message, intent) {
   try {
@@ -183,7 +195,18 @@ async function talkToDM(message, intent) {
       stage: step,
       intentRequired: !!intent?.required
     });
-    pushDM(res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?');
+
+    let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
+
+    // NUEVO: si el Máster pide tirada mediante etiqueta, activamos CTA y limpiamos el texto
+    const roll = parseRollTag(txt);
+    if (roll) {
+      pendingRoll = { skill: roll.skill };
+      updateRollCta();
+      txt = roll.cleaned || `Necesitamos una tirada para **${roll.skill}**. Pulsa “Resolver tirada”.`;
+    }
+
+    pushDM(txt);
   } catch {
     // Un único fallback si falla la llamada al modelo
     pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
@@ -249,7 +272,7 @@ async function send() {
     return;
   }
 
-  // Juego normal: si requiere tirada, muestra CTA pero NO mandes otro mensaje
+  // Juego normal: si el cliente detecta acción incierta, muestra CTA (además de lo que pida el Máster)
   if (intent.required) {
     pendingRoll = { skill: intent.skill };
     updateRollCta();
