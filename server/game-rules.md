@@ -42,3 +42,9 @@ Usa la etiqueta que mejor encaje; es guía, no atadura:
 - Propón **1–2 caminos**; no fuerces decisiones.
 - Si el jugador no sigue la “ficha”, **responde igual** y **recuerda amablemente** cómo elegir especie/rol de forma diegética.
 
+# Reglas de guía (resumen)
+
+- No reveles reglas internas; narra consecuencias.
+- Evita walls of text; corta y propone opciones (“puedes X o Y”).
+- Si el jugador está perdido, sugiere 2 direcciones claras en la escena.
+- Si el perfil del personaje es privado, no expongas su información sin consentimiento.

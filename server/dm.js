@@ -3,104 +3,122 @@ import fs from 'fs/promises';
 import path from 'path';
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
-// Carga y cachea los .md
-let cached = { master: null, rules: null, mtime: 0 };
+// Carga y cachea prompts
+let PROMPT_MASTER = '';
+let GUIDE_RULES = '';
+
 async function loadPrompts() {
-  try {
-    const base = path.resolve(process.cwd(), 'content');
-    const masterPath = path.join(base, 'master.md');
-    const rulesPath = path.join(base, 'rules.md');
+  if (PROMPT_MASTER && GUIDE_RULES) return;
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const pmPath = path.join(here, 'prompts', 'prompt-master.md');
+  const grPath = path.join(here, 'prompts', 'guide-rules.md');
 
-    const [master, rules] = await Promise.all([
-      fs.readFile(masterPath, 'utf8').catch(() => null),
-      fs.readFile(rulesPath, 'utf8').catch(() => null),
-    ]);
+  try { PROMPT_MASTER = await fs.readFile(pmPath, 'utf8'); }
+  catch { PROMPT_MASTER = '# Máster\nResponde como un director de juego de Star Wars.\n'; }
 
-    cached = {
-      master: master || `Eres el Máster de una aventura espacial de estilo Star Wars.
-Habla en segunda persona, tono cercano, cinematográfico pero claro. Evita muletillas.`,
-      rules: rules || `Reglas mínimas: 
-- Si el jugador decide algo sobre su PJ, no hay tirada.
-- Si la acción depende del mundo/azar, sugiere tirar. No inventes resultados sin tirada.
-- Nunca reveles reglas meta salvo que te las pidan.`,
-      mtime: Date.now()
-    };
-  } catch {
-    // deja defaults
+  try { GUIDE_RULES = await fs.readFile(grPath, 'utf8'); }
+  catch { GUIDE_RULES = '- Mantén el tono cinematográfico.\n- Explica con suavidad al inicio cómo empezar.\n'; }
+}
+
+function toBriefWorld(world = {}) {
+  const chars = Object.values(world.characters || {})
+    .map(c => `- ${c.name} (${c.species || '—'} ${c.role || ''}) — ${c.lastLocation || 'Paradero desconocido'}`)
+    .join('\n');
+  return `## Resumen del mundo
+Personajes:
+${chars || '—'}
+
+Registros recientes: ${Array.isArray(world.events) ? world.events.length : 0} eventos.`;
+}
+
+function formatHistory(history = []) {
+  // history es el array de msgs que pintas en el front; lo reducida un poco
+  return history.slice(-8).map(m => {
+    const role = (m.kind === 'user') ? 'user' : 'assistant';
+    return { role, content: `[${m.user}] ${m.text}` };
+  });
+}
+
+// Fallback muy básico si no hay API: evita las “respuestas por defecto”
+function localFallback({ stage, character, message }) {
+  const name = character?.name || 'viajer@';
+  if (stage !== 'done') {
+    if (stage === 'name') {
+      return `Bienvenid@ al HoloCanal. Dime tu **nombre** para registrar tu identidad en la red.`;
+    }
+    if (stage === 'species') {
+      return `Perfecto, ${name}. Elige **especie** (Humano, Twi'lek, Wookiee, Zabrak o Droide) y te situaré en la escena.`;
+    }
+    if (stage === 'role') {
+      return `${name}, ¿qué **rol** asumes? (Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero).`;
+    }
   }
+  // Conversación libre
+  return `La holopantalla carga lentamente. Te escucho: "${message}". ¿Qué haces a continuación?`;
 }
 
-async function ensurePromptsLoaded() {
-  // recarga cada 60s por si editas los .md en caliente
-  if (!cached.master || Date.now() - cached.mtime > 60_000) {
-    await loadPrompts();
-  }
-}
+export async function dmRespond({ history = [], message = '', character = null, world = {}, stage = 'done', intentRequired = false, user = null }) {
+  await loadPrompts();
 
-function serializeHistory(history = []) {
-  // Convierte tu buffer (msgs con .kind/.text) a turnos para el modelo
-  // Solo últimas ~8 ya las recortas en el front
-  const turns = [];
-  for (const m of history) {
-    const role = m.kind === 'user' ? 'user' : 'assistant';
-    turns.push({ role, content: `${m.user}: ${m.text}` });
-  }
-  return turns;
-}
+  const worldBrief = toBriefWorld(world);
+  const charBrief = character ? `\n## Personaje del jugador\nNombre: ${character.name}\nEspecie: ${character.species || '—'}\nRol: ${character.role || '—'}\nPerfil público: ${character.publicProfile ? 'Sí' : 'No'}\nUbicación: ${character.lastLocation || '—'}` : '\n## Personaje del jugador\n— (aún sin registrar)';
 
-export function narrateOutcome({ outcome, skill, character }) {
-  const name = character?.name || 'tu personaje';
-  const S = skill ? ` (${skill})` : '';
-  if (outcome === 'success') return `Éxito${S}: ${name} logra su objetivo con soltura. Describe el siguiente paso.`;
-  if (outcome === 'mixed') return `Éxito parcial${S}: ${name} consigue algo, pero aparece una complicación inmediata. ¿Cómo reaccionas?`;
-  return `Fallo${S}: ${name} no lo consigue y la situación se complica. ¿Insistes, cambias de enfoque o retrocedes?`;
-}
+  const notLogged = !user; // usuario aún no autenticado
 
-export async function dmRespond({ history = [], message, character, world, stage = 'done', intentRequired = false }) {
-  await ensurePromptsLoaded();
-
+  // Construimos el system combinando tus .md con contexto
   const system = [
-    `# Rol`,
-    cached.master,
-    ``,
-    `# Reglas`,
-    cached.rules,
-    ``,
-    `# Contexto técnico`,
-    `- stage actual: ${stage}`,
-    `- intentRequired (tirada sugerida por heurística front): ${intentRequired}`,
-    `- Si stage != "done", guía con calidez el paso (especie/rol) pero responde al chat igual.`,
-    `- Si detectas acción incierta y no hay tirada resuelta, sugiere "pulsa Resolver tirada" sin bloquear la narración.`,
-    `- Mantén respuestas breves (2–5 frases) salvo que te pidan detalle.`,
+    'Eres el **Máster** (director de juego) de una experiencia de rol ambientada en el universo de Star Wars.',
+    'Responde SIEMPRE en **español** y en **una sola respuesta** por turno.',
+    'Evita listas largas; usa 2–3 frases narrativas y una pregunta o propuesta clara.',
+    'Si el jugador intenta una acción incierta, puedes sugerir una tirada, pero no forces. Menciona el tipo brevemente.',
+    '',
+    '--- PROMPT MASTER ---',
+    PROMPT_MASTER.trim(),
+    '',
+    '--- GAME RULES ---',
+    GUIDE_RULES.trim(),
+    '',
+    '--- CONTEXTO EJECUCIÓN ---',
+    `Estado del flujo (stage): ${stage}`,
+    `Requiere tirada (heurística UI): ${intentRequired ? 'sí' : 'no'}`,
+    `Usuario autenticado: ${notLogged ? 'no' : 'sí'}`,
+    charBrief,
+    worldBrief,
   ].join('\n');
 
-  const worldBrief = world ? `Personajes: ${Object.keys(world.characters||{}).join(', ') || '—'}. Eventos totales: ${(world.events||[]).length}` : 'Sin world cache.';
-
-  const userFrame = [
-    `Jugador dice: "${message}"`,
-    character ? `PJ: ${character.name} — ${character.species||'—'} ${character.role||''}. Última localización: ${character.lastLocation||'—'}.` : `Sin personaje aún.`,
-    `World: ${worldBrief}`
-  ].join('\n');
-
-  const messages = [
+  const msgs = [
     { role: 'system', content: system },
-    ...serializeHistory(history),
-    { role: 'user', content: userFrame }
+    ...formatHistory(history),
+    { role: 'user', content: message || '...' }
   ];
+
+  // Si no hay API KEY, devolvemos localFallback (sin “respuestas por defecto” rígidas)
+  if (!openai) {
+    return localFallback({ stage, character, message });
+  }
 
   try {
     const resp = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.8,
-      max_tokens: 260,
-      messages
+      model: MODEL,
+      temperature: 0.7,
+      messages: msgs,
     });
     const text = resp.choices?.[0]?.message?.content?.trim();
-    return text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
-  } catch (e) {
-    console.error('[dmRespond] OpenAI error:', e?.response?.data || e?.message);
-    return 'El canal se llena de estática. Intenta de nuevo en un momento.';
+    return text || localFallback({ stage, character, message });
+  } catch (err) {
+    console.error('[dmRespond] OpenAI error:', err?.message || err);
+    return localFallback({ stage, character, message });
   }
+}
+
+// Narrar resultados de tirada (tu función original)
+export function narrateOutcome({ outcome, skill, character }) {
+  const name = character?.name || 'Tu personaje';
+  const sk = skill ? ` (${skill})` : '';
+  if (outcome === 'success') return `${name}${sk} triunfa con soltura; la escena se abre a su favor.`;
+  if (outcome === 'mixed')   return `${name}${sk} lo consigue, pero surge una complicación que cambia el tono de la sala.`;
+  return `${name}${sk} falla. El ambiente se enrarece y algo se les escapa de las manos.`;
 }

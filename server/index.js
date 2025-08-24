@@ -208,16 +208,18 @@ app.post('/world/ask-about', requireAuth, async (req, res) => {
 });
 
 // ---------- DM (Máster IA) ----------
-app.post('/dm/respond', requireAuth, async (req, res) => {
+app.post('/dm/respond', optionalAuth, async (req, res) => {
   const { message, history = [], character, stage, intentRequired } = req.body || {};
   try {
+    const world = await getWorld();
     const text = await dmRespond({
       history,
       message,
       character,
-      world: await getWorld(),
-      stage,
-      intentRequired
+      world,
+      stage: stage || 'done',
+      intentRequired: !!intentRequired,
+      user: req.auth ? { id: req.auth.userId, username: req.auth.username } : null,
     });
     res.json({ text });
   } catch (e) {
