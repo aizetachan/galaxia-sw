@@ -6,9 +6,9 @@ const API_BASE =
 
 // === Helpers de URL (evita redirecciones por slash)
 function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');   // quita / al final
-  const p = String(path || '').replace(/^\/+/, '');  // quita / al inicio
-  return `${b}/${p}`;                                // NO añade / final extra
+  const b = String(base || '').replace(/\/+$/,'');
+  const p = String(path || '').replace(/^\/+/, '');
+  return `${b}/${p}`;
 }
 
 // === State ===
@@ -44,29 +44,36 @@ authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
 
-// === Boot: valida token y rehidrata ===
+// === Boot ===
 (async function boot() {
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if (saved?.token && saved?.user?.id) {
       AUTH = saved;
-      const me = await apiGet('/auth/me').catch(async (e) => {
+      await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
-      setUserKeysFromAuth();
-      authStatusEl.textContent = `Hola, ${me?.user?.username || saved.user.username}`;
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      msgs = load(KEY_MSGS, []);
+      character = load(KEY_CHAR, null);
+      step = load(KEY_STEP, 'name');
+      authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
       AUTH = null;
       localStorage.removeItem('sw:auth');
-      setUserKeysFromAuth(); // rehidrata como invitado
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      msgs = load(KEY_MSGS, []);
+      character = load(KEY_CHAR, null);
+      step = load(KEY_STEP, 'name');
     }
   } catch {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
   if (!msgs.length) {
-    pushDM('Bienvenid@ al **HoloCanal**. Primero inicia sesión (usuario + PIN) y luego crearemos tu personaje.');
+    pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
+Para empezar, inicia sesión (usuario + PIN). Después crearemos tu identidad y entramos en escena.`);
   }
   render();
 })();
@@ -77,19 +84,11 @@ function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-function setUserKeysFromAuth() {
-  KEY_MSGS = baseKey('msgs');
-  KEY_CHAR = baseKey('char');
-  KEY_STEP = baseKey('step');
-  msgs = load(KEY_MSGS, []);
-  character = load(KEY_CHAR, null);
-  step = load(KEY_STEP, 'name');
-}
-
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
+// Clasificador simple para CTA de tirada
 function classifyIntent(text) {
   const t = (text || '').trim().toLowerCase();
   const defStarts = /^(mi personaje|soy|me llamo|me pongo|llevo|tengo|defino|declaro|establezco|asumo|recuerdo|configuro)\b/;
@@ -115,7 +114,7 @@ function classifyIntent(text) {
   return { required: false, reason: 'talk' };
 }
 
-// ---- Fetch helpers (sin slash final forzado)
+// ---- Fetch helpers
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
@@ -173,10 +172,28 @@ function updateRollCta() {
   }
 }
 
+// === Hablar con el Máster (LLM) ===
+async function talkToDM(message, intent) {
+  try {
+    const history = msgs.slice(-8);
+    const res = await api('/dm/respond', {
+      message,
+      history,
+      character,
+      stage: step,
+      intentRequired: !!intent?.required
+    });
+    pushDM(res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?');
+  } catch {
+    pushDM('El neón de la cantina parpadea... ¿Observas, preguntas o te mueves?');
+  }
+}
+
 // === Send flow ===
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
+  // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
@@ -194,61 +211,57 @@ async function send() {
     inputEl.value = ''; return;
   }
 
+  // Emitimos lo que escribe el jugador
+  pushUser(value);
+  const intent = classifyIntent(value);
+
+  // Onboarding NO bloqueante: siempre hablamos con el Máster
   if (step !== 'done') {
-    emit({ user: 'Tú', text: value, kind: 'user', ts: now() });
     if (step === 'name') {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
       try { await api('/world/characters', { character }); } catch {}
-      pushDM(`Entendido, **${name}**. Indica tu **especie** (escribe una): Humano, Twi'lek, Wookiee, Zabrak o Droide.`);
+      pushDM(`Encantado, **${name}**. ¿Qué **especie** te identifica? Humano, Twi'lek, Wookiee, Zabrak o Droide.`);
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
-      const options = ['humano','twi','wook','zabr','droid','droide'];
-      const ok = options.some(prefix => value.toLowerCase().startsWith(prefix));
-      if (!ok) { pushDM(`No te he entendido. Especies válidas: Humano, Twi'lek, Wookiee, Zabrak, Droide.`); inputEl.value = ''; return; }
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
-      for (const k in map) { if (value.toLowerCase().startsWith(k)) { character.species = map[k]; break; } }
-      save(KEY_CHAR, character);
-      try { await api('/world/characters', { character }); } catch {}
-      pushDM(`Perfecto, ${character.name} (${character.species}). Ahora dime tu **rol**: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero.`);
-      step = 'role'; save(KEY_STEP, step);
+      const key = Object.keys(map).find(k => value.toLowerCase().startsWith(k));
+      if (key) {
+        character.species = map[key];
+        save(KEY_CHAR, character);
+        try { await api('/world/characters', { character }); } catch {}
+        pushDM(`Perfecto, ${character.name} (${character.species}). Ahora el **rol**: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero.`);
+        step = 'role'; save(KEY_STEP, step);
+      } else {
+        pushDM(`Cuando quieras, elige especie válida (Humano, Twi'lek, Wookiee, Zabrak o Droide). Puedo resolver dudas.`);
+      }
     } else if (step === 'role') {
-      const roles = ['piloto','contra','jedi','caza','inge'];
-      const ok = roles.some(prefix => value.toLowerCase().startsWith(prefix));
-      if (!ok) { pushDM(`Elige un rol válido: Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero.`); inputEl.value = ''; return; }
-      const map = { pilo: 'Piloto', contra: 'Contrabandista', jedi: 'Jedi', caza: 'Cazarrecompensas', inge: 'Ingeniero' };
-      for (const k in map) { if (value.toLowerCase().startsWith(k)) { character.role = map[k]; break; } }
-      save(KEY_CHAR, character);
-      try { await api('/world/characters', { character }); } catch {}
-      pushDM(`Registro completo. Eres **${character.name}**, ${character.species} ${character.role}. Ubicación inicial: **${character.lastLocation}**.\n\nRegla simple: **si decides algo sobre tu personaje, no hay tirada**. Si depende del mundo, te pediré que pulses **Resolver tirada**. ¿Qué haces?`);
-      step = 'done'; save(KEY_STEP, step);
+      const map = { pilo: 'Piloto', piloto: 'Piloto', contra: 'Contrabandista', jedi: 'Jedi', caza: 'Cazarrecompensas', inge: 'Ingeniero', ingeniero: 'Ingeniero' };
+      const key = Object.keys(map).find(k => value.toLowerCase().startsWith(k));
+      if (key) {
+        character.role = map[key];
+        save(KEY_CHAR, character);
+        try { await api('/world/characters', { character }); } catch {}
+        pushDM(`Registro completo. Eres **${character.name}**, ${character.species} ${character.role}. Ubicación inicial: **${character.lastLocation}**. El neón vibra y alguien te mira desde la barra… ¿Qué haces?`);
+        step = 'done'; save(KEY_STEP, step);
+      } else {
+        pushDM(`Elige un rol válido: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero. Si dudas, dime qué te atrae y te guío.`);
+      }
     }
-    inputEl.value = ''; return;
+    // SIEMPRE conversa con el Máster, incluso en onboarding
+    await talkToDM(value, intent);
+    inputEl.value = '';
+    return;
   }
 
-  // Conversación
-  pushUser(value);
-  const intent = classifyIntent(value);
+  // Juego normal
   if (intent.required) {
     pendingRoll = { skill: intent.skill };
-    pushDM(`Esto no depende solo de ti. Pulsa **Resolver tirada${intent.skill ? ` para ${intent.skill}` : ''}** cuando quieras.`);
-    inputEl.value = ''; render(); return;
+    updateRollCta();
+    pushDM(`Esto no depende solo de ti. Pulsa **Resolver tirada${intent.skill ? ` (para ${intent.skill})` : ''}** cuando quieras. Mientras, puedo describirte la escena…`);
   }
-
-  try {
-    const history = msgs.slice(-8);
-    const target = extractTargetName(value);
-    if (target) {
-      const resQ = await api('/world/ask-about', { targetName: target });
-      pushDM(resQ.text || '...');
-    } else {
-      const res = await api('/dm/respond', { message: value, history, character });
-      pushDM(res.text || '...');
-    }
-  } catch {
-    pushDM('El neón de la cantina parpadea... ¿Observas, preguntas o te mueves?');
-  }
+  await talkToDM(value, intent);
   inputEl.value = '';
 }
 
@@ -268,12 +281,12 @@ async function resolveRoll() {
   }
 }
 
-// Migración guest → user (llamada al loguearse por primera vez)
+// Migración guest → user (opcional)
 function migrateGuestToUser(userId) {
-  const loadK = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
-  const gMsgs = loadK('sw:guest:msgs');
-  const gChar = loadK('sw:guest:char');
-  const gStep = loadK('sw:guest:step');
+  const load = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
+  const gMsgs = load('sw:guest:msgs');
+  const gChar = load('sw:guest:char');
+  const gStep = load('sw:guest:step');
   const kMsgs = `sw:${userId}:msgs`;
   const kChar = `sw:${userId}:char`;
   const kStep = `sw:${userId}:step`;
@@ -292,27 +305,23 @@ async function doAuth(kind) {
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
-
-    // 1) Guardamos sesión
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
-    // 2) Si el usuario venía como invitado, migramos su conversación
-    migrateGuestToUser(user.id);
+    KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+    msgs = load(KEY_MSGS, []);
+    character = load(KEY_CHAR, null);
+    step = load(KEY_STEP, 'name');
 
-    // 3) Rehidratar claves/estado del usuario y renderizar (ya se verá el chat)
-    setUserKeysFromAuth();
-
-    // 4) (Opcional) Traer su personaje del backend si existiera
-    try {
-      const me = await apiGet('/world/characters/me');
-      if (me?.character) {
-        character = me.character;
-        save(KEY_CHAR, character);
-      }
-    } catch {}
+    const me = await apiGet('/world/characters/me');
+    if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
+    // Si el usuario ya tenía char creado, asegúrate de entrar en juego
+    if (character?.name && step !== 'done') {
+      step = 'done'; save(KEY_STEP, step);
+      pushDM(`Salud de nuevo, **${character.name}**. Retomamos en **${character.lastLocation || 'la cantina'}**.`);
+    }
     render();
   } catch (e) {
     try {

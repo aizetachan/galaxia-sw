@@ -209,9 +209,16 @@ app.post('/world/ask-about', requireAuth, async (req, res) => {
 
 // ---------- DM (Máster IA) ----------
 app.post('/dm/respond', requireAuth, async (req, res) => {
-  const { message, history = [], character } = req.body || {};
+  const { message, history = [], character, stage, intentRequired } = req.body || {};
   try {
-    const text = await dmRespond({ history, message, character, world: await getWorld() });
+    const text = await dmRespond({
+      history,
+      message,
+      character,
+      world: await getWorld(),
+      stage,
+      intentRequired
+    });
     res.json({ text });
   } catch (e) {
     console.error(e);
