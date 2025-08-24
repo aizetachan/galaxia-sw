@@ -3,14 +3,14 @@
 .app-header h1{margin:0 0 4px 0;font-size:20px}
 .muted{opacity:.7;font-size:13px}
 .chat-wrap{max-width:920px;margin:0 auto;padding:0 20px}
-.chat{height:60vh;min-height:420px;background:rgba(255,255,255,.04);border:1px solid #4091EA;border-radius:14px;padding:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+.chat{height:60vh;min-height:420px;background:#000;border:1px solid #4091EA;border-radius:14px;padding:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 .msg{margin:8px 0;padding:8px 10px;border-radius:12px;line-height:1.35}
-.msg.user{background:rgba(160,200,255,.1);border:1px solid rgba(160,200,255,.25)}
-.msg.dm{background:rgba(180,140,255,.1);border:1px solid #4091EA}
+.msg.user{background:#000;border:1px solid #fff}
+.msg.dm{background:#000;border:1px solid #4091EA}
 .msg .meta{opacity:.6;font-size:12px;margin-bottom:2px}
 .composer{display:flex;gap:8px;margin:10px 0 18px}
-.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#e7e9ee}
-.composer button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#e7e9ee;cursor:pointer}
+.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid #788596;background:rgba(255,255,255,.06);color:#e7e9ee}
+.composer button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:#4091EA;color:#e7e9ee;cursor:pointer}
 .composer button:hover{background:rgba(255,255,255,.12)}
 .roll-cta{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:10px 0;padding:10px 12px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:rgba(255,255,255,.06)}
 .roll-cta.hidden{display:none}
