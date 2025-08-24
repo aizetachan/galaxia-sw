@@ -73,7 +73,7 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
 
   if (!msgs.length) {
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
-Para empezar, inicia sesión (usuario + PIN). Después crearemos tu identidad y entramos en escena.`);
+Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
   render();
 })();
@@ -88,7 +88,7 @@ function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-// Clasificador simple para CTA de tirada
+// Clasificador sencillo para sugerir tirada (solo UI, el LLM lo comenta en su única respuesta)
 function classifyIntent(text) {
   const t = (text || '').trim().toLowerCase();
   const defStarts = /^(mi personaje|soy|me llamo|me pongo|llevo|tengo|defino|declaro|establezco|asumo|recuerdo|configuro)\b/;
@@ -172,7 +172,7 @@ function updateRollCta() {
   }
 }
 
-// === Hablar con el Máster (LLM) ===
+// === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA ===
 async function talkToDM(message, intent) {
   try {
     const history = msgs.slice(-8);
@@ -185,7 +185,8 @@ async function talkToDM(message, intent) {
     });
     pushDM(res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?');
   } catch {
-    pushDM('El neón de la cantina parpadea... ¿Observas, preguntas o te mueves?');
+    // Un único fallback si falla la llamada al modelo
+    pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
   }
 }
 
@@ -198,7 +199,7 @@ async function send() {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
     try { await api('/world/characters', { character }); } catch {}
-    pushDM(`Tu perfil ahora es **${character.publicProfile ? 'público' : 'privado'}** en el HoloNet.`);
+    // No añadimos otra respuesta; el LLM puede comentarlo en su turno siguiente si preguntas
     inputEl.value = ''; return;
   }
 
@@ -215,14 +216,13 @@ async function send() {
   pushUser(value);
   const intent = classifyIntent(value);
 
-  // Onboarding NO bloqueante: siempre hablamos con el Máster
+  // Onboarding NO bloqueante: actualiza estado, pero NO emite mensajes extra.
   if (step !== 'done') {
     if (step === 'name') {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
       try { await api('/world/characters', { character }); } catch {}
-      pushDM(`Encantado, **${name}**. ¿Qué **especie** te identifica? Humano, Twi'lek, Wookiee, Zabrak o Droide.`);
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
@@ -231,10 +231,7 @@ async function send() {
         character.species = map[key];
         save(KEY_CHAR, character);
         try { await api('/world/characters', { character }); } catch {}
-        pushDM(`Perfecto, ${character.name} (${character.species}). Ahora el **rol**: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero.`);
         step = 'role'; save(KEY_STEP, step);
-      } else {
-        pushDM(`Cuando quieras, elige especie válida (Humano, Twi'lek, Wookiee, Zabrak o Droide). Puedo resolver dudas.`);
       }
     } else if (step === 'role') {
       const map = { pilo: 'Piloto', piloto: 'Piloto', contra: 'Contrabandista', jedi: 'Jedi', caza: 'Cazarrecompensas', inge: 'Ingeniero', ingeniero: 'Ingeniero' };
@@ -243,24 +240,21 @@ async function send() {
         character.role = map[key];
         save(KEY_CHAR, character);
         try { await api('/world/characters', { character }); } catch {}
-        pushDM(`Registro completo. Eres **${character.name}**, ${character.species} ${character.role}. Ubicación inicial: **${character.lastLocation}**. El neón vibra y alguien te mira desde la barra… ¿Qué haces?`);
         step = 'done'; save(KEY_STEP, step);
-      } else {
-        pushDM(`Elige un rol válido: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero. Si dudas, dime qué te atrae y te guío.`);
       }
     }
-    // SIEMPRE conversa con el Máster, incluso en onboarding
+    // Siempre UNA respuesta del Máster
     await talkToDM(value, intent);
     inputEl.value = '';
     return;
   }
 
-  // Juego normal
+  // Juego normal: si requiere tirada, muestra CTA pero NO mandes otro mensaje
   if (intent.required) {
     pendingRoll = { skill: intent.skill };
     updateRollCta();
-    pushDM(`Esto no depende solo de ti. Pulsa **Resolver tirada${intent.skill ? ` (para ${intent.skill})` : ''}** cuando quieras. Mientras, puedo describirte la escena…`);
   }
+
   await talkToDM(value, intent);
   inputEl.value = '';
 }
@@ -317,7 +311,6 @@ async function doAuth(kind) {
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
-    // Si el usuario ya tenía char creado, asegúrate de entrar en juego
     if (character?.name && step !== 'done') {
       step = 'done'; save(KEY_STEP, step);
       pushDM(`Salud de nuevo, **${character.name}**. Retomamos en **${character.lastLocation || 'la cantina'}**.`);
