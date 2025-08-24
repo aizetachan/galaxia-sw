@@ -59,22 +59,18 @@
     <span class="muted">/privado o /publico para tu perfil. No hay dados en el front.</span>
   </footer>
 
-  <!-- Configura aquí el endpoint del backend -->
-  <!-- PRODUCCIÓN (Vercel): -->
-  <script>window.API_BASE='https://galaxia-sw.vercel.app/api';</script>
-  <!-- LOCAL (arrancando el server en tu máquina): -->
+  <!-- PRODUCCIÓN (backend en Vercel SIN /api) -->
+  <script>window.API_BASE='https://galaxia-sw.vercel.app';</script>
+  <!-- LOCAL (si ejecutas `npm run dev` en el server) -->
   <!-- <script>window.API_BASE='http://localhost:3001';</script> -->
 
   <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
   <script>
     (async () => {
       const el = document.getElementById('server-status');
-
-      // Normaliza la base y construye siempre .../api/health
-      function trimSlash(s){ return (s||'').replace(/\/+$/,''); }
-      const base = trimSlash(window.API_BASE) || (trimSlash(location.origin) + '/api');
+      const trimSlash = (s) => (s||'').replace(/\/+$/,'');
+      const base = trimSlash(window.API_BASE) || trimSlash(location.origin);
       const healthUrl = base + '/health';
-
       try {
         const r = await fetch(healthUrl, { method: 'GET' });
         el.textContent = r.ok ? 'Server: OK' : 'Server: ?';
