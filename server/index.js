@@ -79,6 +79,13 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
 // ---------- Health ----------
 app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+import { pingOpenAI, openaiEnabled } from './openai.js';
+
+app.get('/debug/openai', async (_req, res) => {
+  if (!process.env.ENABLE_DEBUG_OPENAI) return res.status(404).end();
+  const ping = await pingOpenAI();
+  res.json({ openaiEnabled, ...ping });
+});
 
 // ---------- AUTH ----------
 app.post('/auth/register', async (req, res) => {
