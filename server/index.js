@@ -3,12 +3,12 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
-import { migrate, dbGetMessages, dbAppendMessage, dbReplaceMessages } from './db.js';
+import { migrate, sql } from './db.js';
 import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
 import { dmRespond, narrateOutcome } from './dm.js';
 
-// Migraciones al arranque
+// Migraciones (tolerantes) al arranque
 await migrate();
 
 // ---------- CORS robusto ----------
@@ -66,7 +66,7 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
   const who = target?.name || 'desconocido';
   if (!target) return `No encuentro registros de **${who}** en los archivos del gremio.`;
   const bio = `**${target.name}** — ${target.species || target.race || '—'} ${target.role || target.clazz || ''}`.trim();
-  if (level === 'deny') return `La información sobre ${who} está fuera de tu alcance ahora mismo. Necesitas presencia o contactos en la zona.`;
+  if (level === 'deny') return `La información sobre ${who} está fuera de tu alcance ahora mismo.`;
   if (level === 'bio') return `Registros básicos: ${bio}. Sin actividad reciente a tu alcance.`;
   if (level === 'rumor') {
     if (lastEvt) return `Rumor sobre ${bio}. Última pista: en **${lastEvt.location}** — ${lastEvt.summary}.`;
@@ -105,6 +105,49 @@ app.post('/auth/login', async (req, res) => {
 app.get('/auth/me', (req, res) => {
   if (!req.auth) return res.status(401).json({ error: 'unauthorized' });
   res.json({ ok: true, user: { id: req.auth.userId, username: req.auth.username } });
+});
+
+// ---------- CHAT HISTORY ----------
+app.get('/history', requireAuth, async (req, res) => {
+  const { rows } = await sql(
+    `SELECT ts, role, kind, text
+       FROM chat_messages
+      WHERE user_id = $1
+      ORDER BY ts ASC
+      LIMIT 500`,
+    [req.auth.userId]
+  );
+  res.json({ messages: rows });
+});
+
+app.post('/history/append', requireAuth, async (req, res) => {
+  const { messages = [] } = req.body || {};
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'messages required' });
+  }
+  const values = [];
+  for (const m of messages) {
+    const ts = m?.ts ? new Date(m.ts) : new Date();
+    const role = (m?.role || m?.kind || 'dm').toString().slice(0, 10);
+    const kind = (m?.kind || m?.role || 'dm').toString().slice(0, 10);
+    const text = (m?.text || '').toString();
+    values.push([req.auth.userId, ts, role, kind, text]);
+  }
+  const params = values.flatMap(v => v);
+  const chunks = values.map((_, i) => {
+    const o = i * 5;
+    return `($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5})`;
+  }).join(',');
+  await sql(
+    `INSERT INTO chat_messages (user_id, ts, role, kind, text) VALUES ${chunks}`,
+    params
+  );
+  res.json({ ok: true, inserted: values.length });
+});
+
+app.post('/history/clear', requireAuth, async (req, res) => {
+  await sql(`DELETE FROM chat_messages WHERE user_id=$1`, [req.auth.userId]);
+  res.json({ ok: true });
 });
 
 // ---------- WORLD ----------
@@ -204,47 +247,6 @@ app.post('/roll', requireAuth, async (req, res) => {
     console.error('appendEvent failed', e);
   }
   res.json({ outcome, text });
-});
-
-/* ================= HISTORIAL ================= */
-
-// GET /history?limit=200
-app.get('/history', requireAuth, async (req, res) => {
-  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
-  const rows = await dbGetMessages(req.auth.userId, limit);
-  // Normalizamos a la forma del front
-  const messages = rows.map(r => ({
-    ts: new Date(r.ts).getTime(),
-    kind: r.kind,
-    user: r.user_label || (r.kind === 'dm' ? 'Máster' : 'Tú'),
-    text: r.text
-  }));
-  res.json({ ok: true, messages });
-});
-
-// POST /history/append { msg: { ts, kind, user, text } }
-app.post('/history/append', requireAuth, async (req, res) => {
-  const { msg } = req.body || {};
-  if (!msg?.text || !msg?.kind) return res.status(400).json({ error: 'invalid_message' });
-  if (!['dm','user'].includes(msg.kind)) return res.status(400).json({ error: 'invalid_kind' });
-  if (String(msg.text).length > 4000) return res.status(400).json({ error: 'msg_too_long' });
-
-  await dbAppendMessage({
-    userId: req.auth.userId,
-    ts: msg.ts || Date.now(),
-    kind: msg.kind,
-    user_label: msg.user || null,
-    text: msg.text
-  });
-  res.json({ ok: true });
-});
-
-// POST /history/replace { messages: [...] }  (sobrescribe el historial del usuario)
-app.post('/history/replace', requireAuth, async (req, res) => {
-  const { messages } = req.body || {};
-  const safe = Array.isArray(messages) ? messages.filter(m => m && m.text && m.kind) : [];
-  await dbReplaceMessages(req.auth.userId, safe);
-  res.json({ ok: true });
 });
 
 // ---------- Export para Vercel y listen local ----------
