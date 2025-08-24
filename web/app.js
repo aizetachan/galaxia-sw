@@ -6,8 +6,8 @@ const API_BASE =
 
 // === Helpers de URL (evita redirecciones por slash)
 function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');
-  const p = String(path || '').replace(/^\/+/, '');
+  const b = String(base || '').replace(/\/+$/,'');   // sin / al final
+  const p = String(path || '').replace(/^\/+/, '');  // sin / al inicio
   return `${b}/${p}`;
 }
 
@@ -17,6 +17,7 @@ const baseKey = (suffix) => (AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `
 let KEY_MSGS = baseKey('msgs');
 let KEY_CHAR = baseKey('char');
 let KEY_STEP = baseKey('step');
+
 let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
@@ -54,8 +55,26 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
+
+      // Cargar historial del servidor si existe
+      try {
+        const srv = await apiGet('/history');
+        if (Array.isArray(srv?.messages) && srv.messages.length) {
+          msgs = srv.messages.map(m => ({
+            ts: new Date(m.ts).getTime(),
+            kind: (m.kind || m.role || 'dm'),
+            user: (m.kind || m.role) === 'user' ? (character?.name || 'Tú') : 'Máster',
+            text: m.text
+          }));
+          save(KEY_MSGS, msgs);
+        } else {
+          // Si no hay historial en servidor, subimos el local (si hay)
+          if (msgs.length) tryAppendHistory(msgs);
+        }
+      } catch {}
+
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-      msgs = load(KEY_MSGS, []);
+      msgs = load(KEY_MSGS, msgs || []);
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
       authStatusEl.textContent = `Hola, ${saved.user.username}`;
@@ -84,30 +103,51 @@ function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
+function emit(m) {
+  msgs = [...msgs, m];
+  save(KEY_MSGS, msgs);
+  // Persistencia opcional en servidor si user logueado
+  tryAppendHistory([m]);
+  render();
+}
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-// Clasificador sencillo para sugerir tirada (solo UI, el LLM lo comenta en su única respuesta)
+async function tryAppendHistory(list) {
+  if (!AUTH?.token || !Array.isArray(list) || !list.length) return;
+  try {
+    const payload = list.map(m => ({
+      ts: m.ts,
+      role: m.kind === 'user' ? 'user' : 'dm',
+      kind: m.kind,
+      text: m.text
+    }));
+    await api('/history/append', { messages: payload });
+  } catch { /* silencioso */ }
+}
+
+// Clasificador (UI) para sugerir tirada
 function classifyIntent(text) {
   const t = (text || '').trim().toLowerCase();
+
   const defStarts = /^(mi personaje|soy|me llamo|me pongo|llevo|tengo|defino|declaro|establezco|asumo|recuerdo|configuro)\b/;
   const defPossessive = /\bmi(s)?\b/;
   if (defStarts.test(t)) return { required: false, reason: 'def' };
-  if (defPossessive.test(t) && !/(empujo|abro|forzar|ataco|disparo|persuad|convenc|hackeo|reprogramo|piloto|escapo|esquivo|trepo|salto|investigo|busco|percibo|me escondo|oculto|sabot|burlar)/.test(t))
+  if (defPossessive.test(t) && !/(empujo|abro|forzar|ataco|disparo|persuad|convenc|hackeo|reprogramo|piloto|escapo|esquivo|trepo|salto|investigo|busco|percibo|me\s*escondo|oculto|sabot|burlar)/.test(t))
     return { required: false, reason: 'def' };
 
   const maps = [
-    { re: /(ataco|golpeo|disparo|apunto|lanzo|asalto)/, skill: 'Combate' },
-    { re: /(sigilo|me escondo|oculto|agazapo|camuflo)/, skill: 'Sigilo' },
-    { re: /(forzar|romper|empujar|abrir|derribar)/, skill: 'Fuerza' },
-    { re: /(persuad|convenc|negoci|intimid|engañ)/, skill: 'Carisma' },
-    { re: /(percib|observo|escucho|rastro|vigilo|escaneo)/, skill: 'Percepción' },
-    { re: /(investig|busco pistas|rebusco|analizo|rastre)/, skill: 'Investigación' },
-    { re: /(saltar|trepar|acrob|equilibro|esquivo|carrera)/, skill: 'Movimiento' },
-    { re: /(robo|hurto|manos\s?rapidas|desarmo|desactivar trampa|saco)/, skill: 'Juego de manos' },
-    { re: /(hackeo|sliceo|reprogramo|pirateo)/, skill: 'Tecnología' },
-    { re: /(piloto|despego|aterrizo|hipersalto|burlar escudos)/, skill: 'Pilotaje' },
+    // COMBATE (sinónimos comunes)
+    { re: /(atac(ar|o)|golpe(ar|o)|pego|pegar|puñ(et)?azo|puño(s)?|bofet(ón|ada)|hosti(a|azo)|patad(a|ón)|apuñal(ar|o)|apuñalada|cabezazo|empujón|apunto|disparo|lanzo|asalto)/i, skill: 'Combate' },
+    { re: /(sigilo|me\s*escondo|oculto|agazapo|camuflo)/i, skill: 'Sigilo' },
+    { re: /(forzar|romper|empujar|abrir|derribar)/i, skill: 'Fuerza' },
+    { re: /(persuad|convenc|negoci|intimid|engañ)/i, skill: 'Carisma' },
+    { re: /(percib|observo|escucho|rastro|vigilo|escaneo)/i, skill: 'Percepción' },
+    { re: /(investig|busco\s*pistas|rebusco|analizo|rastre)/i, skill: 'Investigación' },
+    { re: /(saltar|trepar|acrob|equilibr|esquivo|carrera)/i, skill: 'Movimiento' },
+    { re: /(robo|hurto|manos\s*rápidas|manos\s*rapidas|desarmo|desactivar\s*trampa|saco)/i, skill: 'Juego de manos' },
+    { re: /(hackeo|hackear|sliceo|reprogramo|pirate(o|ar))/i, skill: 'Tecnología' },
+    { re: /(piloto|despego|aterrizo|hipersalto|burlar\s*escudos)/i, skill: 'Pilotaje' },
   ];
   for (const m of maps) if (m.re.test(t)) return { required: true, skill: m.skill };
   if (/(intento|quiero|trato de|procuro|busco)/.test(t)) return { required: true, skill: 'Acción incierta' };
@@ -183,7 +223,18 @@ async function talkToDM(message, intent) {
       stage: step,
       intentRequired: !!intent?.required
     });
-    pushDM(res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?');
+
+    let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
+
+    // ¿El Máster ha pedido tirada con la etiqueta especial?
+    const tag = txt.match(/<<ROLL\s+SKILL\s*=\s*"([^"]+)"(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i);
+    if (tag) {
+      pendingRoll = { skill: (tag[1] || '').trim() || 'Acción' };
+      txt = txt.replace(/<<ROLL[\s\S]*?>>/i, '').trim();
+      updateRollCta();
+    }
+
+    pushDM(txt);
   } catch {
     // Un único fallback si falla la llamada al modelo
     pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
@@ -199,7 +250,6 @@ async function send() {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
     try { await api('/world/characters', { character }); } catch {}
-    // No añadimos otra respuesta; el LLM puede comentarlo en su turno siguiente si preguntas
     inputEl.value = ''; return;
   }
 
@@ -216,7 +266,7 @@ async function send() {
   pushUser(value);
   const intent = classifyIntent(value);
 
-  // Onboarding NO bloqueante: actualiza estado, pero NO emite mensajes extra.
+  // Onboarding: actualiza estado pero no añade más DMs locales; el Máster responde 1 vez
   if (step !== 'done') {
     if (step === 'name') {
       const name = value || 'Aventurer@';
@@ -243,13 +293,12 @@ async function send() {
         step = 'done'; save(KEY_STEP, step);
       }
     }
-    // Siempre UNA respuesta del Máster
     await talkToDM(value, intent);
     inputEl.value = '';
     return;
   }
 
-  // Juego normal: si requiere tirada, muestra CTA pero NO mandes otro mensaje
+  // Juego normal
   if (intent.required) {
     pendingRoll = { skill: intent.skill };
     updateRollCta();
@@ -309,6 +358,22 @@ async function doAuth(kind) {
 
     const me = await apiGet('/world/characters/me');
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
+
+    // Cargar historial si existe; si no, subir el local
+    try {
+      const srv = await apiGet('/history');
+      if (Array.isArray(srv?.messages) && srv.messages.length) {
+        msgs = srv.messages.map(m => ({
+          ts: new Date(m.ts).getTime(),
+          kind: (m.kind || m.role || 'dm'),
+          user: (m.kind || m.role) === 'user' ? (character?.name || 'Tú') : 'Máster',
+          text: m.text
+        }));
+        save(KEY_MSGS, msgs);
+      } else if (msgs.length) {
+        tryAppendHistory(msgs);
+      }
+    } catch {}
 
     authStatusEl.textContent = `Hola, ${user.username}`;
     if (character?.name && step !== 'done') {
