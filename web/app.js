@@ -86,12 +86,17 @@ function classifyIntent(text) {
   return { required: false, reason: 'talk' };
 }
 
+// ---- Fetch helpers con propagación de Response en el error
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
   const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`; // barra final evita 308
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
-  if (!res.ok) throw new Error('api error');
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = res; // <- importante para leer el JSON de error en el catch
+    throw err;
+  }
   return res.json();
 }
 
@@ -100,7 +105,11 @@ async function apiGet(path) {
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
   const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`;
   const res = await fetch(url, { method: 'GET', headers });
-  if (!res.ok) throw new Error('api error');
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = res;
+    throw err;
+  }
   return res.json();
 }
 
@@ -252,7 +261,21 @@ async function doAuth(kind) {
     authStatusEl.textContent = `Hola, ${user.username}`;
     render();
   } catch (e) {
-    authStatusEl.textContent = 'Error de autenticación';
+    // --- Mostrar el error real que envía el backend ---
+    try {
+      const data = await e.response?.json?.();
+      const code = data?.error;
+      const friendly = {
+        INVALID_CREDENTIALS: 'Usuario (3–24 minúsculas/números/_) y PIN de 4 dígitos.',
+        USERNAME_TAKEN: 'Ese usuario ya existe.',
+        USER_NOT_FOUND: 'Usuario no encontrado.',
+        INVALID_PIN: 'PIN incorrecto.',
+        unauthorized: 'No autorizado.',
+      };
+      authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
+    } catch {
+      authStatusEl.textContent = 'Error de autenticación';
+    }
   }
 }
 
