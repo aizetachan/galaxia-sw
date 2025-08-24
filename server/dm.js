@@ -6,16 +6,47 @@ import { fileURLToPath } from 'node:url';
 
 // --- util para cargar MD empaquetados en Vercel ---
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-function readPrompt(rel) {
-  try {
-    return readFileSync(path.resolve(__dirname, '..', rel), 'utf8');
-  } catch { return ''; }
+
+function readPromptAny(candidates) {
+  for (const rel of candidates) {
+    try {
+      const full = path.resolve(__dirname, '..', rel);
+      return readFileSync(full, 'utf8');
+    } catch {}
+  }
+  return '';
 }
 
-// Carga tus prompts (ajusta rutas si los mueves)
-const MASTER_MD = readPrompt('prompts/master.md');        // opcional pero recomendado
-const GUIDE_MD  = readPrompt('prompts/guide-rules.md');   // opcional pero recomendado
-const DICE_MD   = readPrompt('prompts/dice-rules.md');    // <- NUEVO
+// Acepta nombres antiguos y nuevos, y rutas dentro/fuera de /prompts
+const MASTER_MD = readPromptAny([
+  'prompts/master.md',
+  'prompts/prompt-master.md',
+  'prompt-master.md',
+]);
+
+const GUIDE_MD = readPromptAny([
+  'prompts/guide-rules.md',
+  'prompts/game-rules.md',
+  'game-rules.md',
+]);
+
+const DICE_MD = readPromptAny([
+  'prompts/dice-rules.md',
+  'dice-rules.md',
+]);
+
+// Snippet de respaldo si falta dice-rules.md
+const DICE_FALLBACK = `
+=== Reglas de tirada (resumen) ===
+- Pide tirada sólo si el resultado es incierto, hay oposición o riesgo relevante, o afecta a terceros/entorno.
+- Si la tirada es necesaria, inserta literalmente en tu respuesta:
+  <<ROLL SKILL="NombreDeHabilidad" REASON="motivo breve">>
+  (Ej.: Combate, Fuerza, Carisma, Percepción, Investigación, Sigilo, Movimiento, Juego de manos, Tecnología, Pilotaje, Acción incierta)
+- Espera a que el sistema te envíe:
+  <<DICE_OUTCOME SKILL="..." OUTCOME="success|mixed|fail">>
+  y entonces narra la consecuencia (2–6 frases) y cierra con una pregunta/opción.
+- No pidas otra tirada hasta resolver la actual. No pidas tirada para decisiones internas o acciones triviales/obvias sin riesgo.
+`.trim();
 
 /* =======================
    Narrador de fallback para /roll
@@ -36,14 +67,23 @@ export function narrateOutcome({ outcome, skill, character }) {
    Base prompt (DM libre)
    ======================= */
 function baseSystemPrompt() {
-  return [
+  const parts = [
     'Eres el Máster de una campaña estilo Star Wars.',
-    'Habla en español, tono cercano y cinematográfico.',
-    'Responde SIEMPRE en un solo mensaje (conciso y jugable).',
-    'No pidas tirar dados salvo que la acción dependa del mundo (incertidumbre).',
+    'Habla en español, tono cercano y cinematográfico. 2–6 frases por turno y termina con una pregunta/opciones.',
+    'Responde SIEMPRE en un solo mensaje.',
+    'Pide tirada SOLO cuando la acción dependa del mundo/terceros o exista incertidumbre/oposición/riesgo.',
+    // Carga de documentos si existen
     MASTER_MD ? `=== Máster ===\n${MASTER_MD}` : '',
-    GUIDE_MD  ? `=== Reglas ===\n${GUIDE_MD}`  : '',
-  ].filter(Boolean).join('\n\n');
+    GUIDE_MD  ? `=== Reglas del juego ===\n${GUIDE_MD}`  : '',
+    (DICE_MD || DICE_FALLBACK)
+      ? `=== Dados ===\n${DICE_MD || DICE_FALLBACK}`
+      : '',
+    // Recordatorio operativo claro para el modelo
+    `Uso de dados:
+- Si decides que hay tirada, inserta exactamente: <<ROLL SKILL="..." REASON="...">> (sin explicarlo en texto).
+- Tras recibir <<DICE_OUTCOME ...>>, narra según success/mixed/fail y no pidas otra tirada en la misma respuesta.`,
+  ];
+  return parts.filter(Boolean).join('\n\n');
 }
 
 /* =======================
@@ -55,26 +95,32 @@ export async function dmRespond({
   character,
   world,
   stage = 'done',
-  intentRequired = false,
+  intentRequired = false, // ya no lo usamos para UI, pero puede guiar al modelo
   user = null
 }) {
   const userMsg = (message || '').trim();
   if (!userMsg) return '¿Qué haces?';
 
-  const system = baseSystemPrompt() +
-    `\n\n[ETAPA:${stage}] intentRequired=${!!intentRequired} user=${user?.username || 'anon'}`;
+  const system = [
+    baseSystemPrompt(),
+    `ETAPA:${stage} | intentRequired=${!!intentRequired} | user=${user?.username || 'anon'}`,
+    stage !== 'done'
+      ? 'En ETAPA distinta de "done" NO pidas tiradas; guía el onboarding de forma amable y diegética.'
+      : 'En juego normal, decide si hace falta tirada. Si sí, usa <<ROLL ...>> exactamente una vez.'
+  ].join('\n\n');
 
+  // Reducimos contexto
   const shortHistory = history.slice(-6).map(m => ({
     role: m.kind === 'user' ? 'user' : 'assistant',
     content: m.text
   }));
 
   const worldLine =
-    `CTX: char=${character?.name || '—'}(${character?.species || '—'} ${character?.role || '—'})` +
+    `CTX: char=${character?.name || '—'} (${character?.species || '—'} ${character?.role || '—'})` +
     ` | loc=${character?.lastLocation || '—'} | jugadores=${Object.keys(world?.characters || {}).length}`;
 
   if (!openaiEnabled) {
-    // Respuesta local básica
+    // Respuesta local básica (sin API)
     if (stage !== 'done') {
       return 'Cuando quieras, elige especie válida (Humano, Twi\'lek, Wookiee, Zabrak o Droide) y seguimos.';
     }
@@ -123,19 +169,19 @@ export async function dmResolveRoll({ roll, skill, character, world, user }) {
 
   const system = [
     baseSystemPrompt(),
-    '=== Reglas de tirada ===',
-    DICE_MD || 'Usa d20 y decide success/mixed/fail según el número.',
-    'Devuelve UNA SOLA respuesta narrativa.',
+    '=== Reglas de tirada para esta respuesta ===',
+    DICE_MD || DICE_FALLBACK,
+    'Devuelve UNA SOLA respuesta narrativa (2–6 frases).',
     'Al final añade la línea: JSON: {"outcome":"success|mixed|fail","summary":"..."}',
   ].join('\n\n');
 
   const worldLine =
-    `CTX: char=${character?.name || '—'}(${character?.species || '—'} ${character?.role || '—'})` +
+    `CTX: char=${character?.name || '—'} (${character?.species || '—'} ${character?.role || '—'})` +
     ` | loc=${character?.lastLocation || '—'} | jugadores=${Object.keys(world?.characters || {}).length}`;
 
   const userMsg =
     `TIRADA: d20=${roll} para la acción "${skill || 'Acción'}" de ${character?.name || 'el PJ'}. ` +
-    `Decide el resultado EXACTAMENTE según las reglas de tirada y narra en 3–5 líneas como máximo.`;
+    `Narra coherentemente y decide outcome EXACTO según las reglas.`;
 
   try {
     const resp = await openai.chat.completions.create({
@@ -162,7 +208,6 @@ export async function dmResolveRoll({ roll, skill, character, world, user }) {
         if (j?.summary) summary = String(j.summary);
       } catch {}
     }
-    // Si el modelo no puso JSON correctamente, estimamos outcome por el número
     if (!summary) {
       summary = outcome === 'success'
         ? `logró su objetivo${skill ? ` (${skill})` : ''}`
@@ -171,7 +216,6 @@ export async function dmResolveRoll({ roll, skill, character, world, user }) {
         : `fracasó en el intento${skill ? ` (${skill})` : ''}`;
     }
 
-    // Quita el rastro JSON de la narración mostrada al jugador
     const visible = m ? text.replace(m[0], '').trim() : text;
     return { text: visible, outcome, summary };
   } catch (e) {
