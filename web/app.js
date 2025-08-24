@@ -1,11 +1,15 @@
 // === Config ===
-// LOCAL por defecto
 const DEFAULT_API_BASE = 'http://localhost:3001';
-
-// PRODUCCIÓN (Vercel): en index.html puedes fijar window.API_BASE='https://tu-back.vercel.app/api'
 const API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   DEFAULT_API_BASE;
+
+// === Helpers de URL (evita redirecciones por slash)
+function joinUrl(base, path) {
+  const b = String(base || '').replace(/\/+$/,'');   // quita / al final
+  const p = String(path || '').replace(/^\/+/, '');  // quita / al inicio
+  return `${b}/${p}`;                                // NO añade / final extra
+}
 
 // === State ===
 let AUTH = { token: null, user: null };
@@ -32,7 +36,7 @@ const rollSkillEl = document.getElementById('roll-skill');
 const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 
-// === Listeners básicos ===
+// Listeners
 sendBtn.addEventListener('click', send);
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 resolveBtn.addEventListener('click', resolveRoll);
@@ -40,25 +44,22 @@ authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
 
-// === Boot: valida token y rehidrata estado ===
+// === Boot: valida token y rehidrata ===
 (async function boot() {
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if (saved?.token && saved?.user?.id) {
       AUTH = saved;
-      // valida token con el backend
       const me = await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
-      // Rehidrata claves y estado del usuario
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
       msgs = load(KEY_MSGS, []);
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
       authStatusEl.textContent = `Hola, ${me?.user?.username || saved.user.username}`;
     } else {
-      // Sesión inválida → guest
       AUTH = null;
       localStorage.removeItem('sw:auth');
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
@@ -67,7 +68,6 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
       step = load(KEY_STEP, 'name');
     }
   } catch {
-    // Error de red validando /auth/me → no borramos auth; solo aviso
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
@@ -112,24 +112,23 @@ function classifyIntent(text) {
   return { required: false, reason: 'talk' };
 }
 
-// ---- Fetch helpers con propagación de Response en el error
+// ---- Fetch helpers (sin slash final forzado)
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`; // barra final evita 308
+  const url = joinUrl(API_BASE, path);
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
-    err.response = res; // <- leer JSON de error en el catch
+    err.response = res;
     throw err;
   }
   return res.json();
 }
-
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`;
+  const url = joinUrl(API_BASE, path);
   const res = await fetch(url, { method: 'GET', headers });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
@@ -150,11 +149,9 @@ function render() {
   updatePlaceholder();
   updateRollCta();
 }
-
 function formatMarkdown(t = '') {
   return t.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 }
-
 function updatePlaceholder() {
   const placeholders = {
     name: 'Tu nombre en el HoloNet…',
@@ -164,7 +161,6 @@ function updatePlaceholder() {
   };
   inputEl.placeholder = placeholders[step] || placeholders.done;
 }
-
 function updateRollCta() {
   if (pendingRoll) {
     rollCta.classList.remove('hidden');
@@ -269,11 +265,12 @@ async function resolveRoll() {
   }
 }
 
-// ---- Migración guest → usuario para no perder conversación
+// Migración guest → user (si alguna vez la quieres usar)
 function migrateGuestToUser(userId) {
-  const gMsgs = load('sw:guest:msgs', null);
-  const gChar = load('sw:guest:char', null);
-  const gStep = load('sw:guest:step', null);
+  const load = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
+  const gMsgs = load('sw:guest:msgs');
+  const gChar = load('sw:guest:char');
+  const gStep = load('sw:guest:step');
   const kMsgs = `sw:${userId}:msgs`;
   const kChar = `sw:${userId}:char`;
   const kStep = `sw:${userId}:step`;
@@ -295,16 +292,11 @@ async function doAuth(kind) {
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
-    // Migrar conversación guest → usuario si existe
-    migrateGuestToUser(user.id);
-
-    // Rehidratar claves/estado del usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
     msgs = load(KEY_MSGS, []);
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
 
-    // Rehidratar personaje desde servidor
     const me = await apiGet('/world/characters/me');
     if (me?.character) {
       character = me.character;
@@ -314,7 +306,6 @@ async function doAuth(kind) {
     authStatusEl.textContent = `Hola, ${user.username}`;
     render();
   } catch (e) {
-    // Mostrar el mensaje real del backend
     try {
       const data = await e.response?.json?.();
       const code = data?.error;
