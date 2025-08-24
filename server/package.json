@@ -2,17 +2,21 @@
   "name": "galaxia-sw-server",
   "version": "1.1.0",
   "type": "module",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.9.3",
+    "@neondatabase/serverless": "^0.9.5",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "pg": "^8.11.3"
+    "nanoid": "^5.1.5",
+    "pg": "^8.11.3",
+    "ws": "^8.18.3"
   }
 }

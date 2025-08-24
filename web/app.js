@@ -1,13 +1,15 @@
 // === Config ===
-// LOCAL:
-// const API_BASE = 'http://localhost:3001';
-// PRODUCCIÓN (Vercel backend público):
-// Se puede sobreescribir con window.API_BASE en tiempo de despliegue
-const API_BASE = (typeof window !== 'undefined' && window.API_BASE) || '';
+// LOCAL por defecto
+const DEFAULT_API_BASE = 'http://localhost:3001';
+
+// PRODUCCIÓN (Vercel): en index.html puedes fijar window.API_BASE='https://tu-back.vercel.app/api'
+const API_BASE =
+  (typeof window !== 'undefined' && window.API_BASE) ||
+  DEFAULT_API_BASE;
 
 // === State ===
 let AUTH = { token: null, user: null };
-const baseKey = (suffix) => AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `sw:guest:${suffix}`;
+const baseKey = (suffix) => (AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `sw:guest:${suffix}`);
 let KEY_MSGS = baseKey('msgs');
 let KEY_CHAR = baseKey('char');
 let KEY_STEP = baseKey('step');
@@ -31,73 +33,78 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 
 // Init
-try { AUTH = JSON.parse(localStorage.getItem('sw:auth')||'null') || null; } catch {}
-if (AUTH?.user?.id){ KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); }
+try {
+  AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null;
+} catch {}
+if (AUTH?.user?.id) {
+  KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+}
 if (!msgs.length) pushDM(`Bienvenid@ al **HoloCanal**. Primero inicia sesión (usuario + PIN) y luego crearemos tu personaje.`);
 render();
 
 sendBtn.addEventListener('click', send);
-inputEl.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') send(); });
+inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 resolveBtn.addEventListener('click', resolveRoll);
 
 // Auth events
 authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
-cancelBtn.addEventListener('click', ()=> { pendingRoll = null; updateRollCta(); });
+cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
 
 // === Utils ===
-function load(k, fb){ try{ const r=localStorage.getItem(k); return r? JSON.parse(r): fb; }catch{ return fb; } }
-function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
-function now(){ return Date.now(); }
-function hhmm(ts){ return new Date(ts).toLocaleTimeString(); }
+function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function now() { return Date.now(); }
+function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-function emit(m){ msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
-function pushDM(text){ emit({ user:'Máster', text, kind:'dm', ts: now() }); }
-function pushUser(text){ emit({ user:character?.name || 'Tú', text, kind:'user', ts: now() }); }
+function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
+function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
+function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-function classifyIntent(text){
-  const t = (text||'').trim().toLowerCase();
+function classifyIntent(text) {
+  const t = (text || '').trim().toLowerCase();
   const defStarts = /^(mi personaje|soy|me llamo|me pongo|llevo|tengo|defino|declaro|establezco|asumo|recuerdo|configuro)\b/;
   const defPossessive = /\bmi(s)?\b/;
-  if (defStarts.test(t)) return { required:false, reason:'def' };
-  if (defPossessive.test(t) && !/(empujo|abro|forzar|ataco|disparo|persuad|convenc|hackeo|reprogramo|piloto|escapo|esquivo|trepo|salto|investigo|busco|percibo|me escondo|oculto|sabot|burlar)/.test(t)) return { required:false, reason:'def' };
+  if (defStarts.test(t)) return { required: false, reason: 'def' };
+  if (defPossessive.test(t) && !/(empujo|abro|forzar|ataco|disparo|persuad|convenc|hackeo|reprogramo|piloto|escapo|esquivo|trepo|salto|investigo|busco|percibo|me escondo|oculto|sabot|burlar)/.test(t))
+    return { required: false, reason: 'def' };
 
   const maps = [
-    { re:/(ataco|golpeo|disparo|apunto|lanzo|asalto)/, skill:'Combate' },
-    { re:/(sigilo|me escondo|oculto|agazapo|camuflo)/, skill:'Sigilo' },
-    { re:/(forzar|romper|empujar|abrir|derribar)/,     skill:'Fuerza' },
-    { re:/(persuad|convenc|negoci|intimid|engañ)/,     skill:'Carisma' },
-    { re:/(percib|observo|escucho|rastro|vigilo|escaneo)/, skill:'Percepción' },
-    { re:/(investig|busco pistas|rebusco|analizo|rastre)/, skill:'Investigación' },
-    { re:/(saltar|trepar|acrob|equilibro|esquivo|carrera)/, skill:'Movimiento' },
-    { re:/(robo|hurto|manos\s?rapidas|desarmo|desactivar trampa|saco)/, skill:'Juego de manos' },
-    { re:/(hackeo|sliceo|reprogramo|pirateo)/,         skill:'Tecnología' },
-    { re:/(piloto|despego|aterrizo|hipersalto|burlar escudos)/, skill:'Pilotaje' },
+    { re: /(ataco|golpeo|disparo|apunto|lanzo|asalto)/, skill: 'Combate' },
+    { re: /(sigilo|me escondo|oculto|agazapo|camuflo)/, skill: 'Sigilo' },
+    { re: /(forzar|romper|empujar|abrir|derribar)/, skill: 'Fuerza' },
+    { re: /(persuad|convenc|negoci|intimid|engañ)/, skill: 'Carisma' },
+    { re: /(percib|observo|escucho|rastro|vigilo|escaneo)/, skill: 'Percepción' },
+    { re: /(investig|busco pistas|rebusco|analizo|rastre)/, skill: 'Investigación' },
+    { re: /(saltar|trepar|acrob|equilibro|esquivo|carrera)/, skill: 'Movimiento' },
+    { re: /(robo|hurto|manos\s?rapidas|desarmo|desactivar trampa|saco)/, skill: 'Juego de manos' },
+    { re: /(hackeo|sliceo|reprogramo|pirateo)/, skill: 'Tecnología' },
+    { re: /(piloto|despego|aterrizo|hipersalto|burlar escudos)/, skill: 'Pilotaje' },
   ];
-  for (const m of maps) if (m.re.test(t)) return { required:true, skill:m.skill };
-  if (/(intento|quiero|trato de|procuro|busco)/.test(t)) return { required:true, skill:'Acción incierta' };
-  return { required:false, reason:'talk' };
+  for (const m of maps) if (m.re.test(t)) return { required: true, skill: m.skill };
+  if (/(intento|quiero|trato de|procuro|busco)/.test(t)) return { required: true, skill: 'Acción incierta' };
+  return { required: false, reason: 'talk' };
 }
 
-async function api(path, body){
+async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`; // forzar barra final evita 308 en preflight
-  const res = await fetch(url, { method:'POST', headers, body: JSON.stringify(body||{}) });
+  const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`; // barra final evita 308
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
   if (!res.ok) throw new Error('api error');
   return res.json();
 }
 
-async function apiGet(path){
+async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
   const url = `${API_BASE}${path}${path.endsWith('/') ? '' : '/'}`;
-  const res = await fetch(url, { method:'GET', headers });
+  const res = await fetch(url, { method: 'GET', headers });
   if (!res.ok) throw new Error('api error');
   return res.json();
 }
 
-function render(){
+function render() {
   chatEl.innerHTML = msgs.map(m => `
     <div class="msg ${m.kind}">
       <div class="meta">[${hhmm(m.ts)}] ${m.user}:</div>
@@ -109,11 +116,11 @@ function render(){
   updateRollCta();
 }
 
-function formatMarkdown(t=''){
-  return t.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g,'<br>');
+function formatMarkdown(t = '') {
+  return t.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 }
 
-function updatePlaceholder(){
+function updatePlaceholder() {
   const placeholders = {
     name: 'Tu nombre en el HoloNet…',
     species: 'Elige especie (Humano, Twi\'lek, Wookiee, Zabrak, Droide)…',
@@ -123,8 +130,8 @@ function updatePlaceholder(){
   inputEl.placeholder = placeholders[step] || placeholders.done;
 }
 
-function updateRollCta(){
-  if (pendingRoll){
+function updateRollCta() {
+  if (pendingRoll) {
     rollCta.classList.remove('hidden');
     rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill}` : '';
   } else {
@@ -133,18 +140,18 @@ function updateRollCta(){
 }
 
 // === Send flow ===
-async function send(){
+async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/api/world/characters', { character }); } catch{}
+    try { await api('/world/characters', { character }); } catch {}
     pushDM(`Tu perfil ahora es **${character.publicProfile ? 'público' : 'privado'}** en el HoloNet.`);
     inputEl.value = ''; return;
   }
 
-  if (value === '/restart'){
+  if (value === '/restart') {
     localStorage.removeItem(KEY_MSGS);
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
@@ -153,33 +160,33 @@ async function send(){
     inputEl.value = ''; return;
   }
 
-  if (step !== 'done'){
-    emit({ user:'Tú', text:value, kind:'user', ts: now() });
-    if (step === 'name'){
+  if (step !== 'done') {
+    emit({ user: 'Tú', text: value, kind: 'user', ts: now() });
+    if (step === 'name') {
       const name = value || 'Aventurer@';
-      character = { name, species:'', role:'', publicProfile:true, lastLocation:'Tatooine — Cantina de Mos Eisley' };
+      character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-      try { await api('/api/world/characters', { character }); } catch{}
+      try { await api('/world/characters', { character }); } catch {}
       pushDM(`Entendido, **${name}**. Indica tu **especie** (escribe una): Humano, Twi'lek, Wookiee, Zabrak o Droide.`);
       step = 'species'; save(KEY_STEP, step);
-    } else if (step === 'species'){
-      const options = ["humano","twi","wook","zabr","droid","droide"];
+    } else if (step === 'species') {
+      const options = ['humano','twi','wook','zabr','droid','droide'];
       const ok = options.some(prefix => value.toLowerCase().startsWith(prefix));
-      if (!ok){ pushDM(`No te he entendido. Especies válidas: Humano, Twi'lek, Wookiee, Zabrak, Droide.`); inputEl.value=''; return; }
-      const map = { humano:"Humano","twi":"Twi'lek","wook":"Wookiee","zabr":"Zabrak","droid":"Droide","droide":"Droide" };
-      for (const k in map){ if (value.toLowerCase().startsWith(k)){ character.species = map[k]; break; } }
+      if (!ok) { pushDM(`No te he entendido. Especies válidas: Humano, Twi'lek, Wookiee, Zabrak, Droide.`); inputEl.value = ''; return; }
+      const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
+      for (const k in map) { if (value.toLowerCase().startsWith(k)) { character.species = map[k]; break; } }
       save(KEY_CHAR, character);
-      try { await api('/api/world/characters', { character }); } catch{}
+      try { await api('/world/characters', { character }); } catch {}
       pushDM(`Perfecto, ${character.name} (${character.species}). Ahora dime tu **rol**: Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero.`);
       step = 'role'; save(KEY_STEP, step);
-    } else if (step === 'role'){
-      const roles = ["piloto","contra","jedi","caza","inge"];
+    } else if (step === 'role') {
+      const roles = ['piloto','contra','jedi','caza','inge'];
       const ok = roles.some(prefix => value.toLowerCase().startsWith(prefix));
-      if (!ok){ pushDM(`Elige un rol válido: Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero.`); inputEl.value=''; return; }
-      const map = { "pilo":"Piloto","contra":"Contrabandista","jedi":"Jedi","caza":"Cazarrecompensas","inge":"Ingeniero" };
-      for (const k in map){ if (value.toLowerCase().startsWith(k)){ character.role = map[k]; break; } }
+      if (!ok) { pushDM(`Elige un rol válido: Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero.`); inputEl.value = ''; return; }
+      const map = { pilo: 'Piloto', contra: 'Contrabandista', jedi: 'Jedi', caza: 'Cazarrecompensas', inge: 'Ingeniero' };
+      for (const k in map) { if (value.toLowerCase().startsWith(k)) { character.role = map[k]; break; } }
       save(KEY_CHAR, character);
-      try { await api('/api/world/characters', { character }); } catch{}
+      try { await api('/world/characters', { character }); } catch {}
       pushDM(`Registro completo. Eres **${character.name}**, ${character.species} ${character.role}. Ubicación inicial: **${character.lastLocation}**.\n\nRegla simple: **si decides algo sobre tu personaje, no hay tirada**. Si depende del mundo, te pediré que pulses **Resolver tirada**. ¿Qué haces?`);
       step = 'done'; save(KEY_STEP, step);
     }
@@ -189,7 +196,7 @@ async function send(){
   // Conversación
   pushUser(value);
   const intent = classifyIntent(value);
-  if (intent.required){
+  if (intent.required) {
     pendingRoll = { skill: intent.skill };
     pushDM(`Esto no depende solo de ti. Pulsa **Resolver tirada${intent.skill ? ` para ${intent.skill}` : ''}** cuando quieras.`);
     inputEl.value = ''; render(); return;
@@ -198,11 +205,11 @@ async function send(){
   try {
     const history = msgs.slice(-8);
     const target = extractTargetName(value);
-    if (target){
-      const resQ = await api('/api/world/ask-about', { targetName: target });
+    if (target) {
+      const resQ = await api('/world/ask-about', { targetName: target });
       pushDM(resQ.text || '...');
     } else {
-      const res = await api('/api/dm/respond', { message:value, history, character });
+      const res = await api('/dm/respond', { message: value, history, character });
       pushDM(res.text || '...');
     }
   } catch {
@@ -212,45 +219,45 @@ async function send(){
 }
 
 let busy = false;
-async function resolveRoll(){
+async function resolveRoll() {
   if (!pendingRoll || busy) return;
   busy = true;
-  try{
-    const res = await api('/api/roll', { skill: pendingRoll.skill, character });
+  try {
+    const res = await api('/roll', { skill: pendingRoll.skill, character });
     pushDM(res.text);
-  }catch{
+  } catch {
     pushDM('Algo se interpone; la situación se complica.');
-  }finally{
+  } finally {
     busy = false;
     pendingRoll = null;
     render();
   }
 }
 
-async function doAuth(kind){
+async function doAuth(kind) {
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
   if (!username || !/^\d{4}$/.test(pin)) { authStatusEl.textContent = 'Usuario y PIN (4 dígitos)'; return; }
-  try{
-    const url = kind === 'register' ? '/api/auth/register' : '/api/auth/login';
+  try {
+    const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-    const me = await apiGet('/api/world/characters/me');
+    const me = await apiGet('/world/characters/me');
     if (me?.character) save(KEY_CHAR, me.character);
     msgs = load(KEY_MSGS, []);
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
     authStatusEl.textContent = `Hola, ${user.username}`;
     render();
-  }catch(e){
+  } catch (e) {
     authStatusEl.textContent = 'Error de autenticación';
   }
 }
 
-function extractTargetName(text){
-  const t = (text||'').trim();
+function extractTargetName(text) {
+  const t = (text || '').trim();
   let m = t.match(/^(?:pregunto|preguntar|preguntas|averiguar|buscar)\s+por\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})/i);
   if (m) return m[1].trim();
   m = t.match(/^\/whois\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})/i);

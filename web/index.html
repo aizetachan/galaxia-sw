@@ -9,24 +9,39 @@
 <body>
   <header class="app-header">
     <h1>Galactic — Star Wars</h1>
-    <p class="muted">Un único mundo vivo. Tus actos quedan en el HoloNet y pueden afectar a otr@s jugadores.</p>
+    <p class="muted">
+      Un único mundo vivo. Tus actos quedan en el HoloNet y pueden afectar a otr@s jugadores.
+    </p>
+    <span id="server-status" class="badge muted">Server: …</span>
   </header>
 
   <section class="auth-panel">
-  <div class="auth-row">
-    <input id="auth-username" placeholder="Usuario" />
-    <input id="auth-pin" placeholder="PIN (4 dígitos)" maxlength="4" />
-    <button id="auth-login">Entrar / Continuar</button>
-    <button id="auth-register" class="outline">Crear usuario</button>
-    <span id="auth-status" class="muted"></span>
-  </div>
-</section>
+    <div class="auth-row">
+      <input id="auth-username"
+             placeholder="Usuario"
+             autocomplete="username"
+             autocapitalize="none"
+             spellcheck="false" />
+      <input id="auth-pin"
+             placeholder="PIN (4 dígitos)"
+             maxlength="4"
+             inputmode="numeric"
+             pattern="[0-9]{4}"
+             autocomplete="one-time-code" />
+      <button id="auth-login">Entrar / Continuar</button>
+      <button id="auth-register" class="outline">Crear usuario</button>
+      <span id="auth-status" class="muted"></span>
+    </div>
+  </section>
 
-<main class="chat-wrap">
+  <main class="chat-wrap">
     <section id="chat" class="chat"></section>
 
     <section id="roll-cta" class="roll-cta hidden">
-      <div class="roll-cta__text"><strong>Tirada pendiente</strong><span id="roll-skill"></span>. Pulsa <strong>Resolver tirada</strong> cuando quieras.</div>
+      <div class="roll-cta__text">
+        <strong>Tirada pendiente</strong><span id="roll-skill"></span>.
+        Pulsa <strong>Resolver tirada</strong> cuando quieras.
+      </div>
       <div class="roll-cta__actions">
         <button id="resolve-btn">Resolver tirada</button>
         <button id="cancel-btn" class="outline">Cancelar</button>
@@ -34,7 +49,8 @@
     </section>
 
     <section class="composer">
-      <input id="input" type="text" placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)">
+      <input id="input" type="text"
+             placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)">
       <button id="send">Enviar</button>
     </section>
   </main>
@@ -43,6 +59,25 @@
     <span class="muted">/privado o /publico para tu perfil. No hay dados en el front.</span>
   </footer>
 
+  <!-- Configura aquí el endpoint del backend -->
+  <!-- LOCAL (por defecto). En producción, cambia la URL a tu backend en Vercel: -->
+  <!-- <script>window.API_BASE='https://tu-back.vercel.app/api';</script> -->
+  <script>window.API_BASE='http://localhost:3001';</script>
+
+  <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
+  <script>
+    (async () => {
+      const el = document.getElementById('server-status');
+      try {
+        const r = await fetch((window.API_BASE || 'https://galaxia-sw.vercel.app/') + '/health', { method: 'GET' });
+        el.textContent = r.ok ? 'Server: OK' : 'Server: ?';
+      } catch {
+        el.textContent = 'Server: FAIL';
+      }
+    })();
+  </script>
+
+  <!-- App principal -->
   <script type="module" src="./app.js"></script>
 </body>
 </html>

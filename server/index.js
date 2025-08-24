@@ -8,26 +8,34 @@ import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
 import { dmRespond, narrateOutcome } from './dm.js';
 
-// Migraciones (Neon) al arranque
+// Migraciones (tolerantes) al arranque
 await migrate();
 
-// ---------- CORS robusto (evita redirects en preflight) ----------
+// ---------- CORS robusto ----------
 const app = express();
+const origins = (process.env.ALLOWED_ORIGIN || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 const corsOptions = {
-  origin: true,
+  origin(origin, cb) {
+    if (!origin || origins.length === 0 || origins.includes(origin)) return cb(null, true);
+    return cb(null, false);
+  },
   methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
   credentials: false,
   preflightContinue: false,
   optionsSuccessStatus: 204,
 };
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-
 app.use(express.json());
 app.use(optionalAuth);
 
-// ---------- Helpers (gating de conocimiento) ----------
+// ---------- Helpers ----------
 function normalizeName(str) {
   return (str || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
 }
@@ -69,11 +77,11 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
 }
 
 // ---------- Health ----------
-app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /api/world'));
+app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- AUTH ----------
-app.post('/api/auth/register', async (req, res) => {
+// ---------- AUTH (SIN prefijo /api en Express) ----------
+app.post('/auth/register', async (req, res) => {
   const { username, pin } = req.body || {};
   try {
     const user = await register(username, pin);
@@ -84,7 +92,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/auth/login', async (req, res) => {
   const { username, pin } = req.body || {};
   try {
     const { token, user } = await login(username, pin);
@@ -94,18 +102,18 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/auth/me', (req, res) => {
+app.get('/auth/me', (req, res) => {
   if (!req.auth) return res.status(401).json({ error: 'unauthorized' });
   res.json({ ok: true, user: { id: req.auth.userId, username: req.auth.username } });
 });
 
 // ---------- WORLD ----------
-app.get('/api/world', async (_req, res) => {
+app.get('/world', async (_req, res) => {
   const world = await getWorld();
   res.json(world);
 });
 
-app.post('/api/world/characters', requireAuth, async (req, res) => {
+app.post('/world/characters', requireAuth, async (req, res) => {
   const { character } = req.body || {};
   if (!character?.name) return res.status(400).json({ error: 'character.name required' });
   character.ownerUserId = req.auth.userId;
@@ -113,19 +121,19 @@ app.post('/api/world/characters', requireAuth, async (req, res) => {
   res.json({ ok: true, character: saved });
 });
 
-app.post('/api/world/events', requireAuth, async (req, res) => {
+app.post('/world/events', requireAuth, async (req, res) => {
   const { actor, location = 'Ubicación desconocida', summary, visibility = 'public' } = req.body || {};
   if (!actor || !summary) return res.status(400).json({ error: 'actor and summary required' });
   await appendEvent({ ts: Date.now(), actor, location, summary, visibility, userId: req.auth.userId });
   res.json({ ok: true });
 });
 
-app.get('/api/world/characters/me', requireAuth, async (req, res) => {
+app.get('/world/characters/me', requireAuth, async (req, res) => {
   const me = await getCharacterByOwner(req.auth.userId);
   res.json({ ok: true, character: me || null });
 });
 
-app.post('/api/world/ask-about', requireAuth, async (req, res) => {
+app.post('/world/ask-about', requireAuth, async (req, res) => {
   const { targetName } = req.body || {};
   if (!targetName) return res.status(400).json({ error: 'targetName required' });
 
@@ -157,7 +165,7 @@ app.post('/api/world/ask-about', requireAuth, async (req, res) => {
 });
 
 // ---------- DM (Máster IA) ----------
-app.post('/api/dm/respond', requireAuth, async (req, res) => {
+app.post('/dm/respond', requireAuth, async (req, res) => {
   const { message, history = [], character } = req.body || {};
   try {
     const text = await dmRespond({ history, message, character, world: await getWorld() });
@@ -169,7 +177,7 @@ app.post('/api/dm/respond', requireAuth, async (req, res) => {
 });
 
 // ---------- Tiradas ----------
-app.post('/api/roll', requireAuth, async (req, res) => {
+app.post('/roll', requireAuth, async (req, res) => {
   const { skill, character, location, visibility = 'public' } = req.body || {};
   const r = Math.random();
   const outcome = r < 0.42 ? 'success' : r < 0.78 ? 'mixed' : 'fail';
