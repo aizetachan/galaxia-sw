@@ -3,12 +3,12 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
-import { migrate } from './db.js';
+import { migrate, dbGetMessages, dbAppendMessage, dbReplaceMessages } from './db.js';
 import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
 import { dmRespond, narrateOutcome } from './dm.js';
 
-// Migraciones (tolerantes) al arranque
+// Migraciones al arranque
 await migrate();
 
 // ---------- CORS robusto ----------
@@ -80,7 +80,7 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
 app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ---------- AUTH (SIN prefijo /api en Express) ----------
+// ---------- AUTH ----------
 app.post('/auth/register', async (req, res) => {
   const { username, pin } = req.body || {};
   try {
@@ -204,6 +204,47 @@ app.post('/roll', requireAuth, async (req, res) => {
     console.error('appendEvent failed', e);
   }
   res.json({ outcome, text });
+});
+
+/* ================= HISTORIAL ================= */
+
+// GET /history?limit=200
+app.get('/history', requireAuth, async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+  const rows = await dbGetMessages(req.auth.userId, limit);
+  // Normalizamos a la forma del front
+  const messages = rows.map(r => ({
+    ts: new Date(r.ts).getTime(),
+    kind: r.kind,
+    user: r.user_label || (r.kind === 'dm' ? 'Máster' : 'Tú'),
+    text: r.text
+  }));
+  res.json({ ok: true, messages });
+});
+
+// POST /history/append { msg: { ts, kind, user, text } }
+app.post('/history/append', requireAuth, async (req, res) => {
+  const { msg } = req.body || {};
+  if (!msg?.text || !msg?.kind) return res.status(400).json({ error: 'invalid_message' });
+  if (!['dm','user'].includes(msg.kind)) return res.status(400).json({ error: 'invalid_kind' });
+  if (String(msg.text).length > 4000) return res.status(400).json({ error: 'msg_too_long' });
+
+  await dbAppendMessage({
+    userId: req.auth.userId,
+    ts: msg.ts || Date.now(),
+    kind: msg.kind,
+    user_label: msg.user || null,
+    text: msg.text
+  });
+  res.json({ ok: true });
+});
+
+// POST /history/replace { messages: [...] }  (sobrescribe el historial del usuario)
+app.post('/history/replace', requireAuth, async (req, res) => {
+  const { messages } = req.body || {};
+  const safe = Array.isArray(messages) ? messages.filter(m => m && m.text && m.kind) : [];
+  await dbReplaceMessages(req.auth.userId, safe);
+  res.json({ ok: true });
 });
 
 // ---------- Export para Vercel y listen local ----------

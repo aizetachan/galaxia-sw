@@ -1,41 +1,35 @@
 // server/db.js
-// Neon (Postgres serverless) con WebSocket para Node
 import { Pool, neonConfig } from '@neondatabase/serverless';
-import ws from 'ws';                      // WebSocket para Node
-neonConfig.webSocketConstructor = ws;
 
-const connectionString = (process.env.DATABASE_URL || '').trim();
+neonConfig.fetchConnectionCache = true;
 
-export let pool = null;
-export let hasDb = false;
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error('DATABASE_URL is not set');
 
-if (connectionString) {
-  pool = new Pool({ connectionString }); // Neon usa SSL/WS según la URL
-  hasDb = true;
-} else {
-  console.warn('[DB] DATABASE_URL no está definida. DB deshabilitada.');
-}
+export const hasDb = !!connectionString;
 
-// Helper simple
-export const sql = async (text, params) => {
-  if (!hasDb) throw new Error('DB_DISABLED');
-  return pool.query(text, params);
-};
+export const pool = new Pool({
+  connectionString,
+  ssl: { rejectUnauthorized: false },
+});
 
-// -------------------- MIGRACIÓN MINIMAL Y TOLERANTE --------------------
+export const sql = (text, params) => pool.query(text, params);
+
+// --- Migración idempotente (incluye messages) ---
 async function run(tx) {
   await tx.query('BEGIN');
 
-  // Extensión opcional
+  // Extensión opcional (no rompe si no hay permisos)
   await tx.query(`DO $$
   BEGIN
     BEGIN
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    EXCEPTION WHEN others THEN NULL;
+    EXCEPTION WHEN others THEN
+      NULL;
     END;
   END $$;`);
 
-  // Enum visibility
+  // Enum visibility si no existe
   await tx.query(`DO $$
   BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'visibility') THEN
@@ -43,7 +37,7 @@ async function run(tx) {
     END IF;
   END $$;`);
 
-  // users
+  // Tablas base
   await tx.query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
@@ -53,7 +47,6 @@ async function run(tx) {
     );
   `);
 
-  // characters
   await tx.query(`
     CREATE TABLE IF NOT EXISTS characters (
       id BIGSERIAL PRIMARY KEY,
@@ -67,7 +60,6 @@ async function run(tx) {
     );
   `);
 
-  // events (sin FK todavía)
   await tx.query(`
     CREATE TABLE IF NOT EXISTS events (
       id BIGSERIAL PRIMARY KEY,
@@ -76,11 +68,10 @@ async function run(tx) {
       location TEXT,
       summary TEXT NOT NULL,
       visibility visibility NOT NULL DEFAULT 'public',
-      user_id BIGINT
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL
     );
   `);
 
-  // sessions
   await tx.query(`
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
@@ -90,12 +81,25 @@ async function run(tx) {
     );
   `);
 
+  /* ======= NUEVO: tabla messages (historial de chat por usuario) ======= */
+  await tx.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ts TIMESTAMPTZ NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('dm','user')),
+      user_label TEXT,               -- 'Máster' o nombre mostrado
+      text TEXT NOT NULL
+    );
+  `);
+
   // Índices
   await tx.query(`CREATE INDEX IF NOT EXISTS idx_events_actor_ts ON events(actor, ts DESC);`);
   await tx.query(`CREATE INDEX IF NOT EXISTS idx_characters_owner ON characters(owner_user_id);`);
   await tx.query(`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);`);
+  await tx.query(`CREATE INDEX IF NOT EXISTS idx_messages_user_ts ON messages(user_id, ts);`);
 
-  // Unicidad owner_user_id por si el esquema viene antiguo
+  // Unicidad owner_user_id aunque la tabla ya existiera
   await tx.query(`DO $$
   BEGIN
     IF NOT EXISTS (
@@ -105,64 +109,75 @@ async function run(tx) {
     END IF;
   END $$;`);
 
-  /* ---------- CONVERSIÓN SEGURA DE events.user_id A BIGINT (SI HACE FALTA) ---------- */
-  // No comparamos con users.id para evitar TEXT = BIGINT. Solo convertimos la columna.
-
-  await tx.query(`
-    DO $$
-    DECLARE coltype text;
-    BEGIN
-      SELECT atttypid::regtype::text INTO coltype
-      FROM pg_attribute
-      WHERE attrelid = 'events'::regclass
-        AND attname = 'user_id'
-        AND NOT attisdropped
-      LIMIT 1;
-
-      IF coltype IS DISTINCT FROM 'bigint' THEN
-        -- Poner a NULL lo no numérico
-        BEGIN
-          EXECUTE 'UPDATE events SET user_id = NULL WHERE user_id IS NOT NULL AND user_id::text !~ ''^[0-9]+$''';
-        EXCEPTION WHEN others THEN NULL;
-        END;
-
-        -- Convertir a BIGINT (si se puede). Si no, lo dejamos como esté.
-        BEGIN
-          EXECUTE 'ALTER TABLE events ALTER COLUMN user_id TYPE BIGINT USING NULLIF(user_id::text, '''')::bigint';
-        EXCEPTION WHEN others THEN NULL;
-        END;
+  // Reparación: asegura autoincremento en users.id si faltaba
+  await tx.query(`DO $$
+  BEGIN
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name='users' AND column_name='id' AND column_default IS NULL
+    ) THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname='users_id_seq') THEN
+        CREATE SEQUENCE users_id_seq;
       END IF;
-    END $$;
-  `);
-
-  // ⚠️ No añadimos la FK aquí. La pondremos más adelante cuando confirmemos que el tipo quedó en BIGINT.
+      ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('users_id_seq');
+      ALTER SEQUENCE users_id_seq OWNED BY users.id;
+      PERFORM setval('users_id_seq', COALESCE((SELECT MAX(id) FROM users), 0) + 1, false);
+    END IF;
+  END $$;`);
 
   await tx.query('COMMIT');
 }
 
-export async function migrate({ strict = false } = {}) {
-  if (!hasDb) {
-    console.warn('[DB] migrate: saltado (DB deshabilitada).');
-    return;
-  }
-
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (err) {
-    console.error('[DB] No se pudo conectar. migrate saltado:', err.message);
-    if (strict) throw err;
-    return;
-  }
-
+export async function migrate() {
+  const client = await pool.connect();
   try {
     await run(client);
     console.log('[DB] migrate: ok');
   } catch (e) {
-    try { await client.query('ROLLBACK'); } catch {}
-    console.error('[DB] migrate error:', e.message);
-    if (strict) throw e;
+    await client.query('ROLLBACK');
+    console.error('[DB] migrate error:', e);
+    throw e;
   } finally {
     client.release();
+  }
+}
+
+/* ======= Helpers de historial ======= */
+export async function dbGetMessages(userId, limit = 200) {
+  const { rows } = await sql(
+    `SELECT ts, kind, user_label, text
+       FROM messages
+      WHERE user_id = $1
+      ORDER BY ts ASC
+      LIMIT $2`,
+    [userId, limit]
+  );
+  return rows;
+}
+
+export async function dbAppendMessage({ userId, ts, kind, user_label, text }) {
+  await sql(
+    `INSERT INTO messages (user_id, ts, kind, user_label, text)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [userId, new Date(ts || Date.now()), kind, user_label || null, text]
+  );
+}
+
+export async function dbReplaceMessages(userId, messages = []) {
+  await sql('BEGIN');
+  try {
+    await sql(`DELETE FROM messages WHERE user_id=$1`, [userId]);
+    for (const m of messages) {
+      await sql(
+        `INSERT INTO messages (user_id, ts, kind, user_label, text)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [userId, new Date(m.ts || Date.now()), m.kind, m.user || null, m.text]
+      );
+    }
+    await sql('COMMIT');
+  } catch (e) {
+    await sql('ROLLBACK');
+    throw e;
   }
 }

@@ -4,11 +4,11 @@ const API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   DEFAULT_API_BASE;
 
-// === Helpers de URL (evita redirecciones por slash)
+// === Helpers URL (evita redirecciones por slash)
 function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');   // quita / al final
-  const p = String(path || '').replace(/^\/+/, '');  // quita / al inicio
-  return `${b}/${p}`;                                // NO añade / final extra
+  const b = String(base || '').replace(/\/+$/,'');
+  const p = String(path || '').replace(/^\/+/, '');
+  return `${b}/${p}`;
 }
 
 // === State ===
@@ -44,7 +44,7 @@ authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
 
-// === Boot: valida token y rehidrata ===
+// === Boot: valida token + sincroniza historial ===
 (async function boot() {
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
@@ -54,8 +54,21 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
+      // Claves por usuario
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-      msgs = load(KEY_MSGS, []);
+
+      // Trae historial remoto
+      const remote = await apiGet('/history?limit=200').catch(() => ({ messages: [] }));
+      if (remote?.messages?.length) {
+        msgs = remote.messages;
+        save(KEY_MSGS, msgs);
+      } else {
+        // Primer login con historial local -> súbelo
+        msgs = load(KEY_MSGS, []);
+        if (msgs.length) {
+          try { await api('/history/replace', { messages: msgs }); } catch {}
+        }
+      }
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
       authStatusEl.textContent = `Hola, ${me?.user?.username || saved.user.username}`;
@@ -83,7 +96,20 @@ function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
+function emit(m) {
+  msgs = [...msgs, m];
+  save(KEY_MSGS, msgs);
+  render();
+  // Persistir en el backend si hay sesión
+  if (AUTH?.token) {
+    // No bloqueamos la UI
+    (async () => {
+      try {
+        await api('/history/append', { msg: { ts: m.ts, kind: m.kind, user: m.user, text: m.text } });
+      } catch {}
+    })();
+  }
+}
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
@@ -187,6 +213,7 @@ async function send() {
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
     msgs = []; character = null; step = 'name'; pendingRoll = null;
+    try { if (AUTH?.token) await api('/history/replace', { messages: [] }); } catch {}
     pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo te llamas en la red del HoloNet?`);
     inputEl.value = ''; return;
   }
@@ -265,23 +292,6 @@ async function resolveRoll() {
   }
 }
 
-// Migración guest → user (si alguna vez la quieres usar)
-function migrateGuestToUser(userId) {
-  const load = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
-  const gMsgs = load('sw:guest:msgs');
-  const gChar = load('sw:guest:char');
-  const gStep = load('sw:guest:step');
-  const kMsgs = `sw:${userId}:msgs`;
-  const kChar = `sw:${userId}:char`;
-  const kStep = `sw:${userId}:step`;
-  if (gMsgs && !localStorage.getItem(kMsgs)) localStorage.setItem(kMsgs, JSON.stringify(gMsgs));
-  if (gChar && !localStorage.getItem(kChar)) localStorage.setItem(kChar, JSON.stringify(gChar));
-  if (gStep && !localStorage.getItem(kStep)) localStorage.setItem(kStep, JSON.stringify(gStep));
-  localStorage.removeItem('sw:guest:msgs');
-  localStorage.removeItem('sw:guest:char');
-  localStorage.removeItem('sw:guest:step');
-}
-
 async function doAuth(kind) {
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
@@ -293,16 +303,22 @@ async function doAuth(kind) {
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-    msgs = load(KEY_MSGS, []);
-    character = load(KEY_CHAR, null);
-    step = load(KEY_STEP, 'name');
 
-    const me = await apiGet('/world/characters/me');
-    if (me?.character) {
-      character = me.character;
-      save(KEY_CHAR, character);
+    // Sincroniza historial tras login
+    const remote = await apiGet('/history?limit=200').catch(() => ({ messages: [] }));
+    if (remote?.messages?.length) {
+      msgs = remote.messages;
+      save(KEY_MSGS, msgs);
+    } else {
+      msgs = load(KEY_MSGS, []);
+      if (msgs.length) { try { await api('/history/replace', { messages: msgs }); } catch {} }
     }
 
+    const me = await apiGet('/world/characters/me').catch(()=>null);
+    if (me?.character) { character = me.character; save(KEY_CHAR, character); }
+    else { character = load(KEY_CHAR, null); }
+
+    step = load(KEY_STEP, 'name');
     authStatusEl.textContent = `Hola, ${user.username}`;
     render();
   } catch (e) {
