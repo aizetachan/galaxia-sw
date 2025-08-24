@@ -6,7 +6,8 @@ import cors from 'cors';
 import { migrate, sql } from './db.js';
 import { register, login, requireAuth, optionalAuth } from './auth.js';
 import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
-import { dmRespond, narrateOutcome } from './dm.js';
+import { dmRespond, narrateOutcome, dmResolveRoll } from './dm.js';
+import { pingOpenAI, openaiEnabled } from './openai.js';
 
 // Migraciones (tolerantes) al arranque
 await migrate();
@@ -79,8 +80,8 @@ function buildAskAboutText({ asker, target, lastEvt, level }) {
 // ---------- Health ----------
 app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
-import { pingOpenAI, openaiEnabled } from './openai.js';
 
+// Debug OpenAI (activar con ENABLE_DEBUG_OPENAI=1)
 app.get('/debug/openai', async (_req, res) => {
   if (!process.env.ENABLE_DEBUG_OPENAI) return res.status(404).end();
   const ping = await pingOpenAI();
@@ -152,8 +153,8 @@ app.post('/history/append', requireAuth, async (req, res) => {
   res.json({ ok: true, inserted: values.length });
 });
 
-app.post('/history/clear', requireAuth, async (req, res) => {
-  await sql(`DELETE FROM chat_messages WHERE user_id=$1`, [req.auth.userId]);
+app.post('/history/clear', requireAuth, async (_req, res) => {
+  await sql(`DELETE FROM chat_messages WHERE user_id=$1`, [_req.auth.userId]);
   res.json({ ok: true });
 });
 
@@ -238,31 +239,42 @@ app.post('/dm/respond', optionalAuth, async (req, res) => {
 // ---------- Tiradas ----------
 app.post('/roll', requireAuth, async (req, res) => {
   const { skill, character, location, visibility = 'public' } = req.body || {};
-  const r = Math.random();
-  const outcome = r < 0.42 ? 'success' : r < 0.78 ? 'mixed' : 'fail';
-  const text = narrateOutcome({ outcome, skill, character });
+  const roll = Math.floor(Math.random() * 20) + 1; // d20
 
   try {
-    const actor = character?.name || 'Desconocido';
-    const loc = location || character?.lastLocation || 'Sector desconocido';
-    const summary =
-      outcome === 'success'
-        ? `logró su objetivo`
-        : outcome === 'mixed'
-        ? `consiguió algo con complicación`
-        : `fracasó en el intento`;
-    await appendEvent({
-      ts: Date.now(),
-      actor,
-      location: loc,
-      summary: `${summary}${skill ? ` (${skill})` : ''}`,
-      visibility,
-      userId: req.auth.userId
+    const world = await getWorld();
+    const { text, outcome, summary } = await dmResolveRoll({
+      roll,
+      skill,
+      character,
+      world,
+      user: { id: req.auth.userId, username: req.auth.username }
     });
+
+    try {
+      const actor = character?.name || 'Desconocido';
+      const loc = location || character?.lastLocation || 'Sector desconocido';
+      await appendEvent({
+        ts: Date.now(),
+        actor,
+        location: loc,
+        summary,           // resumen breve para el HoloNet
+        visibility,
+        userId: req.auth.userId
+      });
+    } catch (e) {
+      console.error('appendEvent failed', e);
+    }
+
+    res.json({ roll, outcome, text });
   } catch (e) {
-    console.error('appendEvent failed', e);
+    console.error(e);
+    // Fallback ultra seguro (no debería llegar aquí si dmResolveRoll hizo su propio fallback)
+    const r = roll / 20;
+    const outcome = r >= 0.75 ? 'success' : r >= 0.4 ? 'mixed' : 'fail';
+    const text = narrateOutcome({ outcome, skill, character });
+    res.json({ roll, outcome, text });
   }
-  res.json({ outcome, text });
 });
 
 // ---------- Export para Vercel y listen local ----------
