@@ -20,7 +20,7 @@ let KEY_STEP = baseKey('step');
 let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
-let pendingRoll = null;
+let pendingRoll = null; // { skill?: string }
 
 // === DOM ===
 const chatEl = document.getElementById('chat');
@@ -88,32 +88,6 @@ function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-// Clasificador sencillo para sugerir tirada (solo UI, el LLM lo comenta en su única respuesta)
-function classifyIntent(text) {
-  const t = (text || '').trim().toLowerCase();
-  const defStarts = /^(mi personaje|soy|me llamo|me pongo|llevo|tengo|defino|declaro|establezco|asumo|recuerdo|configuro)\b/;
-  const defPossessive = /\bmi(s)?\b/;
-  if (defStarts.test(t)) return { required: false, reason: 'def' };
-  if (defPossessive.test(t) && !/(empujo|abro|forzar|ataco|disparo|persuad|convenc|hackeo|reprogramo|piloto|escapo|esquivo|trepo|salto|investigo|busco|percibo|me escondo|oculto|sabot|burlar)/.test(t))
-    return { required: false, reason: 'def' };
-
-  const maps = [
-    { re: /(ataco|golpeo|disparo|apunto|lanzo|asalto)/, skill: 'Combate' },
-    { re: /(sigilo|me escondo|oculto|agazapo|camuflo)/, skill: 'Sigilo' },
-    { re: /(forzar|romper|empujar|abrir|derribar)/, skill: 'Fuerza' },
-    { re: /(persuad|convenc|negoci|intimid|engañ)/, skill: 'Carisma' },
-    { re: /(percib|observo|escucho|rastro|vigilo|escaneo)/, skill: 'Percepción' },
-    { re: /(investig|busco pistas|rebusco|analizo|rastre)/, skill: 'Investigación' },
-    { re: /(saltar|trepar|acrob|equilibro|esquivo|carrera)/, skill: 'Movimiento' },
-    { re: /(robo|hurto|manos\s?rapidas|desarmo|desactivar trampa|saco)/, skill: 'Juego de manos' },
-    { re: /(hackeo|sliceo|reprogramo|pirateo)/, skill: 'Tecnología' },
-    { re: /(piloto|despego|aterrizo|hipersalto|burlar escudos)/, skill: 'Pilotaje' },
-  ];
-  for (const m of maps) if (m.re.test(t)) return { required: true, skill: m.skill };
-  if (/(intento|quiero|trato de|procuro|busco)/.test(t)) return { required: true, skill: 'Acción incierta' };
-  return { required: false, reason: 'talk' };
-}
-
 // ---- Fetch helpers
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
@@ -172,33 +146,31 @@ function updateRollCta() {
   }
 }
 
-// --- Helper: detectar etiqueta de tirada en el texto del Máster ---
+// --- Detectar etiqueta de tirada en el texto del Máster ---
 function parseRollTag(txt = '') {
-  // Acepta: <<ROLL SKILL="Combate" REASON="lo que sea">>
+  // Acepta: <<ROLL SKILL="Combate" REASON="...">>
   const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
   const m = re.exec(txt);
   if (!m) return null;
   const skill = (m[1] || 'Acción').trim();
-  const reason = (m[2] || '').trim();
   const cleaned = txt.replace(re, '').trim();
-  return { skill, reason, cleaned };
+  return { skill, cleaned };
 }
 
 // === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA ===
-async function talkToDM(message, intent) {
+async function talkToDM(message) {
   try {
     const history = msgs.slice(-8);
     const res = await api('/dm/respond', {
       message,
       history,
       character,
-      stage: step,
-      intentRequired: !!intent?.required
+      stage: step
     });
 
     let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
 
-    // NUEVO: si el Máster pide tirada mediante etiqueta, activamos CTA y limpiamos el texto
+    // Si el Máster pide tirada, activamos CTA y limpiamos el texto
     const roll = parseRollTag(txt);
     if (roll) {
       pendingRoll = { skill: roll.skill };
@@ -208,7 +180,6 @@ async function talkToDM(message, intent) {
 
     pushDM(txt);
   } catch {
-    // Un único fallback si falla la llamada al modelo
     pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
   }
 }
@@ -222,7 +193,6 @@ async function send() {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
     try { await api('/world/characters', { character }); } catch {}
-    // No añadimos otra respuesta; el LLM puede comentarlo en su turno siguiente si preguntas
     inputEl.value = ''; return;
   }
 
@@ -237,9 +207,8 @@ async function send() {
 
   // Emitimos lo que escribe el jugador
   pushUser(value);
-  const intent = classifyIntent(value);
 
-  // Onboarding NO bloqueante: actualiza estado, pero NO emite mensajes extra.
+  // Onboarding NO bloqueante (el Máster guía, no el front)
   if (step !== 'done') {
     if (step === 'name') {
       const name = value || 'Aventurer@';
@@ -266,19 +235,13 @@ async function send() {
         step = 'done'; save(KEY_STEP, step);
       }
     }
-    // Siempre UNA respuesta del Máster
-    await talkToDM(value, intent);
+    await talkToDM(value);
     inputEl.value = '';
     return;
   }
 
-  // Juego normal: si el cliente detecta acción incierta, muestra CTA (además de lo que pida el Máster)
-  if (intent.required) {
-    pendingRoll = { skill: intent.skill };
-    updateRollCta();
-  }
-
-  await talkToDM(value, intent);
+  // Juego normal: TODO lo decide el Máster (si quiere tirada, nos pondrá la etiqueta)
+  await talkToDM(value);
   inputEl.value = '';
 }
 
@@ -286,9 +249,25 @@ let busy = false;
 async function resolveRoll() {
   if (!pendingRoll || busy) return;
   busy = true;
+  const skill = pendingRoll.skill || 'Acción';
   try {
-    const res = await api('/roll', { skill: pendingRoll.skill, character });
-    pushDM(res.text);
+    // 1) Tirada en el backend (registra evento, etc.)
+    const res = await api('/roll', { skill, character });
+
+    // 2) Pedimos al Máster que continúe la narración con ese resultado
+    //    Enviamos una "señal" clara en el mensaje para que la prompt lo entienda.
+    const history = msgs.slice(-8);
+    const follow = await api('/dm/respond', {
+      message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
+      history,
+      character,
+      stage: step
+    });
+
+    // Si el modelo respondió, usamos su texto; si no, usamos el fallback del servidor
+    const nextText = (follow && follow.text) ? follow.text : res.text;
+    pushDM(nextText || res.text || 'La situación evoluciona…');
+
   } catch {
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
