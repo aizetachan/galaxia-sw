@@ -32,24 +32,50 @@ const rollSkillEl = document.getElementById('roll-skill');
 const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 
-// Init
-try {
-  AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null;
-} catch {}
-if (AUTH?.user?.id) {
-  KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-}
-if (!msgs.length) pushDM(`Bienvenid@ al **HoloCanal**. Primero inicia sesión (usuario + PIN) y luego crearemos tu personaje.`);
-render();
-
+// === Listeners básicos ===
 sendBtn.addEventListener('click', send);
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 resolveBtn.addEventListener('click', resolveRoll);
-
-// Auth events
 authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
+
+// === Boot: valida token y rehidrata estado ===
+(async function boot() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
+    if (saved?.token && saved?.user?.id) {
+      AUTH = saved;
+      // valida token con el backend
+      const me = await apiGet('/auth/me').catch(async (e) => {
+        if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
+        throw e;
+      });
+      // Rehidrata claves y estado del usuario
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      msgs = load(KEY_MSGS, []);
+      character = load(KEY_CHAR, null);
+      step = load(KEY_STEP, 'name');
+      authStatusEl.textContent = `Hola, ${me?.user?.username || saved.user.username}`;
+    } else {
+      // Sesión inválida → guest
+      AUTH = null;
+      localStorage.removeItem('sw:auth');
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      msgs = load(KEY_MSGS, []);
+      character = load(KEY_CHAR, null);
+      step = load(KEY_STEP, 'name');
+    }
+  } catch {
+    // Error de red validando /auth/me → no borramos auth; solo aviso
+    authStatusEl.textContent = 'Sin conexión para validar sesión';
+  }
+
+  if (!msgs.length) {
+    pushDM('Bienvenid@ al **HoloCanal**. Primero inicia sesión (usuario + PIN) y luego crearemos tu personaje.');
+  }
+  render();
+})();
 
 // === Utils ===
 function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
@@ -94,7 +120,7 @@ async function api(path, body) {
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
-    err.response = res; // <- importante para leer el JSON de error en el catch
+    err.response = res; // <- leer JSON de error en el catch
     throw err;
   }
   return res.json();
@@ -243,6 +269,22 @@ async function resolveRoll() {
   }
 }
 
+// ---- Migración guest → usuario para no perder conversación
+function migrateGuestToUser(userId) {
+  const gMsgs = load('sw:guest:msgs', null);
+  const gChar = load('sw:guest:char', null);
+  const gStep = load('sw:guest:step', null);
+  const kMsgs = `sw:${userId}:msgs`;
+  const kChar = `sw:${userId}:char`;
+  const kStep = `sw:${userId}:step`;
+  if (gMsgs && !localStorage.getItem(kMsgs)) localStorage.setItem(kMsgs, JSON.stringify(gMsgs));
+  if (gChar && !localStorage.getItem(kChar)) localStorage.setItem(kChar, JSON.stringify(gChar));
+  if (gStep && !localStorage.getItem(kStep)) localStorage.setItem(kStep, JSON.stringify(gStep));
+  localStorage.removeItem('sw:guest:msgs');
+  localStorage.removeItem('sw:guest:char');
+  localStorage.removeItem('sw:guest:step');
+}
+
 async function doAuth(kind) {
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
@@ -252,16 +294,27 @@ async function doAuth(kind) {
     const { token, user } = (await api(url, { username, pin }));
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
+
+    // Migrar conversación guest → usuario si existe
+    migrateGuestToUser(user.id);
+
+    // Rehidratar claves/estado del usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-    const me = await apiGet('/world/characters/me');
-    if (me?.character) save(KEY_CHAR, me.character);
     msgs = load(KEY_MSGS, []);
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
+
+    // Rehidratar personaje desde servidor
+    const me = await apiGet('/world/characters/me');
+    if (me?.character) {
+      character = me.character;
+      save(KEY_CHAR, character);
+    }
+
     authStatusEl.textContent = `Hola, ${user.username}`;
     render();
   } catch (e) {
-    // --- Mostrar el error real que envía el backend ---
+    // Mostrar el mensaje real del backend
     try {
       const data = await e.response?.json?.();
       const code = data?.error;
