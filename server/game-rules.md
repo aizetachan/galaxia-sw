@@ -48,3 +48,11 @@ Usa la etiqueta que mejor encaje; es guía, no atadura:
 - Evita walls of text; corta y propone opciones (“puedes X o Y”).
 - Si el jugador está perdido, sugiere 2 direcciones claras en la escena.
 - Si el perfil del personaje es privado, no expongas su información sin consentimiento.
+
+Ejemplo de como debe funcionar el uso de los dados:
+### Forzar la puerta del almacén (d20)
+1: te lesionas y haces mucho ruido
+2–9: no se abre; ruido medio
+10–14: se abre pero con ruido alto (complicación)
+15–19: se abre con poco ruido
+20: se abre sin ruido (crítico)
