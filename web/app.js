@@ -54,33 +54,12 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
-
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-      msgs = load(KEY_MSGS, []);
-      character = load(KEY_CHAR, null);
-      step = load(KEY_STEP, 'name');
-
-      // Rehidrata historial desde servidor (si existe)
-      try {
-        const h = await apiGet('/history');
-        const serverMsgs = (h?.messages || []).map(m => ({
-          user: (m.role === 'user') ? (character?.name || 'Tú') : 'Máster',
-          text: m.text,
-          kind: m.kind || m.role,
-          ts: +new Date(m.ts)
-        }));
-        if (serverMsgs.length) {
-          msgs = serverMsgs;
-          save(KEY_MSGS, msgs);
-        }
-      } catch {}
-
+      setUserKeysFromAuth();
       authStatusEl.textContent = `Hola, ${me?.user?.username || saved.user.username}`;
     } else {
       AUTH = null;
       localStorage.removeItem('sw:auth');
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-      msgs = []; character = null; step = 'name';
+      setUserKeysFromAuth(); // rehidrata como invitado
     }
   } catch {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
@@ -98,26 +77,18 @@ function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-// ---- Persistencia remota del historial
-async function persistMessages(list) {
-  if (!AUTH?.token || !list?.length) return;
-  try { await api('/history/append', { messages: list }); } catch {}
-}
-function toServerMsg(m) {
-  return { ts: m.ts, role: m.kind === 'user' ? 'user' : 'dm', kind: m.kind, text: m.text };
+function setUserKeysFromAuth() {
+  KEY_MSGS = baseKey('msgs');
+  KEY_CHAR = baseKey('char');
+  KEY_STEP = baseKey('step');
+  msgs = load(KEY_MSGS, []);
+  character = load(KEY_CHAR, null);
+  step = load(KEY_STEP, 'name');
 }
 
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
-function pushDM(text) {
-  const m = { user: 'Máster', text, kind: 'dm', ts: now() };
-  emit(m);
-  persistMessages([toServerMsg(m)]);
-}
-function pushUser(text) {
-  const m = { user: character?.name || 'Tú', text, kind: 'user', ts: now() };
-  emit(m);
-  persistMessages([toServerMsg(m)]);
-}
+function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
+function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
 function classifyIntent(text) {
   const t = (text || '').trim().toLowerCase();
@@ -215,7 +186,6 @@ async function send() {
   }
 
   if (value === '/restart') {
-    if (AUTH?.token) { try { await api('/history/clear'); } catch {} }
     localStorage.removeItem(KEY_MSGS);
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
@@ -225,7 +195,7 @@ async function send() {
   }
 
   if (step !== 'done') {
-    pushUser(value);
+    emit({ user: 'Tú', text: value, kind: 'user', ts: now() });
     if (step === 'name') {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
@@ -298,12 +268,12 @@ async function resolveRoll() {
   }
 }
 
-// Migración guest → user (si alguna vez la quieres usar)
+// Migración guest → user (llamada al loguearse por primera vez)
 function migrateGuestToUser(userId) {
-  const load = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
-  const gMsgs = load('sw:guest:msgs');
-  const gChar = load('sw:guest:char');
-  const gStep = load('sw:guest:step');
+  const loadK = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
+  const gMsgs = loadK('sw:guest:msgs');
+  const gChar = loadK('sw:guest:char');
+  const gStep = loadK('sw:guest:step');
   const kMsgs = `sw:${userId}:msgs`;
   const kChar = `sw:${userId}:char`;
   const kStep = `sw:${userId}:step`;
@@ -322,32 +292,23 @@ async function doAuth(kind) {
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
+
+    // 1) Guardamos sesión
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
-    KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
-    msgs = load(KEY_MSGS, []);
-    character = load(KEY_CHAR, null);
-    step = load(KEY_STEP, 'name');
+    // 2) Si el usuario venía como invitado, migramos su conversación
+    migrateGuestToUser(user.id);
 
-    const me = await apiGet('/world/characters/me');
-    if (me?.character) {
-      character = me.character;
-      save(KEY_CHAR, character);
-    }
+    // 3) Rehidratar claves/estado del usuario y renderizar (ya se verá el chat)
+    setUserKeysFromAuth();
 
-    // Rehidrata historial desde servidor
+    // 4) (Opcional) Traer su personaje del backend si existiera
     try {
-      const h = await apiGet('/history');
-      const serverMsgs = (h?.messages || []).map(m => ({
-        user: (m.role === 'user') ? (character?.name || 'Tú') : 'Máster',
-        text: m.text,
-        kind: m.kind || m.role,
-        ts: +new Date(m.ts)
-      }));
-      if (serverMsgs.length) {
-        msgs = serverMsgs;
-        save(KEY_MSGS, msgs);
+      const me = await apiGet('/world/characters/me');
+      if (me?.character) {
+        character = me.character;
+        save(KEY_CHAR, character);
       }
     } catch {}
 
