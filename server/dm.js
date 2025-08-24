@@ -1,124 +1,66 @@
 // server/dm.js
-import fs from 'fs/promises';
-import path from 'path';
-import OpenAI from 'openai';
+import { openai, openaiEnabled } from './openai.js';
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// Si tienes ficheros .md, cárgalos aquí (sync al arrancar o lazy en cada request)
+// import fs from 'fs';
+// const PROMPT_MASTER = fs.readFileSync('prompts/master.md','utf8');
+// const GUIDE_RULES   = fs.readFileSync('prompts/guide-rules.md','utf8');
 
-// Carga y cachea prompts
-let PROMPT_MASTER = '';
-let GUIDE_RULES = '';
-
-async function loadPrompts() {
-  if (PROMPT_MASTER && GUIDE_RULES) return;
-  const here = path.dirname(new URL(import.meta.url).pathname);
-  const pmPath = path.join(here, 'prompts', 'prompt-master.md');
-  const grPath = path.join(here, 'prompts', 'guide-rules.md');
-
-  try { PROMPT_MASTER = await fs.readFile(pmPath, 'utf8'); }
-  catch { PROMPT_MASTER = '# Máster\nResponde como un director de juego de Star Wars.\n'; }
-
-  try { GUIDE_RULES = await fs.readFile(grPath, 'utf8'); }
-  catch { GUIDE_RULES = '- Mantén el tono cinematográfico.\n- Explica con suavidad al inicio cómo empezar.\n'; }
-}
-
-function toBriefWorld(world = {}) {
-  const chars = Object.values(world.characters || {})
-    .map(c => `- ${c.name} (${c.species || '—'} ${c.role || ''}) — ${c.lastLocation || 'Paradero desconocido'}`)
-    .join('\n');
-  return `## Resumen del mundo
-Personajes:
-${chars || '—'}
-
-Registros recientes: ${Array.isArray(world.events) ? world.events.length : 0} eventos.`;
-}
-
-function formatHistory(history = []) {
-  // history es el array de msgs que pintas en el front; lo reducida un poco
-  return history.slice(-8).map(m => {
-    const role = (m.kind === 'user') ? 'user' : 'assistant';
-    return { role, content: `[${m.user}] ${m.text}` };
-  });
-}
-
-// Fallback muy básico si no hay API: evita las “respuestas por defecto”
-function localFallback({ stage, character, message }) {
-  const name = character?.name || 'viajer@';
-  if (stage !== 'done') {
-    if (stage === 'name') {
-      return `Bienvenid@ al HoloCanal. Dime tu **nombre** para registrar tu identidad en la red.`;
-    }
-    if (stage === 'species') {
-      return `Perfecto, ${name}. Elige **especie** (Humano, Twi'lek, Wookiee, Zabrak o Droide) y te situaré en la escena.`;
-    }
-    if (stage === 'role') {
-      return `${name}, ¿qué **rol** asumes? (Piloto, Contrabandista, Jedi, Cazarrecompensas o Ingeniero).`;
-    }
-  }
-  // Conversación libre
-  return `La holopantalla carga lentamente. Te escucho: "${message}". ¿Qué haces a continuación?`;
-}
-
-export async function dmRespond({ history = [], message = '', character = null, world = {}, stage = 'done', intentRequired = false, user = null }) {
-  await loadPrompts();
-
-  const worldBrief = toBriefWorld(world);
-  const charBrief = character ? `\n## Personaje del jugador\nNombre: ${character.name}\nEspecie: ${character.species || '—'}\nRol: ${character.role || '—'}\nPerfil público: ${character.publicProfile ? 'Sí' : 'No'}\nUbicación: ${character.lastLocation || '—'}` : '\n## Personaje del jugador\n— (aún sin registrar)';
-
-  const notLogged = !user; // usuario aún no autenticado
-
-  // Construimos el system combinando tus .md con contexto
-  const system = [
-    'Eres el **Máster** (director de juego) de una experiencia de rol ambientada en el universo de Star Wars.',
-    'Responde SIEMPRE en **español** y en **una sola respuesta** por turno.',
-    'Evita listas largas; usa 2–3 frases narrativas y una pregunta o propuesta clara.',
-    'Si el jugador intenta una acción incierta, puedes sugerir una tirada, pero no forces. Menciona el tipo brevemente.',
-    '',
-    '--- PROMPT MASTER ---',
-    PROMPT_MASTER.trim(),
-    '',
-    '--- GAME RULES ---',
-    GUIDE_RULES.trim(),
-    '',
-    '--- CONTEXTO EJECUCIÓN ---',
-    `Estado del flujo (stage): ${stage}`,
-    `Requiere tirada (heurística UI): ${intentRequired ? 'sí' : 'no'}`,
-    `Usuario autenticado: ${notLogged ? 'no' : 'sí'}`,
-    charBrief,
-    worldBrief,
+function baseSystemPrompt() {
+  // Pon aquí un prompt mínimo para probar (sustitúyelo por tu PROMPT_MASTER + GUIDE_RULES)
+  return [
+    "Eres el Máster de una partida ambientada en Star Wars.",
+    "Habla en español, con tono cercano y cinematográfico.",
+    "Contesta en un solo mensaje; no pidas tirar dados salvo que haya acción incierta."
   ].join('\n');
+}
 
-  const msgs = [
+export async function dmRespond({ history = [], message, character, world, stage = 'done', intentRequired = false, user = null }) {
+  // Fallbacks RÁPIDOS si no hay API o no hay mensaje
+  if (!message || !message.trim()) return '¿Qué haces?';
+  if (!openaiEnabled) {
+    console.warn('[DM] OpenAI deshabilitado (sin OPENAI_API_KEY). Usando fallback.');
+    return 'El canal se llena de estática. (OpenAI no configurado).';
+  }
+
+  // Construimos el contexto mínimo para probar (ajústalo a tu formato)
+  const system = baseSystemPrompt() +
+    `\n\n[ETAPA:${stage}] intentRequired=${intentRequired} user=${user?.username || 'anon'}`;
+
+  const messages = [
     { role: 'system', content: system },
-    ...formatHistory(history),
-    { role: 'user', content: message || '...' }
+    // si quieres, pasa parte del histórico real
+    ...history.slice(-6).map(m => ({
+      role: m.kind === 'user' ? 'user' : 'assistant',
+      content: m.text
+    })),
+    // estado del personaje/mundo en una única línea para que el modelo lo use si quiere
+    {
+      role: 'system',
+      content: `CTX: character=${character?.name || '—'}(${character?.species || '—'} ${character?.role || '—'}), loc=${character?.lastLocation || '—'}`
+    },
+    { role: 'user', content: message }
   ];
 
-  // Si no hay API KEY, devolvemos localFallback (sin “respuestas por defecto” rígidas)
-  if (!openai) {
-    return localFallback({ stage, character, message });
-  }
-
   try {
+    const t0 = Date.now();
     const resp = await openai.chat.completions.create({
-      model: MODEL,
+      model: 'gpt-4o-mini',        // usa el que prefieras
+      messages,
       temperature: 0.7,
-      messages: msgs,
+      max_tokens: 350,
     });
     const text = resp.choices?.[0]?.message?.content?.trim();
-    return text || localFallback({ stage, character, message });
-  } catch (err) {
-    console.error('[dmRespond] OpenAI error:', err?.message || err);
-    return localFallback({ stage, character, message });
+    console.log(`[DM] OpenAI ok id=${resp.id} ${Date.now() - t0}ms tokens=${resp.usage?.total_tokens || '?'} stage=${stage}`);
+    return text || '...';
+  } catch (e) {
+    // Log detallado para detectar por qué no llega al dashboard
+    console.error('[DM] OpenAI error:', {
+      status: e?.status,
+      message: e?.message,
+      code: e?.code,
+      type: e?.error?.type,
+    });
+    return 'El canal se llena de estática. (Fallo al contactar con el oráculo).';
   }
-}
-
-// Narrar resultados de tirada (tu función original)
-export function narrateOutcome({ outcome, skill, character }) {
-  const name = character?.name || 'Tu personaje';
-  const sk = skill ? ` (${skill})` : '';
-  if (outcome === 'success') return `${name}${sk} triunfa con soltura; la escena se abre a su favor.`;
-  if (outcome === 'mixed')   return `${name}${sk} lo consigue, pero surge una complicación que cambia el tono de la sala.`;
-  return `${name}${sk} falla. El ambiente se enrarece y algo se les escapa de las manos.`;
 }
