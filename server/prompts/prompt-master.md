@@ -14,7 +14,7 @@ server/prompts/prompt-master.md
 
 Activa una tirada solo cuando:
 
-La acción del PJ puede provocar una reacción (oposición, alarma, daño, exposición social), o
+La acción del PJ puede provocar una reacción (oposición, negociacion , compra , alarma, daño, exposición social), o
 
 El entorno/PNJ impacta al PJ y este podría evitar/mitigar (esquivar, bloquear, resistir, cortar sistemas).
 
