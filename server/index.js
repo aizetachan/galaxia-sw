@@ -7,7 +7,7 @@ import dmRouter from './dm.js';
 
 const app = express();
 
-/* ===== CORS universal (siempre antes de TODO) ===== */
+/* ===== CORS universal (antes de TODO) ===== */
 app.use((req, res, next) => {
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
@@ -25,9 +25,7 @@ app.use(express.json({ limit: '1mb' }));
 
 /* ===== Root & Health (nunca 500) ===== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
-app.get('/health', (_req, res) => {
-  res.status(200).json({ ok: true, ts: new Date().toISOString() });
-});
+app.get('/health', (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 
 /* ===== (opcional) Estado de DB real ===== */
 app.get('/db/health', async (_req, res) => {
@@ -39,11 +37,9 @@ app.get('/db/health', async (_req, res) => {
       out.ok = true;
       out.latencyMs = Date.now() - t0;
     } else {
-      out.ok = false;
       out.reason = 'missing DATABASE_URL';
     }
   } catch (e) {
-    out.ok = false;
     out.error = String(e?.message || e);
   }
   res.status(200).json(out);
@@ -64,10 +60,7 @@ app.get('/ai/health', async (_req, res) => {
         { role: 'user', content: 'ping' }
       ]
     };
-    // GPT-5 usa max_completion_tokens (NO max_tokens)
-    if (/^gpt-5/i.test(out.model)) {
-      payload.max_completion_tokens = 800;
-    }
+    if (/^gpt-5/i.test(out.model)) payload.max_completion_tokens = 8;
 
     await client.chat.completions.create(payload);
     out.ok = true;
@@ -117,7 +110,7 @@ app.post('/auth/logout', requireAuth, async (req, res) => {
 });
 
 /* ===== Rutas de juego ===== */
-app.use('/', dmRouter);     // /dm y /dm/respond
+app.use('/', dmRouter);
 app.use('/', worldRouter);
 
 /* ===== Error handler (asegura CORS en errores inesperados) ===== */
@@ -127,9 +120,7 @@ app.use((err, req, res, _next) => {
     res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
     res.setHeader('Vary', 'Origin');
   } catch {}
-  if (!res.headersSent) {
-    res.status(500).json({ ok: false, error: String(err?.message || err) });
-  }
+  if (!res.headersSent) res.status(500).json({ ok: false, error: String(err?.message || err) });
 });
 
 /* ===== Start (local) ===== */

@@ -6,14 +6,12 @@ import { optionalAuth } from './auth.js';
 const router = Router();
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
-/* ========= Carga perezosa del SDK (evita crasheos en build) ========= */
+/* ========= SDK OpenAI (lazy) ========= */
 let openaiClient = null;
 async function getOpenAI() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY missing'); // IA es obligatoria
-  }
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing');
   if (openaiClient) return openaiClient;
-  const mod = await import('openai'); // no revienta si no existe hasta aquí
+  const mod = await import('openai');
   const OpenAI = mod.default || mod.OpenAI || mod;
   openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return openaiClient;
@@ -82,7 +80,7 @@ async function handleDM(req, res) {
       return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t });
     }
 
-    // Personaje activo (si lo hay)
+    // personaje activo
     let characterId = toInt(req.body?.character_id);
     if (!characterId && hasDb && userId) {
       const { rows } = await sql(`SELECT id FROM characters WHERE owner_user_id=$1 LIMIT 1`, [userId]);
@@ -92,10 +90,11 @@ async function handleDM(req, res) {
     await saveMsg(userId, 'user', text);
 
     const brief = await worldBrief(characterId);
-    const model = process.env.OPENAI_MODEL || 'gpt-5-mini'; // modelo por defecto
+    const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
 
-    // IA: SIEMPRE intentamos OpenAI primero
     let outText = null;
+    let metaError = null;
+
     try {
       const client = await getOpenAI();
       const system = [
@@ -106,26 +105,29 @@ async function handleDM(req, res) {
         brief ? '\nContexto del mundo:\n' + brief : ''
       ].join('\n');
 
-      // Payload compatible con GPT-5 (sin max_tokens)
       const payload = {
         model,
-        temperature: 0.8,
+        temperature: Number(process.env.DM_TEMPERATURE ?? 0.8),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: text },
         ],
       };
-      if (/^gpt-5/i.test(model)) {
-        payload.max_completion_tokens = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || 400);
-      }
+
+      // compat GPT-5
+      const maxOut =
+        Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ||
+               process.env.DM_MAX_TOKENS ||   // compat antigua
+               800);
+      if (/^gpt-5/i.test(model)) payload.max_completion_tokens = maxOut;
 
       const resp = await client.chat.completions.create(payload);
       outText = resp.choices?.[0]?.message?.content?.trim() || null;
     } catch (e) {
+      metaError = { status: e?.status, code: e?.code, message: e?.message };
       console.error('[DM] OpenAI error:', e?.status, e?.code, e?.message);
     }
 
-    // Si aun así no tenemos respuesta IA, devolvemos un texto de cortesía
     if (!outText) {
       const t = 'Interferencia en la HoloNet. El máster no responde ahora mismo; repite la acción más tarde.';
       await saveMsg(userId, 'dm', t);
@@ -134,7 +136,7 @@ async function handleDM(req, res) {
         reply: { text: t },
         text: t,
         message: t,
-        meta: { ai_ok: false, model, reason: 'openai_call_failed' }
+        meta: { ai_ok: false, model, ... (metaError ? { error: metaError } : {}) }
       });
     }
 
@@ -153,7 +155,7 @@ async function handleDM(req, res) {
   }
 }
 
-/* ========= rutas (incluye compat /dm/respond) ========= */
+/* ========= rutas ========= */
 router.post('/dm', optionalAuth, handleDM);
 router.post('/dm/respond', optionalAuth, handleDM);
 
