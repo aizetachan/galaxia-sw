@@ -186,7 +186,7 @@
   /* Botón "Enviar" plano (sin degradado ni relieve) */
 #send{
     background: var(--holo);        /* color liso */
-    color: #00141a;                 /* buen contraste sobre el holo */
+    color: #fff;                 /* buen contraste sobre el holo */
     border: 1px solid var(--holo-soft);
     box-shadow: none;               /* sin brillo ni relieve */
     transform: none;                /* sin “aplastado” al click */
