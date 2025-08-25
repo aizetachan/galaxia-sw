@@ -7,7 +7,7 @@ import dmRouter from './dm.js';
 
 const app = express();
 
-/* CORS universal */
+/* ===== CORS universal (antes de TODO) ===== */
 app.use((req,res,next)=>{
   const origin=req.headers.origin||'*';
   res.setHeader('Access-Control-Allow-Origin', origin==='null' ? '*' : origin);
@@ -17,9 +17,14 @@ app.use((req,res,next)=>{
   if(req.method==='OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use(express.json({ limit:'1mb' }));
 
-/* Health SIEMPRE 200 */
+/* ===== Body parsers =====
+   Admitimos: JSON, text/plain y x-www-form-urlencoded */
+app.use(express.text({ type: ['text/plain', 'text/*'], limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+app.use(express.json({ limit: '1mb' }));
+
+/* ===== Root & Health (siempre 200) ===== */
 app.get('/',(_req,res)=>res.type('text/plain').send('OK: API running. Prueba /health'));
 app.get('/health', async(_req,res)=>{
   const out={ ok:true, ts:new Date().toISOString(), db:{ ok:false } };
@@ -30,7 +35,7 @@ app.get('/health', async(_req,res)=>{
   res.status(200).json(out);
 });
 
-/* Auth */
+/* ===== Auth ===== */
 app.post('/auth/register', async(req,res)=>{
   try{ const {username,pin}=req.body||{}; const user=await register(username,pin); const {token}=await login(username,pin);
        res.json({ ok:true, token, user }); }
@@ -50,10 +55,10 @@ app.post('/auth/logout', requireAuth, async(req,res)=>{
   catch(e){ res.status(500).json({ ok:false, error:e.message }); }
 });
 
-/* Rutas de juego */
-app.use('/', dmRouter);
+/* ===== Routers de juego ===== */
+app.use('/', dmRouter);    // /dm y /dm/respond
 app.use('/', worldRouter);
 
-/* Start (Vercel serverless ignora el puerto, no pasa nada) */
+/* ===== Start ===== */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, ()=>console.log(`API on :${PORT}`));

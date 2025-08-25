@@ -12,16 +12,41 @@ async function getOpenAI() {
   if (!process.env.OPENAI_API_KEY) return null;
   if (openaiClient) return openaiClient;
   try {
-    const mod = await import('openai');            // <- sin import estático
+    const mod = await import('openai'); // carga perezosa
     const OpenAI = mod.default || mod.OpenAI || mod;
     openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     return openaiClient;
   } catch {
-    return null; // si no está instalado el paquete, seguimos en modo fallback
+    return null;
   }
 }
 
 /* ========= helpers ========= */
+function extractUserText(body) {
+  // 1) Si es string (text/plain)
+  if (typeof body === 'string') return body.trim();
+
+  // 2) JSON con campos comunes
+  if (body && typeof body === 'object') {
+    const direct =
+      body.text ?? body.message ?? body.prompt ?? body.content ?? body.input?.text;
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+
+    // 3) Mensajes estilo OpenAI
+    if (Array.isArray(body.messages)) {
+      // toma el último user
+      for (let i = body.messages.length - 1; i >= 0; i--) {
+        const m = body.messages[i];
+        if (m?.role === 'user' && typeof m?.content === 'string' && m.content.trim()) {
+          return m.content.trim();
+        }
+      }
+    }
+  }
+
+  return ''; // no encontrado
+}
+
 async function worldBrief(characterId){
   if(!hasDb||!characterId) return '';
   const [{rows:cRows},{rows:eNear},{rows:eFaction},{rows:eMine}] = await Promise.all([
@@ -51,17 +76,17 @@ async function saveMsg(userId,role,text){
 /* ========= handler ========= */
 async function handleDM(req, res){
   try{
-    const { text, character_id } = req.body || {};
     const userId = req.auth?.userId || null;
 
-    if(!text || String(text).trim()===''){
+    const text = extractUserText(req.body);
+    if(!text){
       const t='¿Puedes repetir la acción o pregunta?';
       await saveMsg(userId,'dm',t);
       return res.status(200).json({ ok:true, reply:{ text:t }, text:t, message:t });
     }
 
     // personaje activo
-    let characterId = toInt(character_id);
+    let characterId = toInt(req.body?.character_id);
     if(!characterId && hasDb && userId){
       const { rows } = await sql(`SELECT id FROM characters WHERE owner_user_id=$1 LIMIT 1`,[userId]);
       characterId = rows[0]?.id || null;
@@ -80,7 +105,6 @@ async function handleDM(req, res){
           brief ? '\nContexto del mundo:\n'+brief : ''
         ].join('\n');
 
-        // SDK v4
         const resp = await client.chat.completions.create({
           model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
           temperature: 0.8,
