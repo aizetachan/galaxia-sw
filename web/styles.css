@@ -1,26 +1,185 @@
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:#0b0d12;color:#e7e9ee}
-.app-header,.app-footer{padding:16px 20px}
-.app-header h1{margin:0 0 4px 0;font-size:20px}
-.muted{opacity:.7;font-size:13px}
-.chat-wrap{max-width:920px;margin:0 auto;padding:0 20px}
-.chat{height:60vh;min-height:420px;background:#000;border:1px solid #4091EA;border-radius:14px;padding:12px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.2)}
-.msg{margin:8px 0;padding:8px 10px;border-radius:12px;line-height:1.35}
-.msg.user{background:#000;border:1px solid #fff}
-.msg.dm{background:#000;border:1px solid #4091EA}
-.msg .meta{opacity:.6;font-size:12px;margin-bottom:2px}
-.composer{display:flex;gap:8px;margin:10px 0 18px}
-.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid #788596;background:#000;color:#e7e9ee}
-.composer button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:#4091EA;color:#e7e9ee;cursor:pointer}
-.composer button:hover{background:rgba(255,255,255,.12)}
-.roll-cta{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:10px 0;padding:10px 12px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:rgba(255,255,255,.06)}
-.roll-cta.hidden{display:none}
-.roll-cta__actions button{padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#4091EA;color:#e7e9ee;cursor:pointer}
-.roll-cta__actions .outline{background:transparent}
-a,button{transition:.15s ease all}
-strong{font-weight:600}
+/* =====================================================
+   Galaxia SW — styles.css (drop-in, sin romper HTML)
+   Mantiene tus clases originales + tokens y mejoras SW
+   ===================================================== */
 
-.auth-panel{max-width:920px;margin:0 auto 8px;padding:0 20px}
-.auth-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.auth-row input{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:#000;color:#e7e9ee}
-.auth-row button{padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#e7e9ee;cursor:pointer}
-.auth-row button.outline{background:transparent}
+/* -------- 1) TOKENS / BASE -------- */
+:root{
+    --bg:#0b0d12;
+    --surface:#000000;
+    --text:#e7e9ee;
+    --muted:#8ea3b6;
+  
+    --holo:#4091EA;                 /* azul holográfico (ya usabas este) */
+    --holo-soft: rgba(64,145,234,.20);
+    --accent:#ffe81f;               /* amarillo “crawl” */
+  
+    --radius:14px;
+    --shadow:0 1px 4px rgba(0,0,0,.2);
+  
+    --chat-h:60vh;
+    --chat-min:420px;
+  }
+  
+  *{ box-sizing:border-box }
+  
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;
+    color:var(--text);
+    background:
+      radial-gradient(1200px 800px at 20% -10%, #102136 0%, transparent 60%),
+      radial-gradient(800px 600px at 110% 20%, #0b1a2a 0%, transparent 55%),
+      var(--bg);
+    min-height:100dvh;
+    overflow-x:hidden;
+  }
+  
+  /* Estrellas sutiles */
+  body::before{
+    content:"";
+    position:fixed; inset:0; pointer-events:none; opacity:.28;
+    background:
+      radial-gradient(2px 2px at 20% 30%, #fff8 70%, transparent 71%) repeat,
+      radial-gradient(1px 1px at 70% 60%, #fff6 70%, transparent 71%) repeat;
+    background-size: 400px 300px, 300px 200px;
+    animation: twinkle 12s linear infinite;
+  }
+  @keyframes twinkle{
+    0%,100%{ transform:translateY(0) }
+    50%{ transform:translateY(8px) }
+  }
+  
+  a,button{ transition:.15s ease all }
+  strong{ font-weight:600 }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+  
+  /* -------- 2) HEADER / FOOTER -------- */
+  .app-header,.app-footer{ padding:16px 20px }
+  .app-header h1{
+    margin:0 0 4px 0; font-size:20px;
+    text-shadow:0 0 18px #ffe81f33;
+  }
+  .muted{ opacity:.8; color:var(--muted); font-size:13px }
+  
+  /* Badge (para #server-status si quieres darle estilo) */
+  .badge{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:4px 10px; border-radius:999px;
+    border:1px solid rgba(255,255,255,.15);
+    background:rgba(255,255,255,.06);
+  }
+  
+  /* -------- 3) LAYOUT -------- */
+  .chat-wrap{ max-width:920px; margin:0 auto; padding:0 20px }
+  
+  /* -------- 4) CHAT / MENSAJES -------- */
+  .chat{
+    height:var(--chat-h);
+    min-height:var(--chat-min);
+    background:var(--surface);
+    border:1px solid var(--holo);
+    border-radius:var(--radius);
+    padding:12px;
+    overflow:auto;
+    box-shadow:var(--shadow);
+  }
+  
+  /* Mensaje base con efecto “scanlines” sutil */
+  .msg{
+    margin:8px 0; padding:8px 10px;
+    border-radius:12px; line-height:1.35;
+    background:linear-gradient(180deg, #07131f, #060e18);
+    border:1px solid #0c3142;
+    box-shadow: inset 0 0 0 1px #00d1ff14, 0 0 0 1px #001018;
+    position:relative; overflow:hidden;
+  }
+  .msg::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(to bottom, #00d1ff06 0 2px, transparent 2px 4px);
+  }
+  
+  /* Roles (conservamos tus clases específicas) */
+  .msg.user{
+    background:#000;
+    border:1px solid #ffffff;
+    box-shadow: inset 0 0 0 1px #ffffff22;
+  }
+  .msg.dm{
+    background:#000;
+    border:1px solid var(--holo);
+    box-shadow: inset 0 0 0 1px var(--holo-soft);
+  }
+  .msg .meta{ opacity:.6; font-size:12px; margin-bottom:2px }
+  
+  /* -------- 5) COMPOSER -------- */
+  .composer{
+    display:flex; gap:8px; margin:10px 0 18px;
+  }
+  .composer input{
+    flex:1; padding:10px 12px; border-radius:12px;
+    border:1px solid #10344a; background:#07131f; color:var(--text);
+    box-shadow: inset 0 0 0 1px #00d1ff10;
+  }
+  .composer input::placeholder{ color:#9db1c4aa }
+  
+  .composer button{
+    padding:10px 14px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.2);
+    background:linear-gradient(90deg, #7af0ff, var(--holo));
+    color:#00141a; cursor:pointer; font-weight:700;
+    box-shadow:0 0 12px #00d1ff77, inset 0 -2px 0 #008fb1;
+  }
+  .composer button:hover{ filter:brightness(1.05) }
+  
+  /* -------- 6) CTA TIRADA -------- */
+  .roll-cta{
+    display:flex; gap:12px; align-items:center; justify-content:space-between;
+    margin:10px 0; padding:10px 12px;
+    border:1px solid rgba(255,255,255,.2);
+    border-radius:12px;
+    background:linear-gradient(180deg, #0b1624aa, #09121eaa);
+    backdrop-filter:blur(12px);
+    box-shadow:0 10px 40px #0008, 0 0 0 1px #0d2a38 inset;
+  }
+  .roll-cta.hidden{ display:none }
+  .roll-cta__actions button{
+    padding:8px 12px; border-radius:10px;
+    border:1px solid rgba(255,255,255,.2);
+    background:linear-gradient(90deg, #7af0ff, var(--holo));
+    color:#00141a; cursor:pointer; font-weight:700;
+    box-shadow:0 0 12px #00d1ff55, inset 0 -2px 0 #008fb1;
+  }
+  .roll-cta__actions .outline{
+    background:transparent; color:var(--text);
+    border:1px solid #0e3a4f; box-shadow: inset 0 0 0 1px #00d1ff22;
+  }
+  
+  /* -------- 7) AUTH -------- */
+  .auth-panel{ max-width:920px; margin:0 auto 8px; padding:0 20px }
+  .auth-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+  .auth-row input{
+    padding:10px 12px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.15);
+    background:#000; color:var(--text);
+  }
+  .auth-row button{
+    padding:10px 14px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.08); color:var(--text);
+    cursor:pointer
+  }
+  .auth-row button.outline{ background:transparent }
+  
+  /* -------- 8) PEQUEÑAS UTILIDADES -------- */
+  .hidden{ display:none !important }
+  .text-center{ text-align:center }
+  .text-right{ text-align:right }
+  
+  /* -------- 9) RESPONSIVE SUAVE -------- */
+  @media (max-width:600px){
+    :root{ --chat-h:50vh }
+    .composer{ flex-wrap:wrap }
+    .composer button{ flex:1 1 120px }
+  }
+  
