@@ -1,11 +1,12 @@
 // === Config dinámico del backend ===
-// Preferencias (en orden): window.API_BASE -> <meta name="api-base"> -> same-origin /api -> same-origin (sin /api)
-// -> <meta name="api-fallback"> -> fallback final (si lo quieres)
 function getMeta(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
 }
 
-// Valor inicial (puede ser sobreescrito en ensureApiBase)
+// Fallback de producción por defecto (ajústalo si tu API vive en otro host)
+const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
+
+// Valor inicial (se sobreescribe en ensureApiBase)
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   getMeta('api-base') ||
@@ -25,13 +26,13 @@ async function ensureApiBase() {
   const candidates = []
     .concat(API_BASE || [])
     .concat(getMeta('api-base') || [])
-    .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
+    .concat(typeof window !== 'undefined' && window.API_FALLBACK ? [window.API_FALLBACK] : [])
     .concat(getMeta('api-fallback') || [])
-    .concat('https://galaxia-sw.vercel.app/api') // <- si quieres un fallback duro, descomenta
+    .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
+    .concat(DEFAULT_API_BASE) // <--- fallback duro para producción
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/,''));
 
-  // Quitar duplicados conservando orden
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
 
@@ -100,10 +101,10 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
 
 // === Boot ===
 (async function boot() {
-  // 1) Elegir API_BASE real
+  // 1) elegir base real de API
   await ensureApiBase();
 
-  // 2) Restaurar sesión si existe
+  // 2) restaurar sesión si existe
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if (saved?.token && saved?.user?.id) {
@@ -157,11 +158,9 @@ async function api(path, body) {
     err.response = res;
     throw err;
   }
-  // Intentar parsear JSON; si el servidor devolviera algo no-JSON, evita crash
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : { ok: true };
 }
-
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
@@ -210,7 +209,6 @@ function updateRollCta() {
 
 // --- Detectar etiqueta de tirada en el texto del Máster ---
 function parseRollTag(txt = '') {
-  // Acepta: <<ROLL SKILL="Combate" REASON="...">>
   const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
   const m = re.exec(txt);
   if (!m) return null;
@@ -231,8 +229,6 @@ async function talkToDM(message) {
     });
 
     let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
-
-    // Si el Máster pide tirada, activamos CTA y limpiamos el texto
     const roll = parseRollTag(txt);
     if (roll) {
       pendingRoll = { skill: roll.skill };
@@ -250,7 +246,6 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
-  // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
@@ -267,10 +262,8 @@ async function send() {
     inputEl.value = ''; return;
   }
 
-  // Emitimos lo que escribe el jugador
   pushUser(value);
 
-  // Onboarding NO bloqueante (el Máster guía, no el front)
   if (step !== 'done') {
     if (step === 'name') {
       const name = value || 'Aventurer@';
@@ -302,7 +295,6 @@ async function send() {
     return;
   }
 
-  // Juego normal: TODO lo decide el Máster (si quiere tirada, nos pondrá la etiqueta)
   await talkToDM(value);
   inputEl.value = '';
 }
@@ -313,10 +305,7 @@ async function resolveRoll() {
   busy = true;
   const skill = pendingRoll.skill || 'Acción';
   try {
-    // 1) Tirada en el backend (registra evento, etc.)
     const res = await api('/roll', { skill, character });
-
-    // 2) Continuación narrativa del Máster con el resultado
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
@@ -324,7 +313,6 @@ async function resolveRoll() {
       character,
       stage: step
     });
-
     const nextText = (follow && follow.text) ? follow.text : res.text;
     pushDM(nextText || res.text || 'La situación evoluciona…');
   } catch {
