@@ -182,4 +182,22 @@
     .composer{ flex-wrap:wrap }
     .composer button{ flex:1 1 120px }
   }
+
+  /* Botón "Enviar" plano (sin degradado ni relieve) */
+#send{
+    background: var(--holo);        /* color liso */
+    color: #00141a;                 /* buen contraste sobre el holo */
+    border: 1px solid var(--holo-soft);
+    box-shadow: none;               /* sin brillo ni relieve */
+    transform: none;                /* sin “aplastado” al click */
+  }
+  
+  #send:hover{
+    filter: none;
+    background: #3a86dd;           /* tono un pelín más oscuro al hover */
+  }
+  
+  #send:active{
+    transform: none;
+  }
   
