@@ -1,3 +1,12 @@
+// === DEBUG helpers ===
+const DEBUG = true;
+function dlog(...a) { if (DEBUG) console.log('[WEB]', ...a); }
+function dgroup(label, fn) {
+  if (!DEBUG) return fn?.();
+  console.groupCollapsed(label);
+  try { fn?.(); } finally { console.groupEnd(); }
+}
+
 // === Config dinámico del backend ===
 function getMeta(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
@@ -6,22 +15,47 @@ function getMeta(name) {
 // Fallback de producción por defecto (ajústalo si tu API vive en otro host)
 const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
 
-// Valor inicial (se sobreescribe en ensureApiBase)
+// Valor inicial (se puede sobreescribir en ensureApiBase)
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   getMeta('api-base') ||
   (typeof location !== 'undefined' ? (location.origin + '/api') : '');
 
-// Pequeño status visual si existe <span id="server-status">...</span>
-function setServerStatus(ok) {
+function setServerStatus(ok, msg) {
   const el = document.getElementById('server-status');
   if (!el) return;
-  el.textContent = ok ? 'Server: OK' : 'Server: FAIL';
+  el.textContent = ok ? (msg || 'Server: OK') : (msg || 'Server: FAIL');
   el.classList.toggle('ok', !!ok);
   el.classList.toggle('bad', !ok);
 }
 
-// Probar en orden varias bases hasta que /health responda 200 JSON
+// Comprobar si /health responde JSON 2xx
+async function probeHealth(base) {
+  const url = joinUrl(base, '/health');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
+    const ct = r.headers.get('content-type') || '';
+    const text = await r.text();
+    dlog('probe', { base, status: r.status, ct });
+    if (!r.ok) return { ok: false, reason: `HTTP ${r.status}`, text };
+    if (!ct.includes('application/json')) return { ok: false, reason: 'not-json', text };
+    try {
+      const j = JSON.parse(text);
+      if (j && (j.ok === true || 'ts' in j)) return { ok: true, json: j };
+      return { ok: false, reason: 'json-no-ok', json: j };
+    } catch (e) {
+      return { ok: false, reason: 'json-parse', text };
+    }
+  } catch (e) {
+    return { ok: false, reason: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error') };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Probar en orden varias bases hasta que /health responda bien
 async function ensureApiBase() {
   const candidates = []
     .concat(API_BASE || [])
@@ -29,34 +63,28 @@ async function ensureApiBase() {
     .concat(typeof window !== 'undefined' && window.API_FALLBACK ? [window.API_FALLBACK] : [])
     .concat(getMeta('api-fallback') || [])
     .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
-    .concat(DEFAULT_API_BASE) // <--- fallback duro para producción
+    .concat(DEFAULT_API_BASE) // <- fallback duro
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/,''));
 
+  // Unicos, conservando orden
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
 
+  dgroup('API candidates', () => console.table(unique.map((b,i)=>({i,base:b}))));
+
   for (const base of unique) {
-    try {
-      const url = joinUrl(base, '/health');
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3500);
-      const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!r.ok) continue;
-      const ct = r.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) continue;
-      const j = await r.json().catch(() => null);
-      if (j && (j.ok === true || 'ts' in j)) {
-        API_BASE = base;
-        console.log('[API] Using base =', API_BASE);
-        setServerStatus(true);
-        return;
-      }
-    } catch { /* probar siguiente */ }
+    const result = await probeHealth(base);
+    dgroup(`probe ${base}`, () => console.log(result));
+    if (result.ok) {
+      API_BASE = base;
+      dlog('Using API_BASE =', API_BASE);
+      setServerStatus(true, 'Server: OK');
+      return;
+    }
   }
   console.warn('[API] No API base found. Using initial:', API_BASE || '(empty)');
-  setServerStatus(false);
+  setServerStatus(false, 'Server: FAIL (no health)');
 }
 
 // === Helpers de URL (evita redirecciones por slash)
@@ -101,12 +129,13 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
 
 // === Boot ===
 (async function boot() {
-  // 1) elegir base real de API
+  dlog('Boot start');
   await ensureApiBase();
+  dlog('API_BASE ready =', API_BASE);
 
-  // 2) restaurar sesión si existe
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
+    dlog('Saved auth =', saved);
     if (saved?.token && saved?.user?.id) {
       AUTH = saved;
       await apiGet('/auth/me').catch(async (e) => {
@@ -126,7 +155,8 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
     }
-  } catch {
+  } catch (e) {
+    dlog('Auth restore error:', e);
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
@@ -135,6 +165,7 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
   render();
+  dlog('Boot done');
 })();
 
 // === Utils ===
@@ -147,38 +178,71 @@ function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-// ---- Fetch helpers
+// --- Sanitizar/format mensajes (evita HTML anidado que rompe el layout)
+function escapeHtml(s='') {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+function formatMarkdown(t = '') {
+  const safe = escapeHtml(t);
+  return safe
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
+// ---- Fetch helpers con logging profundo
+async function readMaybeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  const body = await res.text();
+  if (ct.includes('application/json')) {
+    try { return { json: JSON.parse(body), raw: body, ct, status: res.status }; }
+    catch (e) { return { json: null, raw: body, ct, status: res.status, parseError: String(e) }; }
+  }
+  return { json: null, raw: body, ct, status: res.status };
+}
+
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
   const url = joinUrl(API_BASE, path);
+  dgroup('api POST ' + url, () => console.log({ body }));
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+  const data = await readMaybeJson(res);
+  dgroup('api POST result ' + url, () => console.log(data));
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
     err.response = res;
+    err.data = data;
     throw err;
   }
-  const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : { ok: true };
+  return data.json ?? {};
 }
+
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
   const url = joinUrl(API_BASE, path);
+  dgroup('api GET ' + url, () => console.log({}));
   const res = await fetch(url, { method: 'GET', headers });
+  const data = await readMaybeJson(res);
+  dgroup('api GET result ' + url, () => console.log(data));
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
     err.response = res;
+    err.data = data;
     throw err;
   }
-  const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : { ok: true };
+  return data.json ?? {};
 }
 
+// === Render ===
 function render() {
+  dgroup('render', () => console.log({ msgsCount: msgs.length, step, character }));
   chatEl.innerHTML = msgs.map(m => `
     <div class="msg ${m.kind}">
-      <div class="meta">[${hhmm(m.ts)}] ${m.user}:</div>
+      <div class="meta">[${hhmm(m.ts)}] ${escapeHtml(m.user)}</div>
       <div class="text">${formatMarkdown(m.text)}</div>
     </div>
   `).join('');
@@ -186,9 +250,7 @@ function render() {
   updatePlaceholder();
   updateRollCta();
 }
-function formatMarkdown(t = '') {
-  return t.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
-}
+
 function updatePlaceholder() {
   const placeholders = {
     name: 'Tu nombre en el HoloNet…',
@@ -209,6 +271,7 @@ function updateRollCta() {
 
 // --- Detectar etiqueta de tirada en el texto del Máster ---
 function parseRollTag(txt = '') {
+  // Acepta: <<ROLL SKILL="Combate" REASON="...">>
   const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
   const m = re.exec(txt);
   if (!m) return null;
@@ -219,6 +282,7 @@ function parseRollTag(txt = '') {
 
 // === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA ===
 async function talkToDM(message) {
+  dlog('talkToDM start', { message, step, character });
   try {
     const history = msgs.slice(-8);
     const res = await api('/dm/respond', {
@@ -229,6 +293,7 @@ async function talkToDM(message) {
     });
 
     let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
+
     const roll = parseRollTag(txt);
     if (roll) {
       pendingRoll = { skill: roll.skill };
@@ -237,7 +302,8 @@ async function talkToDM(message) {
     }
 
     pushDM(txt);
-  } catch {
+  } catch (e) {
+    dlog('talkToDM error:', e?.data || e);
     pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
   }
 }
@@ -245,11 +311,13 @@ async function talkToDM(message) {
 // === Send flow ===
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
+  dlog('send', { value, step });
 
+  // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/world/characters', { character }); } catch {}
+    try { await api('/world/characters', { character }); } catch (e) { dlog('privacy update fail', e?.data || e); }
     inputEl.value = ''; return;
   }
 
@@ -269,7 +337,7 @@ async function send() {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-      try { await api('/world/characters', { character }); } catch {}
+      try { await api('/world/characters', { character }); } catch (e) { dlog('create char fail', e?.data || e); }
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
@@ -277,7 +345,7 @@ async function send() {
       if (key) {
         character.species = map[key];
         save(KEY_CHAR, character);
-        try { await api('/world/characters', { character }); } catch {}
+        try { await api('/world/characters', { character }); } catch (e) { dlog('update species fail', e?.data || e); }
         step = 'role'; save(KEY_STEP, step);
       }
     } else if (step === 'role') {
@@ -286,7 +354,7 @@ async function send() {
       if (key) {
         character.role = map[key];
         save(KEY_CHAR, character);
-        try { await api('/world/characters', { character }); } catch {}
+        try { await api('/world/characters', { character }); } catch (e) { dlog('update role fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
       }
     }
@@ -304,6 +372,7 @@ async function resolveRoll() {
   if (!pendingRoll || busy) return;
   busy = true;
   const skill = pendingRoll.skill || 'Acción';
+  dlog('resolveRoll', { skill });
   try {
     const res = await api('/roll', { skill, character });
     const history = msgs.slice(-8);
@@ -315,7 +384,8 @@ async function resolveRoll() {
     });
     const nextText = (follow && follow.text) ? follow.text : res.text;
     pushDM(nextText || res.text || 'La situación evoluciona…');
-  } catch {
+  } catch (e) {
+    dlog('resolveRoll error', e?.data || e);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
@@ -345,6 +415,7 @@ async function doAuth(kind) {
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
   if (!username || !/^\d{4}$/.test(pin)) { authStatusEl.textContent = 'Usuario y PIN (4 dígitos)'; return; }
+  dlog('doAuth', { kind, username });
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
@@ -366,8 +437,9 @@ async function doAuth(kind) {
     }
     render();
   } catch (e) {
+    dlog('doAuth error:', e?.data || e);
     try {
-      const data = await e.response?.json?.();
+      const data = e.data?.json ?? (await e.response?.json?.());
       const code = data?.error;
       const friendly = {
         INVALID_CREDENTIALS: 'Usuario (3–24 minúsculas/números/_) y PIN de 4 dígitos.',
