@@ -10,7 +10,7 @@ const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 let openaiClient = null;
 async function getOpenAI() {
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY missing'); // IA es obligatoria
+    throw new Error('OPENAI_API_KEY missing');
   }
   if (openaiClient) return openaiClient;
   const mod = await import('openai');
@@ -19,12 +19,7 @@ async function getOpenAI() {
   return openaiClient;
 }
 
-/* ========= Utilidades ========= */
-function isResponsesModel(model = '') {
-  // Modelos que usan Responses API y token param 'max_output_tokens'
-  return /(^gpt-5|gpt-4\.1|^o3|mini)/i.test(model);
-}
-
+/* ========= helpers ========= */
 function extractUserText(body) {
   if (typeof body === 'string') return body.trim();
   if (body && typeof body === 'object') {
@@ -51,7 +46,7 @@ async function saveMsg(userId, role, text) {
       [userId || null, role, text]
     );
   } catch (e) {
-    console.warn('[DM] saveMsg warn', e?.message);
+    console.warn('[DM] saveMsg error', e?.message);
   }
 }
 
@@ -77,89 +72,66 @@ async function worldBrief(characterId) {
   return L.join('\n');
 }
 
-/* ========= Handler IA ========= */
+/* ========= handler ========= */
 async function handleDM(req, res) {
-  const started = Date.now();
+  const userId = req.auth?.userId || null;
+  const text = extractUserText(req.body);
+
+  console.log('[DM] incoming', {
+    url: req.originalUrl,
+    userId,
+    characterId: req.body?.character_id ?? null,
+    hasAuth: !!req.auth,
+    bodyKeys: Object.keys(req.body || {}),
+    textSample: (text || '').slice(0, 80),
+  });
+
   try {
-    const userId = req.auth?.userId || null;
-    const text = extractUserText(req.body);
-    const bodyKeys = Object.keys(req.body || {});
-
-    console.log('[DM] incoming', {
-      url: req.originalUrl, userId, characterId: req.body?.character?.id || null,
-      hasAuth: !!userId, bodyKeys, textSample: (text || '').slice(0,80)
-    });
-
     if (!text) {
       const t = '¿Puedes repetir la acción o pregunta?';
       await saveMsg(userId, 'dm', t);
       return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t });
     }
 
-    // Personaje activo (si lo hay)
-    let characterId = toInt(req.body?.character_id || req.body?.character?.id);
+    // personaje activo (si lo hay)
+    let characterId = toInt(req.body?.character_id);
     if (!characterId && hasDb && userId) {
       const { rows } = await sql(`SELECT id FROM characters WHERE owner_user_id=$1 LIMIT 1`, [userId]);
       characterId = rows[0]?.id || null;
     }
-
     await saveMsg(userId, 'user', text);
 
     const brief = await worldBrief(characterId);
     const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
-    const temp = Number(process.env.DM_TEMPERATURE ?? 0.8) || 0.8;
-    const maxOut = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 800) || 800;
-
-    const system = [
-      'Eres el Máster de un juego de rol en una galaxia compartida.',
-      'Responde SIEMPRE en español, 2–6 frases, enfocadas a acción y consecuencias.',
-      'Integra continuidad a partir de los documentos/MD y el estado persistido.',
-      'Sugiere 2–3 opciones claras para el siguiente paso del jugador.',
-      brief ? '\nContexto del mundo:\n' + brief : ''
-    ].join('\n');
 
     let outText = null;
-    const client = await getOpenAI();
-
     try {
-      if (isResponsesModel(model)) {
-        // -------- Responses API (gpt-5, 4.1, o3, mini) ----------
-        console.log('[DM] OpenAI request', { api: 'responses', model, temp, maxOut });
-        const resp = await client.responses.create({
-          model,
-          input: [
-            { role: 'system', content: system },
-            { role: 'user', content: text },
-          ],
-          temperature: temp,
-          max_output_tokens: Math.max(1, Math.min(maxOut, 8192)),
-        });
-        outText = (resp.output_text || '').trim();
-      } else {
-        // -------- Chat Completions (modelos legacy) -------------
-        console.log('[DM] OpenAI request', { api: 'chat.completions', model, temp });
-        const payload = {
-          model,
-          temperature: temp,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: text },
-          ],
-        };
-        // Para evitar el error de "max_tokens vs max_completion_tokens"
-        if (/gpt-4o|gpt-3\.5|gpt-4(?!\.1)/i.test(model)) {
-          payload.max_tokens = Math.max(1, Math.min(maxOut, 4096));
-        }
+      const client = await getOpenAI();
+      const system = [
+        'Eres el Máster de un juego de rol en una galaxia compartida.',
+        'Responde SIEMPRE en español, 2–6 frases, enfocadas a acción y consecuencias.',
+        'Integra continuidad a partir de los documentos/MD y el estado persistido.',
+        'Sugiere 2–3 opciones claras para el siguiente paso del jugador.',
+        brief ? '\nContexto del mundo:\n' + brief : ''
+      ].join('\n');
 
-        const resp = await client.chat.completions.create(payload);
-        outText = resp.choices?.[0]?.message?.content?.trim() || null;
-      }
+      const resp = await client.chat.completions.create({
+        model,
+        temperature: Number(process.env.DM_TEMPERATURE ?? 0.8),
+        max_completion_tokens: Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ?? 300),
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: text },
+        ],
+      });
+
+      outText = resp.choices?.[0]?.message?.content?.trim() || null;
     } catch (e) {
-      // Log ampliado
-      let body = null;
-      try { body = e?.response?.data ?? e?.error ?? null; } catch {}
       console.error('[DM] OpenAI error', {
-        status: e?.status, code: e?.code, message: e?.message, body
+        status: e?.status,
+        code: e?.code,
+        message: e?.message,
+        data: e?.response?.data,
       });
     }
 
@@ -171,52 +143,22 @@ async function handleDM(req, res) {
         reply: { text: t },
         text: t,
         message: t,
-        meta: { ai_ok: false, model, reason: 'openai_call_failed', ms: Date.now() - started }
+        meta: { ai_ok: false, reason: 'openai_call_failed' }
       });
     }
 
     await saveMsg(userId, 'dm', outText);
-    return res.status(200).json({
-      ok: true,
-      reply: { text: outText },
-      text: outText,
-      message: outText,
-      meta: { ai_ok: true, model, ms: Date.now() - started }
-    });
+    return res.status(200).json({ ok: true, reply: { text: outText }, text: outText, message: outText, meta: { ai_ok: true, model } });
   } catch (e) {
-    console.error('[DM] fatal:', e?.message || e);
+    console.error('[DM] fatal', e?.message || e);
     const t = 'Fallo temporal del servidor. Repite la acción en un momento.';
     return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t });
   }
 }
 
-/* ========= Rutas ========= */
-router.post('/dm', optionalAuth, handleDM);
-router.post('/dm/respond', optionalAuth, handleDM);
-
-// Diagnóstico: mini llamada para comprobar modelo/clave/salida a OpenAI
-router.get('/ai/health', async (_req, res) => {
-  try {
-    const client = await getOpenAI();
-    const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
-    if (isResponsesModel(model)) {
-      const r = await client.responses.create({
-        model,
-        input: 'ping',
-        max_output_tokens: 8
-      });
-      return res.json({ ok: true, model, api: 'responses', text: r.output_text || '' });
-    } else {
-      const r = await client.chat.completions.create({
-        model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 8
-      });
-      return res.json({ ok: true, model, api: 'chat', text: r.choices?.[0]?.message?.content || '' });
-    }
-  } catch (e) {
-    let body = null;
-    try { body = e?.response?.data ?? e?.error ?? null; } catch {}
-    return res.status(500).json({ ok: false, error: e?.message || 'openai_error', detail: body });
-  }
-});
+/* ========= rutas CORRECTAS (sin prefijos extra) ========= */
+// Recordatorio: este router se monta con app.use('/api/dm', dmRouter) en server/index.js
+router.post('/', optionalAuth, handleDM);          // POST /api/dm
+router.post('/respond', optionalAuth, handleDM);   // POST /api/dm/respond
 
 export default router;
