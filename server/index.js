@@ -66,7 +66,7 @@ app.get('/ai/health', async (_req, res) => {
     };
     // GPT-5 usa max_completion_tokens (NO max_tokens)
     if (/^gpt-5/i.test(out.model)) {
-      payload.max_completion_tokens = 1;
+      payload.max_completion_tokens = 800;
     }
 
     await client.chat.completions.create(payload);
