@@ -3,18 +3,52 @@ import express from 'express';
 import cors from 'cors';
 import { pool, q } from './db.js';
 import worldRouter from './world.js';
+import authRouter from './auth.js';
 
 const app = express();
-app.use(cors());
+
+// ---------- CORS ----------
+const allowed = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    // llamadas server-to-server o curl
+    if (!origin) return cb(null, true);
+    // si no has definido allowed, permite todo (útil en dev)
+    if (allowed.length === 0) return cb(null, true);
+
+    try {
+      const host = new URL(origin).hostname;
+      const ok =
+        allowed.includes(origin) ||
+        allowed.includes(host) ||
+        // permite previews de vercel si añades "*.vercel.app" en ALLOWED_ORIGINS
+        allowed.some(d => host === d || host.endsWith(d.replace(/^\*\./, '')));
+      return ok ? cb(null, true) : cb(new Error('Not allowed by CORS'));
+    } catch {
+      return cb(new Error('Bad Origin'));
+    }
+  },
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// ---------- Body parsing ----------
 app.use(express.json({ limit: '1mb' }));
 
-// ===== Raíz existente (NO romper)
-app.get('/', (req, res) => {
+// ---------- Root & Health (mantener) ----------
+app.get('/', (_req, res) => {
   res.type('text/plain').send('OK: API running. Prueba /health');
 });
 
-// ===== Salud básica (mantiene lo que ya tenías)
-app.get('/health', async (req, res) => {
+app.get('/health', async (_req, res) => {
   const ts = new Date().toISOString();
   try {
     const t0 = Date.now();
@@ -25,9 +59,9 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ===== Opcional: esquema (solo en dev)
+// ---------- Debug schema (solo dev) ----------
 if (process.env.NODE_ENV !== 'production') {
-  app.get('/debug/schema', async (req, res) => {
+  app.get('/debug/schema', async (_req, res) => {
     const { rows } = await q(`
       SELECT table_name, column_name, data_type
       FROM information_schema.columns
@@ -38,10 +72,11 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// ===== RUTAS DE MUNDO / PERSONAJES / EVENTOS
+// ---------- Routers ----------
+app.use('/auth', authRouter);
 app.use('/', worldRouter);
 
-// ===== Arranque
+// ---------- Start ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API on :${PORT}`);

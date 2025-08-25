@@ -1,39 +1,75 @@
 // server/auth.js
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHash } from 'crypto';
 import { hasDb, sql } from './db.js';
 
-/* Utilidades */
+/* =========================
+   Utilidades de tiempo
+========================= */
 const now = () => new Date();
 const addDays = (d) => new Date(Date.now() + d * 24 * 60 * 60 * 1000);
 
+/* =========================
+   Normalizadores
+========================= */
 function normalizeUsername(username = '') {
   const u = String(username).trim().toLowerCase();
-  if (!/^[a-z0-9_]{3,24}$/.test(u)) return null; // sólo letras/números/_
+  // 3-24 chars, letras/números/guion_bajo
+  if (!/^[a-z0-9_]{3,24}$/.test(u)) return null;
   return u;
 }
 function normalizePin(pin = '') {
   const p = String(pin).trim();
-  if (!/^\d{4}$/.test(p)) return null; // 4 dígitos
+  // 4 dígitos exactos
+  if (!/^\d{4}$/.test(p)) return null;
   return p;
 }
-function hashPin(username, pin) {
-  // Hash sencillo (sha256) con "sal" basada en username
+
+/* =========================
+   Hash de PIN
+   - v2: scrypt + salt aleatorio  ->  "v2:<salt_hex>:<key_hex>"
+   - v1: legacy sha256(username:pin)
+========================= */
+function hashPinV2(pin) {
+  const salt = randomBytes(16).toString('hex');
+  const keyHex = scryptSync(String(pin), salt, 64).toString('hex');
+  return `v2:${salt}:${keyHex}`;
+}
+function verifyPinV2(pin, stored) {
+  const parts = String(stored).split(':');
+  if (parts.length !== 3 || parts[0] !== 'v2') return false;
+  const [, salt, keyHex] = parts;
+  const keyA = Buffer.from(keyHex, 'hex');
+  const keyB = Buffer.from(scryptSync(String(pin), salt, 64).toString('hex'), 'hex');
+  return keyA.length === keyB.length && timingSafeEqual(keyA, keyB);
+}
+function hashPinLegacy(username, pin) {
   return createHash('sha256').update(`${username}:${pin}`).digest('hex');
 }
 
-/* Fallback en memoria para desarrollo si no hay DB */
+/* =========================
+   Fallback en memoria (dev)
+========================= */
 const mem = {
   users: new Map(),      // username -> { id, username, pin_hash, created_at }
   sessions: new Map(),   // token -> { token, user_id, created_at, expires_at }
 };
 let memId = 1;
 
-/* Persistencia */
+/* =========================
+   Persistencia (DB o MEM)
+========================= */
 async function dbFindUserByUsername(username) {
   if (!hasDb) return mem.users.get(username) || null;
-  const { rows } = await sql(`SELECT id, username, pin_hash, created_at FROM users WHERE username=$1 LIMIT 1`, [username]);
+  const { rows } = await sql(
+    `SELECT id, username, pin_hash, created_at
+       FROM users
+      WHERE username=$1
+      LIMIT 1`,
+    [username]
+  );
   return rows[0] || null;
 }
+
 async function dbInsertUser(username, pin_hash) {
   if (!hasDb) {
     if (mem.users.has(username)) throw new Error('USERNAME_TAKEN');
@@ -43,18 +79,30 @@ async function dbInsertUser(username, pin_hash) {
   }
   try {
     const { rows } = await sql(
-      `INSERT INTO users (username, pin_hash) VALUES ($1,$2) RETURNING id, username, pin_hash, created_at`,
+      `INSERT INTO users (username, pin_hash)
+       VALUES ($1,$2)
+       RETURNING id, username, pin_hash, created_at`,
       [username, pin_hash]
     );
     return rows[0];
   } catch (e) {
-    // Violación de UNIQUE en username
     if (String(e.message || '').toLowerCase().includes('unique')) {
       throw new Error('USERNAME_TAKEN');
     }
     throw e;
   }
 }
+
+async function dbUpdateUserPinHash(userId, newHash) {
+  if (!hasDb) {
+    for (const u of mem.users.values()) {
+      if (u.id === userId) { u.pin_hash = newHash; break; }
+    }
+    return;
+  }
+  await sql(`UPDATE users SET pin_hash=$1 WHERE id=$2`, [newHash, userId]);
+}
+
 async function dbCreateSession(user_id) {
   const token = randomUUID().replace(/-/g, '');
   const created_at = now();
@@ -64,11 +112,13 @@ async function dbCreateSession(user_id) {
     return { token, user_id, created_at, expires_at };
   }
   await sql(
-    `INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES ($1,$2,$3,$4)`,
+    `INSERT INTO sessions (token, user_id, created_at, expires_at)
+     VALUES ($1,$2,$3,$4)`,
     [token, user_id, created_at, expires_at]
   );
   return { token, user_id, created_at, expires_at };
 }
+
 async function dbGetSession(token) {
   if (!token) return null;
   if (!hasDb) {
@@ -83,14 +133,26 @@ async function dbGetSession(token) {
     `SELECT s.token, s.user_id, u.username
        FROM sessions s
        JOIN users u ON u.id = s.user_id
-      WHERE s.token=$1 AND (s.expires_at IS NULL OR s.expires_at > now())
+      WHERE s.token=$1
+        AND (s.expires_at IS NULL OR s.expires_at > now())
       LIMIT 1`,
     [token]
   );
   return rows[0] || null;
 }
 
-/* API de autenticación */
+async function dbDeleteSession(token) {
+  if (!token) return;
+  if (!hasDb) {
+    mem.sessions.delete(token);
+    return;
+  }
+  await sql(`DELETE FROM sessions WHERE token=$1`, [token]);
+}
+
+/* =========================
+   API de autenticación
+========================= */
 export async function register(usernameRaw, pinRaw) {
   const username = normalizeUsername(usernameRaw);
   const pin = normalizePin(pinRaw);
@@ -99,7 +161,8 @@ export async function register(usernameRaw, pinRaw) {
   const exists = await dbFindUserByUsername(username);
   if (exists) throw new Error('USERNAME_TAKEN');
 
-  const pin_hash = hashPin(username, pin);
+  // Nuevo registro siempre v2 (scrypt + salt)
+  const pin_hash = hashPinV2(pin);
   const user = await dbInsertUser(username, pin_hash);
   return { id: user.id, username: user.username };
 }
@@ -112,7 +175,22 @@ export async function login(usernameRaw, pinRaw) {
   const user = await dbFindUserByUsername(username);
   if (!user) throw new Error('USER_NOT_FOUND');
 
-  const ok = user.pin_hash === hashPin(username, pin);
+  let ok = false;
+  const stored = user.pin_hash || '';
+
+  if (stored.startsWith('v2:')) {
+    ok = verifyPinV2(pin, stored);
+  } else {
+    // legacy v1
+    ok = stored === hashPinLegacy(username, pin);
+    // auto-upgrade a v2 si hay DB y el pin es válido
+    if (ok && hasDb) {
+      try {
+        await dbUpdateUserPinHash(user.id, hashPinV2(pin));
+      } catch { /* no crítico */ }
+    }
+  }
+
   if (!ok) throw new Error('INVALID_PIN');
 
   const session = await dbCreateSession(user.id);
@@ -122,7 +200,9 @@ export async function login(usernameRaw, pinRaw) {
   };
 }
 
-/* Middlewares */
+/* =========================
+   Middlewares
+========================= */
 export async function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
@@ -131,7 +211,7 @@ export async function requireAuth(req, res, next) {
   const s = await dbGetSession(token);
   if (!s) return res.status(401).json({ error: 'unauthorized' });
 
-  req.auth = { userId: s.user_id, username: s.username, token: token };
+  req.auth = { userId: s.user_id, username: s.username, token };
   next();
 }
 
@@ -143,6 +223,18 @@ export async function optionalAuth(req, _res, next) {
     if (!token) return next();
     const s = await dbGetSession(token);
     if (s) req.auth = { userId: s.user_id, username: s.username, token };
-  } catch {}
+  } catch { /* ignore */ }
   next();
+}
+
+/* =========================
+   Utilidades extra (opcionales)
+========================= */
+export async function getSession(token) {
+  return dbGetSession(token); // { token, user_id, username } | null
+}
+
+export async function logout(token) {
+  await dbDeleteSession(token);
+  return { ok: true };
 }
