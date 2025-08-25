@@ -1,5 +1,6 @@
 // server/index.js
 import express from 'express';
+import cors from 'cors';
 import { hasDb, sql } from './db.js';
 import { register, login, requireAuth } from './auth.js'; // <-- SIN 'logout'
 import worldRouter from './world.js';
@@ -7,16 +8,8 @@ import dmRouter from './dm.js';
 
 const app = express();
 
-/* ===== CORS universal (antes de TODO) ===== */
-app.use((req, res, next) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
+/* ===== CORS ===== */
+app.use(cors({ origin: true }));
 
 /* ===== Body parsers ===== */
 app.use(express.text({ type: ['text/plain', 'text/*'], limit: '1mb' }));
