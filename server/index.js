@@ -1,7 +1,6 @@
 // server/index.js
 import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
 
 import dmRouter from './dm.js';               // /respond, etc.
 import worldRouter from './world.js';         // /characters, ...
@@ -9,20 +8,36 @@ import { register, login, requireAuth } from './auth.js';
 
 const app = express();
 
-// ====== Logging y parsing ======
+/* ====== Logging ====== */
+// Logger mínimo siempre activo (no depende de morgan)
 app.use((req, _res, next) => {
-  console.log('[BOOT] incoming', req.method, req.url, 'Origin=', req.headers.origin);
+  console.log('[REQ]', req.method, req.url, 'Origin=', req.headers.origin || '-', 'UA=', req.headers['user-agent'] || '-');
   next();
 });
-app.use(express.json({ limit: '1mb' }));
-app.use(morgan('tiny'));
 
-// ====== CORS ======
+// Intentar cargar morgan de forma opcional (no rompe si no está o falla)
+let morganMW = null;
+try {
+  const m = await import('morgan');           // ESM top-level await
+  morganMW = m.default || m;
+  console.log('[BOOT] morgan loaded');
+} catch (e) {
+  console.warn('[BOOT] morgan not available, using fallback logger. Reason:', e?.message);
+}
+if (morganMW) app.use(morganMW('tiny'));
+
+/* ====== Parsing ====== */
+app.use(express.json({ limit: '1mb' }));
+
+/* ====== CORS ====== */
 const ALLOWED = (process.env.ALLOWED_ORIGIN || '')
-  .split(',').map(s => s.trim()).filter(Boolean);
-// Si no hay ALLOWED_ORIGIN, abrimos para desarrollo
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 const corsOpts = {
   origin(origin, cb) {
+    // Permite same-origin (sin header Origin) y, si no hay lista, abre para dev
     if (!origin) return cb(null, true);
     if (!ALLOWED.length || ALLOWED.includes(origin)) return cb(null, true);
     console.warn('[CORS] blocked:', origin, 'Allowed=', ALLOWED);
@@ -33,17 +48,26 @@ const corsOpts = {
   credentials: true,
   optionsSuccessStatus: 200,
 };
+
 app.use(cors(corsOpts));
+// Responde preflight para cualquier ruta (incluye /api/*)
 app.options('*', cors(corsOpts));
 
-// ====== Salud (en /health y /api/health) ======
+/* ====== Salud (en /health y /api/health) ====== */
 function healthPayload() {
-  return { ok: true, ts: Date.now(), env: process.env.NODE_ENV || 'production' };
+  return {
+    ok: true,
+    ts: Date.now(),
+    env: process.env.NODE_ENV || 'production',
+    api: { routes: 'mounted' },
+  };
 }
 app.get('/health', (_req, res) => res.json(healthPayload()));
+app.head('/health', (_req, res) => res.status(200).end());
 app.get('/api/health', (_req, res) => res.json(healthPayload()));
+app.head('/api/health', (_req, res) => res.status(200).end());
 
-// ====== Auth (todas bajo /api/auth/*) ======
+/* ====== Auth (todas bajo /api/auth/*) ====== */
 app.post('/api/auth/register', async (req, res) => {
   console.log('[AUTH/register] body=', req.body);
   try {
@@ -73,10 +97,10 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   return res.json({ user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-// Logout opcional (no borra histórico, solo sesión si quieres)
+// Logout opcional (no borra histórico, solo la sesión si lo implementas)
 app.post('/api/auth/logout', requireAuth, async (_req, res) => {
   try {
-    // Si quieres invalidar token en DB, hazlo aquí.
+    // Si guardas sesiones en DB y quieres invalidarlas, hazlo aquí.
     return res.json({ ok: true });
   } catch (e) {
     console.error('[AUTH/logout] error', e);
@@ -84,11 +108,11 @@ app.post('/api/auth/logout', requireAuth, async (_req, res) => {
   }
 });
 
-// ====== DM y World (bajo /api/*) ======
+/* ====== DM y World (bajo /api/*) ====== */
 app.use('/api/dm', dmRouter);
 app.use('/api/world', worldRouter);
 
-// ====== Tiradas ======
+/* ====== Tiradas ====== */
 app.post('/api/roll', async (req, res) => {
   const { skill } = req.body || {};
   const n = Math.floor(Math.random() * 20) + 1;
@@ -98,7 +122,20 @@ app.post('/api/roll', async (req, res) => {
   return res.json({ ok: true, roll: n, outcome, text });
 });
 
-// ====== Raíz opcional ======
+/* ====== Raíz opcional ====== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
+
+/* ====== 404 en /api/* (debug útil) ====== */
+app.use('/api', (req, res) => {
+  console.warn('[API 404]', req.method, req.originalUrl);
+  return res.status(404).json({ error: 'not_found', path: req.originalUrl });
+});
+
+/* ====== Manejador global de errores ====== */
+app.use((err, req, res, _next) => {
+  console.error('[API ERROR]', err?.stack || err?.message || err);
+  // Nunca devolver HTML de error al front
+  return res.status(500).json({ error: 'internal_server_error' });
+});
 
 export default app;

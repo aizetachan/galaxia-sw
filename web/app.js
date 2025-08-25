@@ -67,7 +67,7 @@ async function ensureApiBase() {
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/,''));
 
-  // Unicos, conservando orden
+  // Únicos, conservando orden
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
 
@@ -174,16 +174,14 @@ function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch 
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 
-function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
-function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
-function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
-
 // --- Sanitizar/format mensajes (evita HTML anidado que rompe el layout)
 function escapeHtml(s='') {
   return String(s)
     .replace(/&/g,'&amp;')
     .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 function formatMarkdown(t = '') {
   const safe = escapeHtml(t);
@@ -191,6 +189,10 @@ function formatMarkdown(t = '') {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>');
 }
+
+function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
+function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
+function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
 // ---- Fetch helpers con logging profundo
 async function readMaybeJson(res) {
