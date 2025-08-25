@@ -1,86 +1,99 @@
 <!doctype html>
 <html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GALACTIC</title>
-  <link rel="stylesheet" href="./styles.css">
-</head>
-<body>
-  <header class="app-header">
-    <h1>GALACTIC</h1>
-    <p class="muted">
-      Un universo compartido. Cada decisión deja huella y cambia el destino de la galaxia.
-    </p>
-    <span id="server-status" class="badge muted">Server: …</span>
-  </header>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GALACTIC</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>GALACTIC</h1>
+      <p class="muted">
+        Un universo compartido. Cada decisión deja huella y cambia el destino de
+        la galaxia.
+      </p>
+      <span id="server-status" class="badge muted">Server: …</span>
+    </header>
 
-  <section class="auth-panel">
-    <div class="auth-row">
-      <input id="auth-username"
-             placeholder="Usuario"
-             autocomplete="username"
-             autocapitalize="none"
-             spellcheck="false" />
-      <input id="auth-pin"
-             placeholder="PIN (4 dígitos)"
-             maxlength="4"
-             inputmode="numeric"
-             pattern="[0-9]{4}"
-             autocomplete="one-time-code" />
-      <button id="auth-login">Entrar</button>
-      <button id="auth-register" class="outline">Crear</button>
-      <span id="auth-status" class="muted"></span>
-    </div>
-  </section>
-
-  <main class="chat-wrap">
-    <section id="chat" class="chat"></section>
-
-    <section id="roll-cta" class="roll-cta hidden">
-      <div class="roll-cta__text">
-        <strong>Tirada pendiente</strong><span id="roll-skill"></span>.
-        Pulsa <strong>Resolver tirada</strong> cuando quieras.
-      </div>
-      <div class="roll-cta__actions">
-        <button id="resolve-btn">Resolver tirada</button>
-        <button id="cancel-btn" class="outline">Cancelar</button>
+    <section class="auth-panel">
+      <div class="auth-row">
+        <input
+          id="auth-username"
+          placeholder="Usuario"
+          autocomplete="username"
+          autocapitalize="none"
+          spellcheck="false"
+        />
+        <input
+          id="auth-pin"
+          placeholder="PIN (4 dígitos)"
+          maxlength="4"
+          inputmode="numeric"
+          pattern="[0-9]{4}"
+          autocomplete="one-time-code"
+        />
+        <button id="auth-login">Entrar</button>
+        <button id="auth-register" class="outline">Crear</button>
+        <span id="auth-status" class="muted"></span>
       </div>
     </section>
 
-    <section class="composer">
-      <input id="input" type="text"
-             placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)">
-      <button id="send">Enviar</button>
-    </section>
-  </main>
+    <main class="chat-wrap">
+      <section id="chat" class="chat"></section>
 
-  <footer class="app-footer">
-    <span class="muted">/privado o /publico para tu perfil. (texto para indicaciones técnias)</span>
-  </footer>
+      <section id="roll-cta" class="roll-cta hidden">
+        <div class="roll-cta__text">
+          <strong>Tirada pendiente</strong><span id="roll-skill"></span>. Pulsa
+          <strong>Resolver tirada</strong> cuando quieras.
+        </div>
+        <div class="roll-cta__actions">
+          <button id="resolve-btn">Resolver tirada</button>
+          <button id="cancel-btn" class="outline">Cancelar</button>
+        </div>
+      </section>
 
-  <!-- Definir API base dinámicamente según el origen actual -->
-  <script>window.API_BASE = location.origin + '/api';</script>
+      <section class="composer">
+        <input
+          id="input"
+          type="text"
+          placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)"
+        />
+        <button id="send">Enviar</button>
+      </section>
+    </main>
 
-  <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
-  <script>
-    (async () => {
-      const el = document.getElementById('server-status');
-      const trimSlash = (s) => (s||'').replace(/\/+$/,'');
-      const base = trimSlash(window.API_BASE) || trimSlash(location.origin);
-      const healthUrl = base + '/health';
-      try {
-        const r = await fetch(healthUrl, { method: 'GET' });
-        el.textContent = r.ok ? 'Server: OK' : 'Server: ?';
-        el.title = healthUrl;
-      } catch {
-        el.textContent = 'Server: FAIL';
-        el.title = healthUrl;
-      }
-    })();
-  </script>
+    <footer class="app-footer">
+      <span class="muted"
+        >/privado o /publico para tu perfil. (texto para indicaciones
+        técnias)</span
+      >
+    </footer>
 
-  <!-- App principal -->
-  <script type="module" src="./app.js"></script>
-</body>
+    <!-- API base: detect origin automatically -->
+    <script>
+      window.API_BASE = location.origin + "/api";
+    </script>
+
+    <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
+    <script>
+      (async () => {
+        const el = document.getElementById("server-status");
+        const trimSlash = (s) => (s || "").replace(/\/+$/, "");
+        const base = trimSlash(window.API_BASE) || trimSlash(location.origin);
+        const healthUrl = base + "/health";
+        try {
+          const r = await fetch(healthUrl, { method: "GET" });
+          el.textContent = r.ok ? "Server: OK" : "Server: ?";
+          el.title = healthUrl;
+        } catch {
+          el.textContent = "Server: FAIL";
+          el.title = healthUrl;
+        }
+      })();
+    </script>
+
+    <!-- App principal -->
+    <script type="module" src="./app.js"></script>
+  </body>
 </html>
