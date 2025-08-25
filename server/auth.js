@@ -55,7 +55,12 @@ export async function login(usernameRaw,pinRaw){
 export async function requireAuth(req,res,next){
   const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
   const token=m?m[1]:null; const s=await dbGetSession(token);
-  if(!s) return res.status(401).json({ error:'unauthorized' });
+  if(!s){
+    const origin=req.headers.origin||'*';
+    res.setHeader('Access-Control-Allow-Origin', origin==='null'?'*':origin);
+    res.setHeader('Vary','Origin');
+    return res.status(401).json({ error:'unauthorized' });
+  }
   req.auth={ userId:s.user_id, username:s.username, token }; next();
 }
 export async function optionalAuth(req,_res,next){

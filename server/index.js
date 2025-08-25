@@ -8,8 +8,15 @@ import dmRouter from './dm.js';
 
 const app = express();
 
+function allowErrorCors(req, res) {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
+  res.setHeader('Vary', 'Origin');
+}
+
 /* ===== CORS ===== */
 app.use(cors({ origin: true }));
+app.options('*', cors({ origin: true, allowedHeaders: ['Content-Type', 'Authorization'] }));
 
 /* ===== Body parsers ===== */
 app.use(express.text({ type: ['text/plain', 'text/*'], limit: '1mb' }));
@@ -71,6 +78,7 @@ app.post('/auth/register', async (req, res) => {
     const { token } = await login(username, pin);
     res.json({ ok: true, token, user });
   } catch (e) {
+    allowErrorCors(req, res);
     const map = { INVALID_CREDENTIALS: 400, USERNAME_TAKEN: 409 };
     res.status(map[e.message] || 500).json({ ok: false, error: e.message });
   }
@@ -81,6 +89,7 @@ app.post('/auth/login', async (req, res) => {
     const { token, user } = await login(username, pin);
     res.json({ ok: true, token, user });
   } catch (e) {
+    allowErrorCors(req, res);
     const map = { INVALID_CREDENTIALS: 400, USER_NOT_FOUND: 404, INVALID_PIN: 401 };
     res.status(map[e.message] || 500).json({ ok: false, error: e.message });
   }
@@ -92,6 +101,7 @@ app.post('/auth/logout', requireAuth, async (req, res) => {
     }
     res.json({ ok: true });
   } catch (e) {
+    allowErrorCors(req, res);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
@@ -100,6 +110,7 @@ app.get('/auth/me', requireAuth, async (req, res) => {
     const { rows } = await sql(`SELECT * FROM characters WHERE owner_user_id=$1 LIMIT 1`, [req.auth.userId]);
     res.json({ ok: true, user: { id: req.auth.userId, username: req.auth.username }, character: rows[0] || null });
   } catch (e) {
+    allowErrorCors(req, res);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
