@@ -1,286 +1,48 @@
 // server/index.js
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import { pool, q } from './db.js';
+import worldRouter from './world.js';
 
-import { migrate, sql } from './db.js';
-import { register, login, requireAuth, optionalAuth } from './auth.js';
-import { getWorld, upsertCharacter, appendEvent, getCharacterByOwner } from './world.js';
-import { dmRespond, narrateOutcome, dmResolveRoll } from './dm.js';
-import { pingOpenAI, openaiEnabled } from './openai.js';
-
-// Migraciones (tolerantes) al arranque
-await migrate();
-
-// ---------- CORS robusto ----------
 const app = express();
-const origins = (process.env.ALLOWED_ORIGIN || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
 
-const corsOptions = {
-  origin(origin, cb) {
-    if (!origin || origins.length === 0 || origins.includes(origin)) return cb(null, true);
-    return cb(null, false);
-  },
-  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  credentials: false,
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-app.use(express.json());
-app.use(optionalAuth);
-
-// ---------- Helpers ----------
-function normalizeName(str) {
-  return (str || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim();
-}
-function sameZone(a, b) {
-  if (!a || !b) return false;
-  const A = (a.split('—')[0] || a).trim().toLowerCase();
-  const B = (b.split('—')[0] || b).trim().toLowerCase();
-  return !!A && !!B && A === B;
-}
-function pickLastPublicEvent(world, actor) {
-  const evts = (world.events || []).filter((e) => e.actor === actor && e.visibility !== 'private');
-  evts.sort((x, y) => (y.ts || 0) - (x.ts || 0));
-  return evts[0] || null;
-}
-function reachScore(askerChar, targetChar, lastEvt) {
-  let score = 0;
-  if (askerChar?.lastLocation && targetChar?.lastLocation) {
-    if (askerChar.lastLocation === targetChar.lastLocation) score += 2;
-    else if (sameZone(askerChar.lastLocation, targetChar.lastLocation)) score += 1;
-  }
-  if (lastEvt) {
-    const age = Date.now() - (new Date(lastEvt.ts).getTime() || 0);
-    if (age < 1000 * 60 * 60 * 72) score += 1;
-  }
-  return score;
-}
-function buildAskAboutText({ asker, target, lastEvt, level }) {
-  const who = target?.name || 'desconocido';
-  if (!target) return `No encuentro registros de **${who}** en los archivos del gremio.`;
-  const bio = `**${target.name}** — ${target.species || target.race || '—'} ${target.role || target.clazz || ''}`.trim();
-  if (level === 'deny') return `La información sobre ${who} está fuera de tu alcance ahora mismo.`;
-  if (level === 'bio') return `Registros básicos: ${bio}. Sin actividad reciente a tu alcance.`;
-  if (level === 'rumor') {
-    if (lastEvt) return `Rumor sobre ${bio}. Última pista: en **${lastEvt.location}** — ${lastEvt.summary}.`;
-    return `Hay rumores sobre ${bio}, pero nada concreto.`;
-  }
-  if (lastEvt) return `Datos verificados: ${bio}. Visto en **${lastEvt.location}** — ${lastEvt.summary}.`;
-  return `Datos verificados: ${bio}.`;
-}
-
-// ---------- Health ----------
-app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
-app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
-
-// Debug OpenAI (activar con ENABLE_DEBUG_OPENAI=1)
-app.get('/debug/openai', async (_req, res) => {
-  if (!process.env.ENABLE_DEBUG_OPENAI) return res.status(404).end();
-  const ping = await pingOpenAI();
-  res.json({ openaiEnabled, ...ping });
+// ===== Raíz existente (NO romper)
+app.get('/', (req, res) => {
+  res.type('text/plain').send('OK: API running. Prueba /health');
 });
 
-// ---------- AUTH ----------
-app.post('/auth/register', async (req, res) => {
-  const { username, pin } = req.body || {};
+// ===== Salud básica (mantiene lo que ya tenías)
+app.get('/health', async (req, res) => {
+  const ts = new Date().toISOString();
   try {
-    const user = await register(username, pin);
-    const { token } = await login(username, pin);
-    res.json({ ok: true, token, user });
+    const t0 = Date.now();
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, ts, db: { ok: true, latencyMs: Date.now() - t0 } });
   } catch (e) {
-    res.status(400).json({ error: e?.message || 'register failed' });
+    return res.status(500).json({ ok: false, ts, db: { ok: false, error: e.message } });
   }
 });
 
-app.post('/auth/login', async (req, res) => {
-  const { username, pin } = req.body || {};
-  try {
-    const { token, user } = await login(username, pin);
-    res.json({ ok: true, token, user });
-  } catch (e) {
-    res.status(400).json({ error: e?.message || 'login failed' });
-  }
-});
-
-app.get('/auth/me', (req, res) => {
-  if (!req.auth) return res.status(401).json({ error: 'unauthorized' });
-  res.json({ ok: true, user: { id: req.auth.userId, username: req.auth.username } });
-});
-
-// ---------- CHAT HISTORY ----------
-app.get('/history', requireAuth, async (req, res) => {
-  const { rows } = await sql(
-    `SELECT ts, role, kind, text
-       FROM chat_messages
-      WHERE user_id = $1
-      ORDER BY ts ASC
-      LIMIT 500`,
-    [req.auth.userId]
-  );
-  res.json({ messages: rows });
-});
-
-app.post('/history/append', requireAuth, async (req, res) => {
-  const { messages = [] } = req.body || {};
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'messages required' });
-  }
-  const values = [];
-  for (const m of messages) {
-    const ts = m?.ts ? new Date(m.ts) : new Date();
-    const role = (m?.role || m?.kind || 'dm').toString().slice(0, 10);
-    const kind = (m?.kind || m?.role || 'dm').toString().slice(0, 10);
-    const text = (m?.text || '').toString();
-    values.push([req.auth.userId, ts, role, kind, text]);
-  }
-  const params = values.flatMap(v => v);
-  const chunks = values.map((_, i) => {
-    const o = i * 5;
-    return `($${o+1}, $${o+2}, $${o+3}, $${o+4}, $${o+5})`;
-  }).join(',');
-  await sql(
-    `INSERT INTO chat_messages (user_id, ts, role, kind, text) VALUES ${chunks}`,
-    params
-  );
-  res.json({ ok: true, inserted: values.length });
-});
-
-app.post('/history/clear', requireAuth, async (_req, res) => {
-  await sql(`DELETE FROM chat_messages WHERE user_id=$1`, [_req.auth.userId]);
-  res.json({ ok: true });
-});
-
-// ---------- WORLD ----------
-app.get('/world', async (_req, res) => {
-  const world = await getWorld();
-  res.json(world);
-});
-
-app.post('/world/characters', requireAuth, async (req, res) => {
-  const { character } = req.body || {};
-  if (!character?.name) return res.status(400).json({ error: 'character.name required' });
-  character.ownerUserId = req.auth.userId;
-  const saved = await upsertCharacter(character);
-  res.json({ ok: true, character: saved });
-});
-
-app.post('/world/events', requireAuth, async (req, res) => {
-  const { actor, location = 'Ubicación desconocida', summary, visibility = 'public' } = req.body || {};
-  if (!actor || !summary) return res.status(400).json({ error: 'actor and summary required' });
-  await appendEvent({ ts: Date.now(), actor, location, summary, visibility, userId: req.auth.userId });
-  res.json({ ok: true });
-});
-
-app.get('/world/characters/me', requireAuth, async (req, res) => {
-  const me = await getCharacterByOwner(req.auth.userId);
-  res.json({ ok: true, character: me || null });
-});
-
-app.post('/world/ask-about', requireAuth, async (req, res) => {
-  const { targetName } = req.body || {};
-  if (!targetName) return res.status(400).json({ error: 'targetName required' });
-
-  const world = await getWorld();
-  const asker = Object.values(world.characters || {}).find((c) => c.ownerUserId === req.auth.userId) || null;
-
-  const targetKey = Object.keys(world.characters || {}).find(
-    (k) => normalizeName(k) === normalizeName(targetName)
-  );
-  const target = targetKey ? world.characters[targetKey] : null;
-  if (!target) return res.json({ text: `No encuentro registros de **${targetName}**.` });
-
-  const lastEvt = pickLastPublicEvent(world, target.name);
-  const score = reachScore(asker, target, lastEvt);
-
-  let level = 'deny';
-  if (target.publicProfile) {
-    if (score >= 2) level = 'full';
-    else if (lastEvt) level = 'rumor';
-    else level = 'bio';
-  } else {
-    if (score >= 2 && lastEvt) level = 'rumor';
-    else if (score >= 1 && lastEvt) level = 'rumor';
-    else level = 'deny';
-  }
-
-  const text = buildAskAboutText({ asker, target, lastEvt, level });
-  res.json({ text, level, lastEvt });
-});
-
-// ---------- DM (Máster IA) ----------
-app.post('/dm/respond', optionalAuth, async (req, res) => {
-  const { message, history = [], character, stage, intentRequired } = req.body || {};
-  try {
-    const world = await getWorld();
-    const text = await dmRespond({
-      history,
-      message,
-      character,
-      world,
-      stage: stage || 'done',
-      intentRequired: !!intentRequired,
-      user: req.auth ? { id: req.auth.userId, username: req.auth.username } : null,
-    });
-    res.json({ text });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'dm failed' });
-  }
-});
-
-// ---------- Tiradas ----------
-app.post('/roll', requireAuth, async (req, res) => {
-  const { skill, character, location, visibility = 'public' } = req.body || {};
-  const roll = Math.floor(Math.random() * 20) + 1; // d20
-
-  try {
-    const world = await getWorld();
-    const { text, outcome, summary } = await dmResolveRoll({
-      roll,
-      skill,
-      character,
-      world,
-      user: { id: req.auth.userId, username: req.auth.username }
-    });
-
-    try {
-      const actor = character?.name || 'Desconocido';
-      const loc = location || character?.lastLocation || 'Sector desconocido';
-      await appendEvent({
-        ts: Date.now(),
-        actor,
-        location: loc,
-        summary,           // resumen breve para el HoloNet
-        visibility,
-        userId: req.auth.userId
-      });
-    } catch (e) {
-      console.error('appendEvent failed', e);
-    }
-
-    res.json({ roll, outcome, text });
-  } catch (e) {
-    console.error(e);
-    // Fallback ultra seguro (no debería llegar aquí si dmResolveRoll hizo su propio fallback)
-    const r = roll / 20;
-    const outcome = r >= 0.75 ? 'success' : r >= 0.4 ? 'mixed' : 'fail';
-    const text = narrateOutcome({ outcome, skill, character });
-    res.json({ roll, outcome, text });
-  }
-});
-
-// ---------- Export para Vercel y listen local ----------
-export default app;
-
-if (!process.env.VERCEL) {
-  const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`API http://localhost:${PORT}`));
+// ===== Opcional: esquema (solo en dev)
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/debug/schema', async (req, res) => {
+    const { rows } = await q(`
+      SELECT table_name, column_name, data_type
+      FROM information_schema.columns
+      WHERE table_schema='public'
+      ORDER BY table_name, ordinal_position
+    `);
+    res.json({ ok: true, rows });
+  });
 }
+
+// ===== RUTAS DE MUNDO / PERSONAJES / EVENTOS
+app.use('/', worldRouter);
+
+// ===== Arranque
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`API on :${PORT}`);
+});
