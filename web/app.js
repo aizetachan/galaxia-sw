@@ -1,8 +1,7 @@
 // === Config ===
-const DEFAULT_API_BASE = 'http://localhost:3001';
 const API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
-  DEFAULT_API_BASE;
+  (typeof location !== 'undefined' ? location.origin + '/api' : '');
 
 // === Helpers de URL (evita redirecciones por slash)
 function joinUrl(base, path) {
