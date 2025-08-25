@@ -218,7 +218,7 @@ async function handleDM(req, res) {
 }
 
 /* ========= rutas ========= */
-router.post('/dm', optionalAuth, handleDM);
-router.post('/dm/respond', optionalAuth, handleDM);
+router.post('/', optionalAuth, handleDM);
+router.post('/respond', optionalAuth, handleDM);
 
 export default router;
