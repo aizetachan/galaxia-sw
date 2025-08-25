@@ -2,21 +2,24 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error('DATABASE_URL no está definida');
+// ¿Tenemos cadena de conexión?
+export const hasDb = !!process.env.DATABASE_URL;
+
+export let pool = null;
+if (hasDb) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }, // necesario en Neon/Vercel
+  });
 }
 
-// Neon / Postgres serverless suele requerir SSL
-export const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false },
-});
+/** sql(text, params) -> pool.query */
+export async function sql(text, params = []) {
+  if (!hasDb) throw new Error('DB not configured: missing DATABASE_URL');
+  return pool.query(text, params);
+}
 
-// Helper opcional
-export async function q(sql, params = []) {
-  const t0 = Date.now();
-  const res = await pool.query(sql, params);
-  res.latencyMs = Date.now() - t0;
-  return res;
+/** Alias por compatibilidad */
+export async function q(text, params = []) {
+  return sql(text, params);
 }

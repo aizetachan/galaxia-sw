@@ -13,7 +13,7 @@ const addDays = (d) => new Date(Date.now() + d * 24 * 60 * 60 * 1000);
 ========================= */
 function normalizeUsername(username = '') {
   const u = String(username).trim().toLowerCase();
-  // 3-24 chars, letras/números/guion_bajo
+  // 3-24 chars, letras/números/_
   if (!/^[a-z0-9_]{3,24}$/.test(u)) return null;
   return u;
 }
@@ -26,7 +26,7 @@ function normalizePin(pin = '') {
 
 /* =========================
    Hash de PIN
-   - v2: scrypt + salt aleatorio  ->  "v2:<salt_hex>:<key_hex>"
+   - v2: scrypt + salt -> "v2:<salt_hex>:<key_hex>"
    - v1: legacy sha256(username:pin)
 ========================= */
 function hashPinV2(pin) {
@@ -228,12 +228,11 @@ export async function optionalAuth(req, _res, next) {
 }
 
 /* =========================
-   Utilidades extra (opcionales)
+   Utilidades extra
 ========================= */
 export async function getSession(token) {
   return dbGetSession(token); // { token, user_id, username } | null
 }
-
 export async function logout(token) {
   await dbDeleteSession(token);
   return { ok: true };

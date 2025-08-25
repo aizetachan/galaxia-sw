@@ -4,22 +4,16 @@ import { q } from './db.js';
 
 const router = Router();
 
-/* ============================================================
-   Utilidades
-============================================================ */
-
+/* ---------------- Utils ---------------- */
 function ensureInt(v, fallback = null) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
-
 function pick(obj, keys) {
   const out = {};
   for (const k of keys) if (k in obj) out[k] = obj[k];
   return out;
 }
-
-// Parser simple de fórmulas tipo "2d6+1" o "1d20-2"
 function rollFormula(formula) {
   const m = String(formula).trim().match(/^(\d+)d(\d+)([+-]\d+)?$/i);
   if (!m) throw new Error('Fórmula inválida, usa p.ej. "2d6+1"');
@@ -29,25 +23,18 @@ function rollFormula(formula) {
   const mod = modStr ? parseInt(modStr, 10) : 0;
 
   const dice = [];
-  for (let i = 0; i < nDice; i++) {
-    dice.push(1 + Math.floor(Math.random() * faces));
-  }
+  for (let i = 0; i < nDice; i++) dice.push(1 + Math.floor(Math.random() * faces));
   const total = dice.reduce((a, b) => a + b, 0) + mod;
   return { dice, mod, faces, nDice, total };
 }
-
 function outcomeFromDC(total, dc) {
   if (dc == null) return null;
   if (total >= dc + 3) return 'success';
   if (total >= dc) return 'mixed';
   return 'fail';
 }
-
-// Deep-merge controlado para attrs / inventory / tags
 function applyStatePatch(current, patch) {
   const out = { ...current };
-
-  // attrs numéricos (delta o set)
   if (patch?.attrs) {
     out.attrs = { ...(current.attrs || {}) };
     for (const [k, v] of Object.entries(patch.attrs)) {
@@ -59,8 +46,6 @@ function applyStatePatch(current, patch) {
       }
     }
   }
-
-  // inventory con ops [{op:'add'|'remove', id, qty}]
   if (patch?.inventory) {
     const cur = Array.isArray(current.inventory) ? [...current.inventory] : [];
     for (const item of patch.inventory) {
@@ -70,18 +55,14 @@ function applyStatePatch(current, patch) {
       if (op === 'add') {
         if (idx >= 0) cur[idx] = { ...cur[idx], qty: (cur[idx].qty || 0) + qty };
         else cur.push({ id, qty });
-      } else if (op === 'remove') {
-        if (idx >= 0) {
-          const newQty = (cur[idx].qty || 0) - qty;
-          if (newQty > 0) cur[idx] = { ...cur[idx], qty: newQty };
-          else cur.splice(idx, 1);
-        }
+      } else if (op === 'remove' && idx >= 0) {
+        const newQty = (cur[idx].qty || 0) - qty;
+        if (newQty > 0) cur[idx] = { ...cur[idx], qty: newQty };
+        else cur.splice(idx, 1);
       }
     }
     out.inventory = cur;
   }
-
-  // tags add/remove
   if (patch?.tags) {
     const cur = new Set(Array.isArray(current.tags) ? current.tags : []);
     const adds = patch.tags?.add || [];
@@ -90,13 +71,10 @@ function applyStatePatch(current, patch) {
     for (const t of rems) cur.delete(t);
     out.tags = [...cur];
   }
-
   return out;
 }
 
-/* ============================================================
-   Rutas de lectura de contexto
-============================================================ */
+/* ----------- Lecturas de contexto ----------- */
 
 // GET /world/context?character_id=123&limit=20
 router.get('/world/context', async (req, res) => {
@@ -105,7 +83,6 @@ router.get('/world/context', async (req, res) => {
     const limit = Math.min(ensureInt(req.query.limit, 20) || 20, 100);
     if (!characterId) return res.status(400).json({ ok: false, error: 'character_id requerido' });
 
-    // Personaje + estado
     const { rows: charRows } = await q(`
       SELECT c.*, cs.attrs, cs.inventory, cs.tags
       FROM characters c
@@ -115,7 +92,6 @@ router.get('/world/context', async (req, res) => {
     if (!charRows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
     const character = charRows[0];
 
-    // Públicos en misma localización
     const { rows: nearby } = await q(`
       SELECT e.*
       FROM events e
@@ -126,7 +102,6 @@ router.get('/world/context', async (req, res) => {
       LIMIT $2
     `, [character.last_location || null, limit]);
 
-    // De facción (si pertenece a alguna)
     const { rows: facEvents } = await q(`
       SELECT e.*
       FROM faction_memberships fm
@@ -136,7 +111,6 @@ router.get('/world/context', async (req, res) => {
       LIMIT $2
     `, [characterId, limit]);
 
-    // Donde soy objetivo
     const { rows: targeted } = await q(`
       SELECT e.*
       FROM event_targets t
@@ -146,7 +120,6 @@ router.get('/world/context', async (req, res) => {
       LIMIT $2
     `, [characterId, limit]);
 
-    // Mis últimos actos
     const { rows: myActs } = await q(`
       SELECT e.*
       FROM events e
@@ -155,7 +128,6 @@ router.get('/world/context', async (req, res) => {
       LIMIT $2
     `, [characterId, Math.min(limit, 10)]);
 
-    // No leídos (conteo)
     const { rows: unreadRows } = await q(`
       SELECT COUNT(*)::int AS c
       FROM (
@@ -248,9 +220,7 @@ router.post('/events/read', async (req, res) => {
   }
 });
 
-/* ============================================================
-   State del personaje
-============================================================ */
+/* ----------- State del personaje ----------- */
 
 // GET /characters/:id/state
 router.get('/characters/:id/state', async (req, res) => {
@@ -269,12 +239,12 @@ router.get('/characters/:id/state', async (req, res) => {
   }
 });
 
-// PATCH /characters/:id/state  { patch, note }
+// PATCH /characters/:id/state  { patch, note, event_id? }
 router.patch('/characters/:id/state', async (req, res) => {
   try {
     const id = ensureInt(req.params.id);
     const { patch = {}, note = null, event_id = null } = req.body || {};
-    // Lee el estado actual
+
     const { rows: curRows } = await q(`
       SELECT COALESCE(cs.attrs,'{}'::jsonb) AS attrs,
              COALESCE(cs.inventory,'[]'::jsonb) AS inventory,
@@ -286,7 +256,6 @@ router.patch('/characters/:id/state', async (req, res) => {
     const current = curRows[0] || { attrs: {}, inventory: [], tags: [] };
     const merged = applyStatePatch(current, patch);
 
-    // Upsert a character_state
     await q(`
       INSERT INTO character_state(character_id, attrs, inventory, tags, updated_at)
       VALUES ($1, $2::jsonb, $3::jsonb, $4::text[], now())
@@ -297,7 +266,6 @@ router.patch('/characters/:id/state', async (req, res) => {
           updated_at = now()
     `, [id, JSON.stringify(merged.attrs || {}), JSON.stringify(merged.inventory || []), merged.tags || []]);
 
-    // Append a history row
     await q(`
       INSERT INTO character_state_history(character_id, event_id, patch, note)
       VALUES ($1, $2, $3::jsonb, $4)
@@ -309,9 +277,7 @@ router.patch('/characters/:id/state', async (req, res) => {
   }
 });
 
-/* ============================================================
-   Tiradas de dados (acciones críticas)
-============================================================ */
+/* ----------- Tiradas y eventos ----------- */
 
 // POST /rolls  { character_id, user_id, skill, formula, target_dc }
 router.post('/rolls', async (req, res) => {
@@ -336,10 +302,6 @@ router.post('/rolls', async (req, res) => {
   }
 });
 
-/* ============================================================
-   Eventos (hechos del mundo)
-============================================================ */
-
 // POST /events
 // Body mínimo:
 // {
@@ -358,7 +320,6 @@ router.post('/events', async (req, res) => {
     const allowed = pick(body, [
       'summary', 'kind', 'visibility', 'location', 'actor_character_id', 'payload', 'faction_id'
     ]);
-
     if (!allowed.summary) return res.status(400).json({ ok: false, error: 'summary requerido' });
     if (!allowed.visibility) allowed.visibility = 'public';
 
@@ -381,7 +342,6 @@ router.post('/events', async (req, res) => {
 
     const event = evRows[0];
 
-    // targets
     const targets = Array.isArray(body.targets) ? body.targets.map(ensureInt).filter(Boolean) : [];
     if (targets.length) {
       const values = targets.map((t, i) => `($1, $${i + 2})`).join(',');
@@ -397,9 +357,7 @@ router.post('/events', async (req, res) => {
   }
 });
 
-/* ============================================================
-   Timeline del personaje (historia completa reciente)
-============================================================ */
+/* ----------- Timeline ----------- */
 
 // GET /characters/:id/timeline?limit=100
 router.get('/characters/:id/timeline', async (req, res) => {
@@ -443,7 +401,6 @@ router.get('/characters/:id/timeline', async (req, res) => {
       ),
     ]);
 
-    // fusionar en el servidor por timestamp
     const merged = [
       ...eventsActor.rows.map((x) => ({ ...x, ts: x.ts || x.created_at })),
       ...eventsTarget.rows.map((x) => ({ ...x, ts: x.ts || x.created_at })),
