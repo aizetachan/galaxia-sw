@@ -23,37 +23,58 @@ app.use(express.text({ type: ['text/plain','text/*'], limit:'1mb' }));
 app.use(express.urlencoded({ extended:false, limit:'1mb' }));
 app.use(express.json({ limit:'1mb' }));
 
-/* ===== Root & Health (siempre 200) ===== */
-app.get('/',(_req,res)=>res.type('text/plain').send('OK: API running. Prueba /health'));
-app.get('/health', async(_req,res)=>{
-  const out={ ok:true, ts:new Date().toISOString(), db:{ ok:false }, ai:{ ok:'unknown' } };
-  try{
-    if(hasDb){ const t0=Date.now(); await sql('SELECT 1'); out.db={ ok:true, latencyMs:Date.now()-t0 }; }
-    else out.db={ ok:false, reason:'missing DATABASE_URL' };
-  }catch(e){ out.db={ ok:false, error:String(e.message||e) }; }
-  // No testeamos IA aquí para no gastar — usa /ai/health cuando quieras
+/* ===== Root & Health ultra-simple (siempre 200, sin DB) ===== */
+app.get('/', (_req, res) => res.type('text/plain').send('OK: API running. Prueba /health'));
+app.get('/health', (_req, res) => {
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
+});
+
+/* ===== (Opcional) Health de DB real ===== */
+app.get('/db/health', async (_req, res) => {
+  const out = { ok: false };
+  try {
+    if (hasDb) {
+      const t0 = Date.now();
+      await sql('SELECT 1');
+      out.ok = true;
+      out.latencyMs = Date.now() - t0;
+    } else {
+      out.ok = false;
+      out.reason = 'missing DATABASE_URL';
+    }
+  } catch (e) {
+    out.ok = false;
+    out.error = String(e?.message || e);
+  }
   res.status(200).json(out);
 });
 
-/* ===== AI health check explícito (rápido) ===== */
+/* ===== AI health (GPT-5 usa max_completion_tokens) ===== */
 app.get('/ai/health', async (_req, res) => {
-  const out = { ok: false, model: process.env.OPENAI_MODEL || 'gpt-4o-mini' };
+  const out = { ok: false, model: process.env.OPENAI_MODEL || 'gpt-5-mini' };
   try {
     const mod = await import('openai');
     const OpenAI = mod.default || mod.OpenAI || mod;
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    // ping mínimo
-    await client.chat.completions.create({
+
+    const payload = {
       model: out.model,
-      messages: [{ role: 'system', content: 'ping' }, { role: 'user', content: 'ping' }],
-      max_tokens: 1,
-    });
+      messages: [
+        { role: 'system', content: 'ping' },
+        { role: 'user', content: 'ping' }
+      ]
+    };
+    // IMPORTANTe: modelos GPT-5 → max_completion_tokens
+    if (/^gpt-5/i.test(out.model)) {
+      payload.max_completion_tokens = 1;
+    }
+
+    await client.chat.completions.create(payload);
     out.ok = true;
-    res.status(200).json(out);
   } catch (e) {
     out.error = String(e?.message || e);
-    res.status(200).json(out); // 200 para que el front no marque FAIL
   }
+  res.status(200).json(out);
 });
 
 /* ===== Auth ===== */

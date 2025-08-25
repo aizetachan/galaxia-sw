@@ -92,7 +92,7 @@ async function handleDM(req, res) {
     await saveMsg(userId, 'user', text);
 
     const brief = await worldBrief(characterId);
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'; // ajusta aquí tu modelo
+    const model = process.env.OPENAI_MODEL || 'gpt-5-mini'; // modelo por defecto
 
     // IA: SIEMPRE intentamos OpenAI primero
     let outText = null;
@@ -106,15 +106,22 @@ async function handleDM(req, res) {
         brief ? '\nContexto del mundo:\n' + brief : ''
       ].join('\n');
 
-      const resp = await client.chat.completions.create({
+      // Construimos el payload evitando parámetros incompatibles
+      const payload = {
         model,
         temperature: 0.8,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: text },
         ],
-      });
+      };
 
+      // GPT-5 usa max_completion_tokens (no max_tokens)
+      if (/^gpt-5/i.test(model)) {
+        payload.max_completion_tokens = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || 400);
+      }
+
+      const resp = await client.chat.completions.create(payload);
       outText = resp.choices?.[0]?.message?.content?.trim() || null;
     } catch (e) {
       // Importante: logueamos por qué falló la IA para poder corregir (modelo, credencial, egress…)
