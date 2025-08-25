@@ -1,7 +1,62 @@
-// === Config ===
-const API_BASE =
+// === Config dinámico del backend ===
+// Preferencias (en orden): window.API_BASE -> <meta name="api-base"> -> same-origin /api -> same-origin (sin /api)
+// -> <meta name="api-fallback"> -> fallback final (si lo quieres)
+function getMeta(name) {
+  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
+}
+
+// Valor inicial (puede ser sobreescrito en ensureApiBase)
+let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
-  (typeof location !== 'undefined' ? location.origin + '/api' : '');
+  getMeta('api-base') ||
+  (typeof location !== 'undefined' ? (location.origin + '/api') : '');
+
+// Pequeño status visual si existe <span id="server-status">...</span>
+function setServerStatus(ok) {
+  const el = document.getElementById('server-status');
+  if (!el) return;
+  el.textContent = ok ? 'Server: OK' : 'Server: FAIL';
+  el.classList.toggle('ok', !!ok);
+  el.classList.toggle('bad', !ok);
+}
+
+// Probar en orden varias bases hasta que /health responda 200 JSON
+async function ensureApiBase() {
+  const candidates = []
+    .concat(API_BASE || [])
+    .concat(getMeta('api-base') || [])
+    .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
+    .concat(getMeta('api-fallback') || [])
+    // .concat('https://galaxia-sw.vercel.app/api') // <- si quieres un fallback duro, descomenta
+    .filter(Boolean)
+    .map(s => String(s).replace(/\/+$/,''));
+
+  // Quitar duplicados conservando orden
+  const seen = new Set();
+  const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
+
+  for (const base of unique) {
+    try {
+      const url = joinUrl(base, '/health');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 3500);
+      const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) continue;
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) continue;
+      const j = await r.json().catch(() => null);
+      if (j && (j.ok === true || 'ts' in j)) {
+        API_BASE = base;
+        console.log('[API] Using base =', API_BASE);
+        setServerStatus(true);
+        return;
+      }
+    } catch { /* probar siguiente */ }
+  }
+  console.warn('[API] No API base found. Using initial:', API_BASE || '(empty)');
+  setServerStatus(false);
+}
 
 // === Helpers de URL (evita redirecciones por slash)
 function joinUrl(base, path) {
@@ -45,6 +100,10 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
 
 // === Boot ===
 (async function boot() {
+  // 1) Elegir API_BASE real
+  await ensureApiBase();
+
+  // 2) Restaurar sesión si existe
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if (saved?.token && saved?.user?.id) {
@@ -98,8 +157,11 @@ async function api(path, body) {
     err.response = res;
     throw err;
   }
-  return res.json();
+  // Intentar parsear JSON; si el servidor devolviera algo no-JSON, evita crash
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : { ok: true };
 }
+
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
@@ -110,7 +172,8 @@ async function apiGet(path) {
     err.response = res;
     throw err;
   }
-  return res.json();
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : { ok: true };
 }
 
 function render() {
@@ -253,8 +316,7 @@ async function resolveRoll() {
     // 1) Tirada en el backend (registra evento, etc.)
     const res = await api('/roll', { skill, character });
 
-    // 2) Pedimos al Máster que continúe la narración con ese resultado
-    //    Enviamos una "señal" clara en el mensaje para que la prompt lo entienda.
+    // 2) Continuación narrativa del Máster con el resultado
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
@@ -263,10 +325,8 @@ async function resolveRoll() {
       stage: step
     });
 
-    // Si el modelo respondió, usamos su texto; si no, usamos el fallback del servidor
     const nextText = (follow && follow.text) ? follow.text : res.text;
     pushDM(nextText || res.text || 'La situación evoluciona…');
-
   } catch {
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
