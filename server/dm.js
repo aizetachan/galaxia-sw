@@ -1,12 +1,27 @@
 // server/dm.js
 import { Router } from 'express';
-import OpenAI from 'openai';
 import { hasDb, sql } from './db.js';
 import { optionalAuth } from './auth.js';
 
 const router = Router();
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
+/* ========= OpenAI lazy ========= */
+let openaiClient = null;
+async function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) return null;
+  if (openaiClient) return openaiClient;
+  try {
+    const mod = await import('openai');            // <- sin import estático
+    const OpenAI = mod.default || mod.OpenAI || mod;
+    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    return openaiClient;
+  } catch {
+    return null; // si no está instalado el paquete, seguimos en modo fallback
+  }
+}
+
+/* ========= helpers ========= */
 async function worldBrief(characterId){
   if(!hasDb||!characterId) return '';
   const [{rows:cRows},{rows:eNear},{rows:eFaction},{rows:eMine}] = await Promise.all([
@@ -22,28 +37,30 @@ async function worldBrief(characterId){
          WHERE e.actor_character_id=$1 ORDER BY e.ts DESC LIMIT 5`,[characterId]),
   ]);
   const c=cRows[0]; if(!c) return '';
-  const lines=[`PJ: ${c.name} (${c.species||'—'}/${c.role||'—'}) en ${c.last_location||'desconocido'}.`];
-  if(eMine.length){ lines.push('Actos propios recientes:'); eMine.forEach(e=>lines.push(`- [${e.kind||'evento'}] ${e.summary}`)); }
-  if(eNear.length){ lines.push('Cerca (público):'); eNear.forEach(e=>lines.push(`- ${e.summary} @ ${e.location}`)); }
-  if(eFaction.length){ lines.push('De tu facción:'); eFaction.forEach(e=>lines.push(`- ${e.summary}`)); }
-  return lines.join('\n');
+  const L=[`PJ: ${c.name} (${c.species||'—'}/${c.role||'—'}) en ${c.last_location||'desconocido'}.`];
+  if(eMine.length){ L.push('Actos propios recientes:'); eMine.forEach(e=>L.push(`- [${e.kind||'evento'}] ${e.summary}`)); }
+  if(eNear.length){ L.push('Cerca (público):'); eNear.forEach(e=>L.push(`- ${e.summary} @ ${e.location}`)); }
+  if(eFaction.length){ L.push('De tu facción:'); eFaction.forEach(e=>L.push(`- ${e.summary}`)); }
+  return L.join('\n');
 }
 async function saveMsg(userId,role,text){
   if(!hasDb) return;
   try{ await sql(`INSERT INTO chat_messages(user_id,role,kind,text,ts) VALUES ($1,$2,$2,$3,now())`,[userId||null, role, text]); }catch{}
 }
 
+/* ========= handler ========= */
 async function handleDM(req, res){
   try{
     const { text, character_id } = req.body || {};
     const userId = req.auth?.userId || null;
+
     if(!text || String(text).trim()===''){
       const t='¿Puedes repetir la acción o pregunta?';
       await saveMsg(userId,'dm',t);
       return res.status(200).json({ ok:true, reply:{ text:t }, text:t, message:t });
     }
 
-    // personaje
+    // personaje activo
     let characterId = toInt(character_id);
     if(!characterId && hasDb && userId){
       const { rows } = await sql(`SELECT id FROM characters WHERE owner_user_id=$1 LIMIT 1`,[userId]);
@@ -54,14 +71,16 @@ async function handleDM(req, res){
     const brief = await worldBrief(characterId);
 
     let outText = 'Recibido. (Modo sin IA; configura OPENAI_API_KEY).';
-    if(process.env.OPENAI_API_KEY){
+    const client = await getOpenAI();
+    if (client) {
       try{
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const system = [
           'Eres el Máster de un juego de rol en una galaxia. Responde en español con 2-6 frases, orientado a la acción.',
           'No reveles reglas internas. Describe consecuencias y ganchos.',
           brief ? '\nContexto del mundo:\n'+brief : ''
         ].join('\n');
+
+        // SDK v4
         const resp = await client.chat.completions.create({
           model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
           temperature: 0.8,
@@ -69,13 +88,12 @@ async function handleDM(req, res){
         });
         outText = resp.choices?.[0]?.message?.content?.trim()
                || 'El silencio del vacío te responde; intenta otra acción.';
-      }catch(e){
+      }catch{
         outText = 'Interferencia en la HoloNet. El máster no responde ahora mismo; repite la acción más tarde.';
       }
     }
 
     await saveMsg(userId,'dm',outText);
-    // JSON compatible con posibles formatos del front
     return res.status(200).json({ ok:true, reply:{ text: outText }, text: outText, message: outText });
   }catch{
     const t='Fallo temporal del servidor. Repite la acción en un momento.';
@@ -83,8 +101,8 @@ async function handleDM(req, res){
   }
 }
 
-// Rutas: /dm y compat /dm/respond
+/* ========= rutas ========= */
 router.post('/dm', optionalAuth, handleDM);
-router.post('/dm/respond', optionalAuth, handleDM);
+router.post('/dm/respond', optionalAuth, handleDM); // compat
 
 export default router;
