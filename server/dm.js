@@ -106,7 +106,7 @@ async function handleDM(req, res) {
         brief ? '\nContexto del mundo:\n' + brief : ''
       ].join('\n');
 
-      // Construimos el payload evitando parámetros incompatibles
+      // Payload compatible con GPT-5 (sin max_tokens)
       const payload = {
         model,
         temperature: 0.8,
@@ -115,8 +115,6 @@ async function handleDM(req, res) {
           { role: 'user', content: text },
         ],
       };
-
-      // GPT-5 usa max_completion_tokens (no max_tokens)
       if (/^gpt-5/i.test(model)) {
         payload.max_completion_tokens = Number(process.env.OPENAI_MAX_COMPLETION_TOKENS || 400);
       }
@@ -124,11 +122,10 @@ async function handleDM(req, res) {
       const resp = await client.chat.completions.create(payload);
       outText = resp.choices?.[0]?.message?.content?.trim() || null;
     } catch (e) {
-      // Importante: logueamos por qué falló la IA para poder corregir (modelo, credencial, egress…)
       console.error('[DM] OpenAI error:', e?.status, e?.code, e?.message);
     }
 
-    // Si aun así no tenemos respuesta IA, devolvemos un texto de cortesía (pero NO inventamos narrativa local)
+    // Si aun así no tenemos respuesta IA, devolvemos un texto de cortesía
     if (!outText) {
       const t = 'Interferencia en la HoloNet. El máster no responde ahora mismo; repite la acción más tarde.';
       await saveMsg(userId, 'dm', t);
