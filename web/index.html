@@ -59,10 +59,10 @@
     <span class="muted">/privado o /publico para tu perfil. (texto para indicaciones técnias)</span>
   </footer>
 
-  <!-- PRODUCCIÓN (backend en Vercel SIN /api) -->
-  <script>window.API_BASE='https://galaxia-sw.vercel.app';</script>
-  <!-- LOCAL (si ejecutas `npm run dev` en el server) -->
-  <!-- <script>window.API_BASE='http://localhost:3001';</script> -->
+    <!-- PRODUCCIÓN (backend en Vercel con prefijo /api) -->
+    <script>window.API_BASE='/api';</script>
+    <!-- LOCAL (si ejecutas `npm run dev` en el server) -->
+    <!-- <script>window.API_BASE='http://localhost:3001';</script> -->
 
   <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
   <script>

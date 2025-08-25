@@ -3,11 +3,12 @@
     "trailingSlash": false,
     "rewrites": [
       { "source": "/api/(.*)", "destination": "/api/index.js" },
+      { "source": "/(auth|dm|world)(.*)", "destination": "/api/index.js" },
       { "source": "/health", "destination": "/api/index.js" }
     ],
     "headers": [
       {
-        "source": "/api/(.*)",
+        "source": "/(api|auth|dm|world|health)(.*)",
         "headers": [
           { "key": "Access-Control-Allow-Origin", "value": "*" },
           { "key": "Access-Control-Allow-Methods", "value": "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS" },
