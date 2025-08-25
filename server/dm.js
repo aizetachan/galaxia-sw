@@ -114,11 +114,10 @@ async function handleDM(req, res) {
         ],
       };
 
-      // compat GPT-5
+      // GPT-5 => max_completion_tokens
       const maxOut =
         Number(process.env.OPENAI_MAX_COMPLETION_TOKENS ||
-               process.env.DM_MAX_TOKENS ||   // compat antigua
-               800);
+               process.env.DM_MAX_TOKENS || 800);
       if (/^gpt-5/i.test(model)) payload.max_completion_tokens = maxOut;
 
       const resp = await client.chat.completions.create(payload);
@@ -131,23 +130,13 @@ async function handleDM(req, res) {
     if (!outText) {
       const t = 'Interferencia en la HoloNet. El máster no responde ahora mismo; repite la acción más tarde.';
       await saveMsg(userId, 'dm', t);
-      return res.status(200).json({
-        ok: true,
-        reply: { text: t },
-        text: t,
-        message: t,
-        meta: { ai_ok: false, model, ... (metaError ? { error: metaError } : {}) }
-      });
+      const meta = { ai_ok: false, model };
+      if (metaError) meta.error = metaError;
+      return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t, meta });
     }
 
     await saveMsg(userId, 'dm', outText);
-    return res.status(200).json({
-      ok: true,
-      reply: { text: outText },
-      text: outText,
-      message: outText,
-      meta: { ai_ok: true, model }
-    });
+    return res.status(200).json({ ok: true, reply: { text: outText }, text: outText, message: outText, meta: { ai_ok: true, model } });
   } catch (e) {
     console.error('[DM] fatal:', e?.message || e);
     const t = 'Fallo temporal del servidor. Repite la acción en un momento.';

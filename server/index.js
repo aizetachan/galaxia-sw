@@ -1,7 +1,7 @@
 // server/index.js
 import express from 'express';
 import { hasDb, sql } from './db.js';
-import { register, login, requireAuth, logout } from './auth.js';
+import { register, login, requireAuth } from './auth.js'; // <-- SIN 'logout'
 import worldRouter from './world.js';
 import dmRouter from './dm.js';
 
@@ -92,6 +92,16 @@ app.post('/auth/login', async (req, res) => {
     res.status(map[e.message] || 500).json({ ok: false, error: e.message });
   }
 });
+app.post('/auth/logout', requireAuth, async (req, res) => {
+  try {
+    if (hasDb && req.auth?.token) {
+      await sql(`DELETE FROM sessions WHERE token=$1`, [req.auth.token]);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 app.get('/auth/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await sql(`SELECT * FROM characters WHERE owner_user_id=$1 LIMIT 1`, [req.auth.userId]);
@@ -100,17 +110,9 @@ app.get('/auth/me', requireAuth, async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-app.post('/auth/logout', requireAuth, async (req, res) => {
-  try {
-    await logout(req.auth.token);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
 
 /* ===== Rutas de juego ===== */
-app.use('/', dmRouter);
+app.use('/', dmRouter);     // /dm y /dm/respond
 app.use('/', worldRouter);
 
 /* ===== Error handler (asegura CORS en errores inesperados) ===== */
