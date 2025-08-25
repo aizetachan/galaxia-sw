@@ -27,7 +27,7 @@ async function ensureApiBase() {
     .concat(getMeta('api-base') || [])
     .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
     .concat(getMeta('api-fallback') || [])
-    // .concat('https://galaxia-sw.vercel.app/api') // <- si quieres un fallback duro, descomenta
+    .concat('https://galaxia-sw.vercel.app/api') // <- si quieres un fallback duro, descomenta
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/,''));
 
