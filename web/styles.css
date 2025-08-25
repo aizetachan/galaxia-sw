@@ -201,3 +201,20 @@
     transform: none;
   }
   
+    /* Botón "Tirar dados" plano (sin degradado ni relieve) */
+#resolve-btn{
+    background: var(--holo);        /* color liso */
+    color: #fff;                 /* buen contraste sobre el holo */
+    border: 1px solid var(--holo-soft);
+    box-shadow: none;               /* sin brillo ni relieve */
+    transform: none;                /* sin “aplastado” al click */
+  }
+  
+  #resolve-btn:hover{
+    filter: none;
+    background: #3a86dd;           /* tono un pelín más oscuro al hover */
+  }
+  
+  #resolve-btn:active{
+    transform: none;
+  }
