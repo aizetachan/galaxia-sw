@@ -119,12 +119,14 @@ const baseKey = (suffix) => (AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `
 let KEY_MSGS = baseKey('msgs');
 let KEY_CHAR = baseKey('char');
 let KEY_STEP = baseKey('step');
+let KEY_CONFIRM = baseKey('confirm');
+
 let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
 let pendingRoll = null; // { skill?: string }
-let KEY_CONFIRM = baseKey('confirm');
 let pendingConfirm = load(KEY_CONFIRM, null); // { type:'name'|'build', name?, species?, role? }
+let lastRoll = null;
 
 // ============================================================
 //                        DOM
@@ -149,19 +151,79 @@ const confirmSummaryEl = document.getElementById('confirm-summary');
 const confirmYesBtn = document.getElementById('confirm-yes');
 const confirmNoBtn  = document.getElementById('confirm-no');
 
-// Listeners
-sendBtn.addEventListener('click', send);
-inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-resolveBtn.addEventListener('click', resolveRoll);
-authLoginBtn.addEventListener('click', () => doAuth('login'));
-authRegisterBtn.addEventListener('click', () => doAuth('register'));
-cancelBtn.addEventListener('click', () => {
-  pushDM('🎲 Tirada cancelada (… )');
-  pendingRoll = null;
-  updateRollCta();
-});
-if (confirmYesBtn) confirmYesBtn.addEventListener('click', () => handleConfirmDecision('yes'));
-if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDecision('no'));
+// ============================================================
+//                       Utils / helpers
+// ============================================================
+function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function now() { return Date.now(); }
+function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
+function escapeHtml(s='') {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function formatMarkdown(t = '') {
+  const safe = escapeHtml(t);
+  return safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+}
+function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
+function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
+function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
+
+// Payload plano + anidado para /world/characters
+function charPayload(c) {
+  return {
+    name: c?.name || '',
+    species: c?.species || '',
+    role: c?.role || '',
+    publicProfile: c?.publicProfile ?? true,
+    character: c || null,
+  };
+}
+
+// ---- Fetch helpers
+async function readMaybeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  const body = await res.text();
+  if (ct.includes('application/json')) {
+    try { return { json: JSON.parse(body), raw: body, ct, status: res.status }; }
+    catch (e) { return { json: null, raw: body, ct, status: res.status, parseError: String(e) }; }
+  }
+  return { json: null, raw: body, ct, status: res.status };
+}
+async function api(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  const url = joinUrl(API_BASE, path);
+  dgroup('api POST ' + url, () => console.log({ body }));
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+  const data = await readMaybeJson(res);
+  dgroup('api POST result ' + url, () => console.log(data));
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = res;
+    err.data = data;
+    throw err;
+  }
+  return data.json ?? {};
+}
+async function apiGet(path) {
+  const headers = {};
+  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  const url = joinUrl(API_BASE, path);
+  dgroup('api GET ' + url, () => console.log({}));
+  const res = await fetch(url, { method: 'GET', headers });
+  const data = await readMaybeJson(res);
+  dgroup('api GET result ' + url, () => console.log(data));
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.response = res;
+    err.data = data;
+    throw err;
+  }
+  return data.json ?? {};
+}
 
 // ============================================================
 //                          BOOT
@@ -205,78 +267,6 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   render();
   dlog('Boot done');
 })();
-
-// ============================================================
-//                       Utils / helpers
-// ============================================================
-function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
-function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
-function now() { return Date.now(); }
-function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
-
-function escapeHtml(s='') {
-  return String(s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
-}
-function formatMarkdown(t = '') {
-  const safe = escapeHtml(t);
-  return safe
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-}
-
-function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
-function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
-function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
-
-// ---- Fetch helpers
-async function readMaybeJson(res) {
-  const ct = res.headers.get('content-type') || '';
-  const body = await res.text();
-  if (ct.includes('application/json')) {
-    try { return { json: JSON.parse(body), raw: body, ct, status: res.status }; }
-    catch (e) { return { json: null, raw: body, ct, status: res.status, parseError: String(e) }; }
-  }
-  return { json: null, raw: body, ct, status: res.status };
-}
-
-async function api(path, body) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const url = joinUrl(API_BASE, path);
-  dgroup('api POST ' + url, () => console.log({ body }));
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
-  const data = await readMaybeJson(res);
-  dgroup('api POST result ' + url, () => console.log(data));
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.response = res;
-    err.data = data;
-    throw err;
-  }
-  return data.json ?? {};
-}
-
-async function apiGet(path) {
-  const headers = {};
-  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  const url = joinUrl(API_BASE, path);
-  dgroup('api GET ' + url, () => console.log({}));
-  const res = await fetch(url, { method: 'GET', headers });
-  const data = await readMaybeJson(res);
-  dgroup('api GET result ' + url, () => console.log(data));
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.response = res;
-    err.data = data;
-    throw err;
-  }
-  return data.json ?? {};
-}
 
 // ============================================================
 //                         Render
@@ -421,7 +411,8 @@ async function send() {
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/world/characters', { character }); } catch (e) { dlog('privacy update fail', e?.data || e); }
+    try { await api('/world/characters', charPayload(character)); }
+    catch (e) { dlog('privacy update fail', e?.data || e); }
     inputEl.value = ''; return;
   }
 
@@ -429,7 +420,8 @@ async function send() {
     localStorage.removeItem(KEY_MSGS);
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
-    msgs = []; character = null; step = 'name'; pendingRoll = null;
+    localStorage.removeItem(KEY_CONFIRM);
+    msgs = []; character = null; step = 'name'; pendingRoll = null; pendingConfirm = null;
     pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo te llamas en la red del HoloNet?`);
     inputEl.value = ''; return;
   }
@@ -442,7 +434,7 @@ async function send() {
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
       try {
-        const r = await api('/world/characters', { character });
+        const r = await api('/world/characters', charPayload(character));
         if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
       } catch (e) { dlog('create char fail', e?.data || e); }
       step = 'species'; save(KEY_STEP, step);
@@ -453,7 +445,7 @@ async function send() {
         character.species = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update species fail', e?.data || e); }
@@ -466,7 +458,7 @@ async function send() {
         character.role = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update role fail', e?.data || e); }
@@ -535,7 +527,7 @@ async function handleConfirmDecision(decision) {
         }
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert name fail', e?.data || e); }
         step = 'species'; save(KEY_STEP, step);
@@ -548,12 +540,17 @@ async function handleConfirmDecision(decision) {
         }
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert build fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
       }
     }
+
+    // Limpiar CTA siempre (tanto si YES como NO)
+    pendingConfirm = null;
+    save(KEY_CONFIRM, null);
+    updateConfirmCta();
 
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
@@ -629,18 +626,23 @@ async function doAuth(kind) {
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
+    // Migrar contenido guest a usuario real (si existía)
     migrateGuestToUser(user.id);
 
+    // reset keys/estado de usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
+    // Intentar recuperar personaje — si 404, lo ignoramos y seguimos con sesión OK
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
     catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
+
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
 
+    // Si el chat está vacío tras login, pedimos /dm/resume para saludar con resumen
     if (msgs.length === 0) {
       await showResumeIfAny();
       if (msgs.length === 0 && character?.name && step !== 'done') {
@@ -651,7 +653,7 @@ async function doAuth(kind) {
 
     render();
 
-    // Kickoff onboarding si no está completado — AHORA PINTA EL TEXTO
+    // Kickoff onboarding si no está completado — pinta el primer mensaje
     if (msgs.length === 0 && step !== 'done') {
       try {
         const kick = await api('/dm/respond', {
