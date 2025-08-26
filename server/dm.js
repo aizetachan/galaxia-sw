@@ -2,9 +2,25 @@
 import { Router } from 'express';
 import { hasDb, sql } from './db.js';
 import { optionalAuth } from './auth.js';
+import fs from 'fs';
+import path from 'path';
 
 const router = Router();
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+
+/* ========= Lectura de prompts .md (ruta correcta + fallback legacy) ========= */
+function readPrompt(filename) {
+  const candidates = [
+    path.join(process.cwd(), 'server', 'prompts', filename),          // ruta correcta
+    path.join(process.cwd(), 'server', 'data', 'prompts', filename),  // fallback legacy
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+    } catch {}
+  }
+  return null;
+}
 
 /* ========= Carga perezosa del SDK ========= */
 let openaiClient = null;
@@ -144,9 +160,7 @@ const dicePolicy = [
 ].join('\n');
 
 /* ========= llamada robusta a OpenAI ========= */
-function isGpt5(model) {
-  return /^gpt-5/i.test(model || '');
-}
+function isGpt5(model) { return /^gpt-5/i.test(model || ''); }
 
 async function callOpenAI({ client, model, system, userText }) {
   const messages = [
@@ -189,26 +203,26 @@ async function handleDM(req, res) {
   const userId = req.auth?.userId || null;
   const hasAuth = !!userId;
   const text = extractUserText(req.body);
+  const rawStage = (req.body?.stage ?? '').toString().trim().toLowerCase();
+  const stage = (rawStage === 'species' || rawStage === 'role') ? 'build' : (rawStage || 'name');
 
   console.log('[DM] incoming {',
     '\n  url:', JSON.stringify(url),
     '\n  userId:', JSON.stringify(userId),
     '\n  characterId(raw):', JSON.stringify(req.body?.character_id || null),
     '\n  hasAuth:', hasAuth,
-    '\n  stage:', JSON.stringify(req.body?.stage || null),
+    '\n  stage:', JSON.stringify(stage || null),
     '\n  bodyKeys:', Object.keys(req.body || {}),
     '\n  textSample:', JSON.stringify(text?.slice?.(0, 40) || ''),
     '\n}');
 
   try {
-    if (!text) {
-      const t = '¿Puedes repetir la acción o pregunta?';
-      await saveMsg(userId, 'dm', t);
-      return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t });
-    }
-
     const characterId = await getNumericCharacterId({ body: req.body, userId });
-    await saveMsg(userId, 'user', text);
+
+    // Guardar mensaje del usuario SOLO si hay texto
+    if (text) {
+      await saveMsg(userId, 'user', text);
+    }
 
     const [brief, history] = await Promise.all([
       worldBrief(characterId),
@@ -220,25 +234,33 @@ async function handleDM(req, res) {
       ? ('\nHistorial reciente (resumen cronológico corto):\n' + history.lines.slice(-20).join('\n'))
       : '');
 
+    // Cargar prompts .md
+    const masterMd = readPrompt('prompt-master.md') || '';
+    const gameMd   = readPrompt('game-rules.md') || '';
+    const diceMd   = readPrompt('dice-rules.md') || '';
+
+    // Construir system prompt
     const system = [
-      'Eres el Máster de un juego de rol en una galaxia compartida.',
-      // Idioma adaptable (español por defecto).
+      (masterMd || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
+      (gameMd ? ('\nREGLAS DEL JUEGO:\n' + gameMd) : ''),
+      (diceMd ? ('\nREGLAS DE DADOS:\n' + diceMd) : dicePolicy),
       languagePolicy,
-      // Estilo de respuesta y continuidad.
-      'Responde conciso (2–6 frases), orientado a acción y consecuencias.',
-      'Integra continuidad a partir del estado persistido y del historial reciente del jugador.',
-      // No listar opciones salvo que el jugador las pida.
-      'No enumeres opciones a menos que el jugador las pida explícitamente.',
-      // Política de dados (cuándo y cómo pedir tirada).
-      dicePolicy,
       brief ? ('\nContexto del mundo:\n' + brief) : '',
       historyBlock,
+      `\n[STAGE=${stage}]`
     ].join('\n');
+
+    // Si no hay texto del usuario, generamos kickoff sintético
+    const userTextForModel = (text && text.trim())
+      ? text.trim()
+      : (stage !== 'done'
+          ? '<<CLIENT_HELLO>> (inicia onboarding según el STAGE; emite confirmaciones con etiquetas <<CONFIRM ...>> y espera <<CONFIRM_ACK ...>>)'
+          : '<<CLIENT_HELLO>> (saluda y arranca escena actual)');
 
     let outText = null;
     try {
       const client = await getOpenAI();
-      outText = await callOpenAI({ client, model, system, userText: text });
+      outText = await callOpenAI({ client, model, system, userText: userTextForModel });
     } catch (e) {
       console.error('[DM] OpenAI fatal:', e?.status, e?.code, e?.message);
     }
