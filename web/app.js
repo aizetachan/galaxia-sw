@@ -180,7 +180,7 @@ if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDe
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     dlog('Saved auth =', saved);
     if (saved?.token && saved?.user?.id) {
-      // 🔧 Restauramos correctamente AUTH y validamos token
+      // Restauramos AUTH y validamos token
       AUTH = saved;
       await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
@@ -306,7 +306,7 @@ function render() {
   chatEl.scrollTop = chatEl.scrollHeight;
   updatePlaceholder();
   updateRollCta();
-  updateConfirmCta(); // 🔧 añadimos el CTA de confirmación
+  updateConfirmCta(); // CTA de confirmación
 }
 
 function updatePlaceholder() {
@@ -395,7 +395,7 @@ async function talkToDM(message) {
       message,
       history,
       character_id: Number(character?.id) || null, // <-- SOLO id numérico
-      stage: mapStageForDM(step) // 🔧 enviamos stage mapeado
+      stage: mapStageForDM(step) // enviamos stage mapeado
     });
 
     let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
@@ -430,6 +430,14 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
   dlog('send', { value, step });
+
+  // ⚠️ Si hay confirmación pendiente, no avances el flujo antiguo; deja que lo gestione el Máster.
+  if (pendingConfirm && step !== 'done') {
+    pushUser(value);
+    await talkToDM(value);
+    inputEl.value = '';
+    return;
+  }
 
   // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
@@ -541,7 +549,7 @@ async function resolveRoll() {
     pushDM(nextText || res.text || 'La situación evoluciona…');
 
   } catch (e) {
-    dlog('resolveRoll error:', e?.data || e);
+    dlog('resolveRoll error', e?.data || e);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
@@ -726,6 +734,19 @@ async function doAuth(kind) {
     }
 
     render();
+
+    // 🔸 Kickoff onboarding si todavía no está completado (arranca al Máster)
+    if (msgs.length === 0 && step !== 'done') {
+      try {
+        await api('/dm/respond', {
+          message: '',
+          history: [],
+          character_id: Number(character?.id) || null,
+          stage: mapStageForDM(step)
+        });
+      } catch (e) { dlog('kickoff fail', e?.data || e); }
+    }
+
   } catch (e) {
     dlog('doAuth error:', e?.data || e);
     let code = '';
