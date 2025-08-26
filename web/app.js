@@ -128,8 +128,8 @@ let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
 let pendingRoll = null; // { skill?: string }
-
-
+let KEY_CONFIRM = baseKey('confirm');
+let pendingConfirm = load(KEY_CONFIRM, null); // { type:'name'|'build', name?, species?, role? }
 
 // ============================================================
 //                        DOM
@@ -148,7 +148,11 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-
+// Confirm CTA
+const confirmCta = document.getElementById('confirm-cta');
+const confirmSummaryEl = document.getElementById('confirm-summary');
+const confirmYesBtn = document.getElementById('confirm-yes');
+const confirmNoBtn  = document.getElementById('confirm-no');
 
 // Listeners
 sendBtn.addEventListener('click', send);
@@ -161,8 +165,8 @@ cancelBtn.addEventListener('click', () => {
   pendingRoll = null;
   updateRollCta();   // <- oculta el bloque fijo
 });
-
-
+if (confirmYesBtn) confirmYesBtn.addEventListener('click', () => handleConfirmDecision('yes'));
+if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDecision('no'));
 
 // ============================================================
 //                          BOOT
@@ -176,23 +180,26 @@ cancelBtn.addEventListener('click', () => {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     dlog('Saved auth =', saved);
     if (saved?.token && saved?.user?.id) {
+      // 🔧 Restauramos correctamente AUTH y validamos token
       AUTH = saved;
       await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
       msgs = load(KEY_MSGS, []);
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
+      pendingConfirm = load(KEY_CONFIRM, null);
       authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
       AUTH = null;
       localStorage.removeItem('sw:auth');
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
       msgs = load(KEY_MSGS, []);
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
+      pendingConfirm = load(KEY_CONFIRM, null);
     }
   } catch (e) {
     dlog('Auth restore error:', e);
@@ -299,6 +306,7 @@ function render() {
   chatEl.scrollTop = chatEl.scrollHeight;
   updatePlaceholder();
   updateRollCta();
+  updateConfirmCta(); // 🔧 añadimos el CTA de confirmación
 }
 
 function updatePlaceholder() {
@@ -320,8 +328,6 @@ function updateRollCta() {
   }
 }
 
-
-
 // --- Detectar etiqueta de tirada en el texto del Máster ---
 function parseRollTag(txt = '') {
   // Acepta: <<ROLL SKILL="Combate" REASON="...">>
@@ -331,6 +337,51 @@ function parseRollTag(txt = '') {
   const skill = (m[1] || 'Acción').trim();
   const cleaned = txt.replace(re, '').trim();
   return { skill, cleaned };
+}
+
+// --- Detectar etiqueta de confirmación en el texto del Máster ---
+// Acepta:
+//   <<CONFIRM NAME="Miau Cat">>
+//   <<CONFIRM SPECIES="Wookiee" ROLE="Cazarrecompensas">>
+function parseConfirmTag(txt = '') {
+  const re = /<<\s*CONFIRM\b([^>]*)>>/i;
+  const m = re.exec(txt);
+  if (!m) return null;
+  const attrsStr = m[1] || '';
+  const attrs = {};
+  for (const mm of attrsStr.matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) {
+    attrs[mm[1].toUpperCase()] = mm[2];
+  }
+  let pending = null;
+  if (attrs.NAME) {
+    pending = { type: 'name', name: attrs.NAME };
+  } else if (attrs.SPECIES && attrs.ROLE) {
+    pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
+  }
+  const cleaned = txt.replace(re, '').trim();
+  return { pending, cleaned };
+}
+
+// ====== CTA de Confirmación ======
+function mapStageForDM(s) {
+  // El prompt del Máster entiende 'name' | 'build' | 'done'.
+  // Nuestro front usa 'species'/'role'. Mapeamos ambos a 'build'.
+  if (s === 'species' || s === 'role') return 'build';
+  return s || 'name';
+}
+
+function updateConfirmCta() {
+  if (!confirmCta || !confirmSummaryEl) return;
+  if (!pendingConfirm) {
+    confirmCta.classList.add('hidden');
+    confirmSummaryEl.textContent = '—';
+    return;
+  }
+  confirmSummaryEl.textContent =
+    (pendingConfirm.type === 'name')
+      ? `¿Confirmas el nombre: “${pendingConfirm.name}”?`
+      : `¿Confirmas: ${pendingConfirm.species} — ${pendingConfirm.role}?`;
+  confirmCta.classList.remove('hidden');
 }
 
 // ============================================================
@@ -344,11 +395,21 @@ async function talkToDM(message) {
       message,
       history,
       character_id: Number(character?.id) || null, // <-- SOLO id numérico
-      stage: step
+      stage: mapStageForDM(step) // 🔧 enviamos stage mapeado
     });
 
     let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
 
+    // 1) Confirmación (onboarding)
+    const conf = parseConfirmTag(txt);
+    if (conf) {
+      pendingConfirm = conf.pending;
+      save(KEY_CONFIRM, pendingConfirm);
+      updateConfirmCta();
+      txt = conf.cleaned || txt;
+    }
+
+    // 2) Tirada
     const roll = parseRollTag(txt);
     if (roll) {
       pendingRoll = { skill: roll.skill };
@@ -394,14 +455,15 @@ async function send() {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-      try {  const r = await api('/world/characters', { character });
-  if (r?.character?.id) {
-    character.id = r.character.id;      // <- guardamos el ID que nos devuelve el server
-    save(KEY_CHAR, character);
-  }
-} catch (e) {
-  dlog('create char fail', e?.data || e);
-}
+      try {
+        const r = await api('/world/characters', { character });
+        if (r?.character?.id) {
+          character.id = r.character.id;      // <- guardamos el ID que nos devuelve el server
+          save(KEY_CHAR, character);
+        }
+      } catch (e) {
+        dlog('create char fail', e?.data || e);
+      }
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
@@ -418,7 +480,6 @@ async function send() {
         } catch (e) {
           dlog('update species fail', e?.data || e);
         }
-        
         step = 'role'; save(KEY_STEP, step);
       }
     } else if (step === 'role') {
@@ -436,7 +497,6 @@ async function send() {
         } catch (e) {
           dlog('update role fail', e?.data || e);
         }
-        
         step = 'done'; save(KEY_STEP, step);
       }
     }
@@ -461,7 +521,6 @@ async function resolveRoll() {
     const res = await api('/roll', { skill });
     pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
 
-
     // 2) pintar el resultado en el bloque de tirada (queda fijo)
     const outcomeText = (typeof res.roll !== 'undefined')
       ? ` · ${res.roll} → ${res.outcome}`
@@ -475,14 +534,14 @@ async function resolveRoll() {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
       history,
       character_id: Number(character?.id) || null, // <-- SOLO id numérico
-      stage: step
+      stage: mapStageForDM(step)
     });
 
     const nextText = (follow && follow.text) ? follow.text : res.text;
     pushDM(nextText || res.text || 'La situación evoluciona…');
 
   } catch (e) {
-    dlog('resolveRoll error', e?.data || e);
+    dlog('resolveRoll error:', e?.data || e);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
@@ -492,6 +551,92 @@ async function resolveRoll() {
   }
 }
 
+// ====== Handler de confirmación Sí/No ======
+let busyConfirm = false;
+async function handleConfirmDecision(decision) {
+  if (!pendingConfirm || busyConfirm) return;
+  busyConfirm = true;
+  const { type } = pendingConfirm;
+
+  try {
+    // 1) Actualizar personaje/step si SÍ
+    if (decision === 'yes') {
+      if (type === 'name') {
+        if (!character) {
+          character = {
+            name: pendingConfirm.name,
+            species: '',
+            role: '',
+            publicProfile: true,
+            lastLocation: 'Tatooine — Cantina de Mos Eisley'
+          };
+        } else {
+          character.name = pendingConfirm.name;
+        }
+        save(KEY_CHAR, character);
+        try {
+          const r = await api('/world/characters', { character });
+          if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
+        } catch (e) { dlog('upsert name fail', e?.data || e); }
+        step = 'species'; save(KEY_STEP, step);
+
+      } else if (type === 'build') {
+        if (!character) {
+          character = { name: 'Aventurer@', species: pendingConfirm.species, role: pendingConfirm.role, publicProfile: true };
+        } else {
+          character.species = pendingConfirm.species;
+          character.role = pendingConfirm.role;
+        }
+        save(KEY_CHAR, character);
+        try {
+          const r = await api('/world/characters', { character });
+          if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
+        } catch (e) { dlog('upsert build fail', e?.data || e); }
+        step = 'done'; save(KEY_STEP, step);
+      }
+    }
+
+    // 2) Enviar ACK al Máster y procesar su respuesta
+    const history = msgs.slice(-8);
+    const follow = await api('/dm/respond', {
+      message: `<<CONFIRM_ACK TYPE="${type}" DECISION="${decision}">>`,
+      history,
+      character_id: Number(character?.id) || null,
+      stage: mapStageForDM(step)
+    });
+
+    let nextText = (follow && follow.text) ? follow.text : '';
+
+    // Encadenados: parsear confirm si llega otra
+    const conf2 = parseConfirmTag(nextText);
+    if (conf2) {
+      pendingConfirm = conf2.pending;
+      save(KEY_CONFIRM, pendingConfirm);
+      updateConfirmCta();
+      nextText = conf2.cleaned || nextText;
+    } else {
+      pendingConfirm = null; save(KEY_CONFIRM, pendingConfirm);
+      updateConfirmCta();
+    }
+
+    // Encadenados: parsear roll si llega
+    const roll2 = parseRollTag(nextText);
+    if (roll2) {
+      pendingRoll = { skill: roll2.skill };
+      updateRollCta();
+      nextText = roll2.cleaned || nextText;
+    }
+
+    if (nextText) pushDM(nextText);
+
+  } catch (e) {
+    dlog('handleConfirmDecision error', e?.data || e);
+    alert(e.message || 'No se pudo procesar la confirmación');
+  } finally {
+    busyConfirm = false;
+    render(); // refrescar UI
+  }
+}
 
 // Migración guest → user (opcional)
 function migrateGuestToUser(userId) {
@@ -499,15 +644,19 @@ function migrateGuestToUser(userId) {
   const gMsgs = load('sw:guest:msgs');
   const gChar = load('sw:guest:char');
   const gStep = load('sw:guest:step');
+  const gConfirm = load('sw:guest:confirm');
   const kMsgs = `sw:${userId}:msgs`;
   const kChar = `sw:${userId}:char`;
   const kStep = `sw:${userId}:step`;
+  const kConfirm = `sw:${userId}:confirm`;
   if (gMsgs && !localStorage.getItem(kMsgs)) localStorage.setItem(kMsgs, JSON.stringify(gMsgs));
   if (gChar && !localStorage.getItem(kChar)) localStorage.setItem(kChar, JSON.stringify(gChar));
   if (gStep && !localStorage.getItem(kStep)) localStorage.setItem(kStep, JSON.stringify(gStep));
+  if (gConfirm && !localStorage.getItem(kConfirm)) localStorage.setItem(kConfirm, JSON.stringify(gConfirm));
   localStorage.removeItem('sw:guest:msgs');
   localStorage.removeItem('sw:guest:char');
   localStorage.removeItem('sw:guest:step');
+  localStorage.removeItem('sw:guest:confirm');
 }
 
 // ============================================================
@@ -548,10 +697,11 @@ async function doAuth(kind) {
     migrateGuestToUser(user.id);
 
     // reset keys/estado de usuario
-    KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
+    KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []);
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
+    pendingConfirm = load(KEY_CONFIRM, null);
 
     // Intentar recuperar personaje — si 404, lo ignoramos y seguimos con sesión OK
     let me = null;
