@@ -128,6 +128,8 @@ let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
 let pendingRoll = null; // { skill?: string }
+let lastRoll = null;    // { skill: string, outcomeText: string }
+
 
 // ============================================================
 //                        DOM
@@ -144,6 +146,9 @@ const rollCta = document.getElementById('roll-cta');
 const rollSkillEl = document.getElementById('roll-skill');
 const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
+const rollTitleEl = document.getElementById('roll-title');
+const rollOutcomeEl = document.getElementById('roll-outcome');
+
 
 // Listeners
 sendBtn.addEventListener('click', send);
@@ -151,7 +156,16 @@ inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 resolveBtn.addEventListener('click', resolveRoll);
 authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
-cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
+cancelBtn.addEventListener('click', () => {
+  if (pendingRoll) {
+    const skill = pendingRoll.skill || 'Acción';
+    lastRoll = { skill, outcomeText: ' · cancelada' }; // se queda fijo en el bloque
+    pushDM(`🎲 **Tirada cancelada** (${skill})`);
+  }
+  pendingRoll = null;
+  updateRollCta();
+});
+
 
 // ============================================================
 //                          BOOT
@@ -300,13 +314,36 @@ function updatePlaceholder() {
   inputEl.placeholder = placeholders[step] || placeholders.done;
 }
 function updateRollCta() {
+  const actionsEl = rollCta.querySelector('.roll-cta__actions');
+
   if (pendingRoll) {
+    rollTitleEl.textContent = 'Tirada:';
+    rollSkillEl.textContent = ` ${pendingRoll.skill || 'Acción'}`;
+    rollOutcomeEl.textContent = ' · pendiente';
     rollCta.classList.remove('hidden');
-    rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill}` : '';
-  } else {
-    rollCta.classList.add('hidden');
+    if (actionsEl) actionsEl.style.display = '';
+    resolveBtn.disabled = false;
+    cancelBtn.disabled = false;
+    return;
   }
+
+  if (lastRoll) {
+    rollTitleEl.textContent = 'Tirada:';
+    rollSkillEl.textContent = ` ${lastRoll.skill || 'Acción'}`;
+    rollOutcomeEl.textContent = lastRoll.outcomeText || '';
+    rollCta.classList.remove('hidden');
+    if (actionsEl) actionsEl.style.display = 'none'; // ocultar botones una vez resuelta/cancelada
+    resolveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    return;
+  }
+
+  // sin tirada activa ni última tirada -> ocultar
+  rollCta.classList.add('hidden');
+  rollOutcomeEl.textContent = '';
+  rollSkillEl.textContent = '';
 }
+
 
 // --- Detectar etiqueta de tirada en el texto del Máster ---
 function parseRollTag(txt = '') {
@@ -416,10 +453,21 @@ async function resolveRoll() {
   busy = true;
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
-  try {
-    // /api/roll no necesita character; evitamos arrastrar UUIDs de guest
-    const res = await api('/roll', { skill });
 
+  try {
+    // 1) tirada al servidor
+    const res = await api('/roll', { skill });
+    pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
+
+
+    // 2) pintar el resultado en el bloque de tirada (queda fijo)
+    const outcomeText = (typeof res.roll !== 'undefined')
+      ? ` · ${res.roll} → ${res.outcome}`
+      : ` · ${res.outcome || 'resultado'}`;
+    lastRoll = { skill, outcomeText };
+    updateRollCta();
+
+    // 3) notificar al Máster el outcome para que continúe la narración
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
@@ -427,17 +475,21 @@ async function resolveRoll() {
       character_id: Number(character?.id) || null, // <-- SOLO id numérico
       stage: step
     });
+
     const nextText = (follow && follow.text) ? follow.text : res.text;
     pushDM(nextText || res.text || 'La situación evoluciona…');
+
   } catch (e) {
     dlog('resolveRoll error', e?.data || e);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
+    // limpiamos la tirada pendiente; el bloque permanece mostrando lastRoll
     pendingRoll = null;
     render();
   }
 }
+
 
 // Migración guest → user (opcional)
 function migrateGuestToUser(userId) {

@@ -42,14 +42,16 @@
     <main class="chat-wrap">
       <section id="chat" class="chat"></section>
 
-      <section id="roll-cta" class="roll-cta hidden">
+      <!-- CTA de tirada -->
+      <section id="roll-cta" class="roll-cta hidden" aria-live="polite">
         <div class="roll-cta__text">
-          <strong>Tirada pendiente</strong><span id="roll-skill"></span>. Pulsa
-          <strong>Resolver tirada</strong> cuando quieras.
+          <strong id="roll-title">Tirada:</strong>
+          <span id="roll-skill">—</span>
+          <span id="roll-outcome" class="muted"></span>
         </div>
         <div class="roll-cta__actions">
-          <button id="resolve-btn">Resolver tirada</button>
-          <button id="cancel-btn" class="outline">Cancelar</button>
+          <button id="resolve-btn" type="button">Resolver tirada</button>
+          <button id="cancel-btn" type="button" class="outline">Cancelar</button>
         </div>
       </section>
 
@@ -64,10 +66,9 @@
     </main>
 
     <footer class="app-footer">
-      <span class="muted"
-        >/privado o /publico para tu perfil. (texto para indicaciones
-        técnias)</span
-      >
+      <span class="muted">
+        /privado o /publico para tu perfil. (texto para indicaciones técnicas)
+      </span>
     </footer>
 
     <!-- API base: detect origin automatically -->
