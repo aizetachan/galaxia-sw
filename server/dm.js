@@ -50,16 +50,13 @@ async function saveMsg(userId, role, text) {
 }
 
 async function getNumericCharacterId({ body, userId }) {
-  // 1) si viene en el body como character_id numérico, usarlo
   const cidFromBody = toInt(body?.character_id);
   if (cidFromBody) return cidFromBody;
 
-  // (Ignorar body.character.id si es un UUID)
   if (body?.character?.id && !toInt(body.character.id)) {
     console.log('[DM] Ignoring non-numeric character.id from body (guest UUID)');
   }
 
-  // 2) si hay usuario logueado, buscar su pj en DB
   if (hasDb && toInt(userId)) {
     try {
       const { rows } = await sql(
@@ -102,6 +99,28 @@ async function worldBrief(characterId) {
   }
 }
 
+/* ========= historial reciente (para prompt y /resume) ========= */
+function compressLine(s = '') {
+  return String(s).replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
+async function getRecentChatSummary(userId, limit = 200) {
+  if (!hasDb || !toInt(userId)) return { lines: [], lastTs: null };
+  const uid = toInt(userId);
+  const { rows } = await sql(
+    `SELECT role, text, ts
+       FROM chat_messages
+      WHERE user_id = $1
+      ORDER BY ts DESC
+      LIMIT $2`,
+    [uid, Math.min(limit, 200)]
+  );
+  const ordered = rows.slice().reverse(); // cronológico
+  const lines = ordered.map(r => `${r.role === 'user' ? 'Jugador' : 'Máster'}: ${compressLine(r.text || '')}`);
+  const lastTs = rows[0]?.ts || null;
+  return { lines, lastTs };
+}
+
 /* ========= llamada robusta a OpenAI ========= */
 function isGpt5(model) {
   return /^gpt-5/i.test(model || '');
@@ -142,7 +161,7 @@ async function callOpenAI({ client, model, system, userText }) {
   }
 }
 
-/* ========= handler ========= */
+/* ========= handler principal ========= */
 async function handleDM(req, res) {
   const url = req.originalUrl || req.url;
   const userId = req.auth?.userId || null;
@@ -169,14 +188,23 @@ async function handleDM(req, res) {
     const characterId = await getNumericCharacterId({ body: req.body, userId });
     await saveMsg(userId, 'user', text);
 
-    const brief = await worldBrief(characterId);
+    const [brief, history] = await Promise.all([
+      worldBrief(characterId),
+      getRecentChatSummary(userId, 80), // unas 80 líneas para contexto
+    ]);
+
     const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+    const historyBlock = (history.lines.length
+      ? ('\nHistorial reciente (resumen cronológico corto):\n' + history.lines.slice(-20).join('\n'))
+      : '');
+
     const system = [
       'Eres el Máster de un juego de rol en una galaxia compartida.',
       'Responde SIEMPRE en español, 2–6 frases, enfocado a acción y consecuencias.',
-      'Integra continuidad a partir del estado persistido y documentos/MD.',
+      'Integra continuidad a partir del estado persistido y del historial reciente del jugador.',
       'Propón 2–3 opciones claras para el siguiente paso del jugador.',
-      brief ? '\nContexto del mundo:\n' + brief : ''
+      brief ? ('\nContexto del mundo:\n' + brief) : '',
+      historyBlock,
     ].join('\n');
 
     let outText = null;
@@ -214,8 +242,53 @@ async function handleDM(req, res) {
   }
 }
 
+/* ========= /api/dm/resume =========
+   Devuelve saludo + mini-resumen de la última sesión, si la hay.
+   Útil cuando el chat local está vacío pero el usuario tiene sesión. */
+router.get('/resume', optionalAuth, async (req, res) => {
+  try {
+    const userId = toInt(req.auth?.userId);
+    if (!userId || !hasDb) {
+      return res.json({ ok: true, text: null, empty: true });
+    }
+
+    // Personaje y localización (si existen)
+    const { rows: cRows } = await sql(
+      `SELECT id, name, last_location
+         FROM characters
+        WHERE owner_user_id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    const char = cRows?.[0] || null;
+
+    // Últimos mensajes para resumen
+    const { lines } = await getRecentChatSummary(userId, 40);
+    if (!lines.length) {
+      return res.json({ ok: true, text: null, empty: true });
+    }
+
+    // Resumen muy simple (sin depender de OpenAI)
+    const short = lines.slice(-10).join(' · ');
+    const helloName = char?.name ? `, **${char.name}**` : '';
+    const loc = char?.last_location ? ` en **${char.last_location}**` : '';
+    const text =
+      `Salud de nuevo${helloName}${loc}. Resumen anterior: ${short}. ` +
+      `¿Cómo deseas continuar?`;
+
+    return res.json({
+      ok: true,
+      text,
+      character: char || null,
+      empty: false
+    });
+  } catch (e) {
+    console.error('[DM/resume] error:', e?.message || e);
+    return res.json({ ok: true, text: null, empty: true });
+  }
+});
+
 /* ========= rutas ========= */
 router.post('/', optionalAuth, handleDM);
 router.post('/respond', optionalAuth, handleDM);
-
 export default router;

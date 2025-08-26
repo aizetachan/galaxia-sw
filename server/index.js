@@ -4,6 +4,7 @@ import cors from 'cors';
 
 import dmRouter from './dm.js';               // /respond, etc.
 import worldRouter from './world.js';         // /world/..., /characters/...
+import chatRouter from './chat.js';
 import { register, login, requireAuth } from './auth.js';
 
 const app = express();
@@ -112,6 +113,7 @@ app.use('/api/dm', dmRouter);
 // Porque dentro del router usamos prefijos /world/... y /characters/...
 // Resultado final: /api/world/..., /api/characters/:id/state, etc.
 app.use('/api', worldRouter);
+app.use('/api/chat', chatRouter);
 
 /* ====== Tiradas demo ====== */
 app.post('/api/roll', async (req, res) => {

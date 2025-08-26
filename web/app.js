@@ -188,10 +188,16 @@ cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta();
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  if (!msgs.length) {
+  // — Saludo inteligente: si hay sesión y no hay chat local, pedimos /dm/resume
+  if ((AUTH?.user?.id) && msgs.length === 0) {
+    await showResumeIfAny();
+  }
+  // Si no hay sesión o /resume no devolvió nada, mostramos bienvenida básica si sigue vacío
+  if (msgs.length === 0) {
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
+
   render();
   dlog('Boot done');
 })();
@@ -451,6 +457,25 @@ function migrateGuestToUser(userId) {
 }
 
 // ============================================================
+//                 /dm/resume helper (saludo/mini-resumen)
+// ============================================================
+async function showResumeIfAny() {
+  try {
+    const r = await apiGet('/dm/resume');
+    if (r?.ok && !r.empty && r.text) {
+      if (r.character) {
+        character = r.character;
+        save(KEY_CHAR, character);
+        if (step !== 'done') { step = 'done'; save(KEY_STEP, step); }
+      }
+      pushDM(r.text);
+    }
+  } catch (e) {
+    dlog('resume fail', e?.data || e);
+  }
+}
+
+// ============================================================
 //                     Auth (robusto con 404)
 // ============================================================
 async function doAuth(kind) {
@@ -464,6 +489,9 @@ async function doAuth(kind) {
     const { token, user } = (await api(url, { username, pin }));
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
+
+    // Migrar contenido guest a usuario real (si existía)
+    migrateGuestToUser(user.id);
 
     // reset keys/estado de usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step');
@@ -484,10 +512,15 @@ async function doAuth(kind) {
 
     authStatusEl.textContent = `Hola, ${user.username}`;
 
-    if (character?.name && step !== 'done') {
-      step = 'done'; save(KEY_STEP, step);
-      pushDM(`Salud de nuevo, **${character.name}**. Retomamos en **${character.lastLocation || 'la cantina'}**.`);
+    // Si el chat está vacío tras login, pedimos /dm/resume para saludar con resumen
+    if (msgs.length === 0) {
+      await showResumeIfAny();
+      if (msgs.length === 0 && character?.name && step !== 'done') {
+        step = 'done'; save(KEY_STEP, step);
+        pushDM(`Salud de nuevo, **${character.name}**. Retomamos en **${character.lastLocation || 'la cantina'}**.`);
+      }
     }
+
     render();
   } catch (e) {
     dlog('doAuth error:', e?.data || e);
