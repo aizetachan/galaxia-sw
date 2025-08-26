@@ -80,20 +80,15 @@ async function probeHealth(base) {
  * 6) DEFAULT_API_BASE
  */
 async function ensureApiBase() {
-  const override = getQuery('api');                        // ?api=https://mi-api.xyz/api
+  const override = getQuery('api');
   const cached   = localStorage.getItem(API_STORE_KEY) || '';
   const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
   const metaTag  = getMeta('api-base') || '';
   const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
 
-  const candidates = [
-    override,
-    cached,
-    winSet,
-    metaTag,
-    origin,
-    DEFAULT_API_BASE,
-  ].filter(Boolean).map(s => String(s).replace(/\/+$/, ''));
+  const candidates = [override, cached, winSet, metaTag, origin, DEFAULT_API_BASE]
+    .filter(Boolean)
+    .map(s => String(s).replace(/\/+$/, ''));
 
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
@@ -161,9 +156,9 @@ resolveBtn.addEventListener('click', resolveRoll);
 authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => {
-  pushDM('🎲 Tirada cancelada (… )');  // si quieres que quede constancia en el chat
+  pushDM('🎲 Tirada cancelada (… )');
   pendingRoll = null;
-  updateRollCta();   // <- oculta el bloque fijo
+  updateRollCta();
 });
 if (confirmYesBtn) confirmYesBtn.addEventListener('click', () => handleConfirmDecision('yes'));
 if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDecision('no'));
@@ -180,37 +175,28 @@ if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDe
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     dlog('Saved auth =', saved);
     if (saved?.token && saved?.user?.id) {
-      // Restauramos AUTH y validamos token
       AUTH = saved;
       await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []);
-      character = load(KEY_CHAR, null);
-      step = load(KEY_STEP, 'name');
-      pendingConfirm = load(KEY_CONFIRM, null);
+      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
       authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
       AUTH = null;
       localStorage.removeItem('sw:auth');
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []);
-      character = load(KEY_CHAR, null);
-      step = load(KEY_STEP, 'name');
-      pendingConfirm = load(KEY_CONFIRM, null);
+      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
     }
   } catch (e) {
     dlog('Auth restore error:', e);
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  // — Saludo inteligente: si hay sesión y no hay chat local, pedimos /dm/resume
   if ((AUTH?.user?.id) && msgs.length === 0) {
     await showResumeIfAny();
   }
-  // Si no hay sesión o /resume no devolvió nada, mostramos bienvenida básica si sigue vacío
   if (msgs.length === 0) {
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
@@ -247,7 +233,7 @@ function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
 
-// ---- Fetch helpers con logging profundo
+// ---- Fetch helpers
 async function readMaybeJson(res) {
   const ct = res.headers.get('content-type') || '';
   const body = await res.text();
@@ -306,7 +292,7 @@ function render() {
   chatEl.scrollTop = chatEl.scrollHeight;
   updatePlaceholder();
   updateRollCta();
-  updateConfirmCta(); // CTA de confirmación
+  updateConfirmCta();
 }
 
 function updatePlaceholder() {
@@ -328,9 +314,8 @@ function updateRollCta() {
   }
 }
 
-// --- Detectar etiqueta de tirada en el texto del Máster ---
+// --- Detectar etiqueta de tirada ---
 function parseRollTag(txt = '') {
-  // Acepta: <<ROLL SKILL="Combate" REASON="...">>
   const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
   const m = re.exec(txt);
   if (!m) return null;
@@ -339,10 +324,7 @@ function parseRollTag(txt = '') {
   return { skill, cleaned };
 }
 
-// --- Detectar etiqueta de confirmación en el texto del Máster ---
-// Acepta:
-//   <<CONFIRM NAME="Miau Cat">>
-//   <<CONFIRM SPECIES="Wookiee" ROLE="Cazarrecompensas">>
+// --- Detectar etiqueta de confirmación ---
 function parseConfirmTag(txt = '') {
   const re = /<<\s*CONFIRM\b([^>]*)>>/i;
   const m = re.exec(txt);
@@ -353,22 +335,14 @@ function parseConfirmTag(txt = '') {
     attrs[mm[1].toUpperCase()] = mm[2];
   }
   let pending = null;
-  if (attrs.NAME) {
-    pending = { type: 'name', name: attrs.NAME };
-  } else if (attrs.SPECIES && attrs.ROLE) {
-    pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
-  }
+  if (attrs.NAME) pending = { type: 'name', name: attrs.NAME };
+  else if (attrs.SPECIES && attrs.ROLE) pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
   const cleaned = txt.replace(re, '').trim();
   return { pending, cleaned };
 }
 
 // ====== CTA de Confirmación ======
-function mapStageForDM(s) {
-  // El prompt del Máster entiende 'name' | 'build' | 'done'.
-  // Nuestro front usa 'species'/'role'. Mapeamos ambos a 'build'.
-  if (s === 'species' || s === 'role') return 'build';
-  return s || 'name';
-}
+function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build'; return s || 'name'; }
 
 function updateConfirmCta() {
   if (!confirmCta || !confirmSummaryEl) return;
@@ -384,6 +358,30 @@ function updateConfirmCta() {
   confirmCta.classList.remove('hidden');
 }
 
+// ====== Helper central para pintar respuestas del Máster ======
+function handleIncomingDMText(rawText) {
+  let txt = rawText || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
+
+  // Confirmación
+  const conf = parseConfirmTag(txt);
+  if (conf) {
+    pendingConfirm = conf.pending;
+    save(KEY_CONFIRM, pendingConfirm);
+    updateConfirmCta();
+    txt = conf.cleaned || txt;
+  }
+
+  // Tirada
+  const roll = parseRollTag(txt);
+  if (roll) {
+    pendingRoll = { skill: roll.skill };
+    updateRollCta();
+    txt = roll.cleaned || `Necesitamos una tirada para **${roll.skill}**. Pulsa “Resolver tirada”.`;
+  }
+
+  pushDM(txt);
+}
+
 // ============================================================
 //                     Hablar con el Máster
 // ============================================================
@@ -394,30 +392,10 @@ async function talkToDM(message) {
     const res = await api('/dm/respond', {
       message,
       history,
-      character_id: Number(character?.id) || null, // <-- SOLO id numérico
-      stage: mapStageForDM(step) // enviamos stage mapeado
+      character_id: Number(character?.id) || null,
+      stage: mapStageForDM(step)
     });
-
-    let txt = res.text || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
-
-    // 1) Confirmación (onboarding)
-    const conf = parseConfirmTag(txt);
-    if (conf) {
-      pendingConfirm = conf.pending;
-      save(KEY_CONFIRM, pendingConfirm);
-      updateConfirmCta();
-      txt = conf.cleaned || txt;
-    }
-
-    // 2) Tirada
-    const roll = parseRollTag(txt);
-    if (roll) {
-      pendingRoll = { skill: roll.skill };
-      updateRollCta();
-      txt = roll.cleaned || `Necesitamos una tirada para **${roll.skill}**. Pulsa “Resolver tirada”.`;
-    }
-
-    pushDM(txt);
+    handleIncomingDMText(res.text);
   } catch (e) {
     dlog('talkToDM error:', e?.data || e);
     pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
@@ -431,7 +409,7 @@ async function send() {
   const value = inputEl.value.trim(); if (!value) return;
   dlog('send', { value, step });
 
-  // ⚠️ Si hay confirmación pendiente, no avances el flujo antiguo; deja que lo gestione el Máster.
+  // Si hay confirmación pendiente, no avances el flujo antiguo; deja que lo gestione el Máster.
   if (pendingConfirm && step !== 'done') {
     pushUser(value);
     await talkToDM(value);
@@ -465,13 +443,8 @@ async function send() {
       save(KEY_CHAR, character);
       try {
         const r = await api('/world/characters', { character });
-        if (r?.character?.id) {
-          character.id = r.character.id;      // <- guardamos el ID que nos devuelve el server
-          save(KEY_CHAR, character);
-        }
-      } catch (e) {
-        dlog('create char fail', e?.data || e);
-      }
+        if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
+      } catch (e) { dlog('create char fail', e?.data || e); }
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
@@ -481,13 +454,9 @@ async function send() {
         save(KEY_CHAR, character);
         try {
           const r = await api('/world/characters', { character });
-          if (r?.character?.id && !character.id) {
-            character.id = r.character.id;
-          }
+          if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
-        } catch (e) {
-          dlog('update species fail', e?.data || e);
-        }
+        } catch (e) { dlog('update species fail', e?.data || e); }
         step = 'role'; save(KEY_STEP, step);
       }
     } else if (step === 'role') {
@@ -498,13 +467,9 @@ async function send() {
         save(KEY_CHAR, character);
         try {
           const r = await api('/world/characters', { character });
-          if (r?.character?.id && !character.id) {
-            character.id = r.character.id;
-          }
+          if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
-        } catch (e) {
-          dlog('update role fail', e?.data || e);
-        }
+        } catch (e) { dlog('update role fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
       }
     }
@@ -525,28 +490,22 @@ async function resolveRoll() {
   dlog('resolveRoll', { skill });
 
   try {
-    // 1) tirada al servidor
     const res = await api('/roll', { skill });
     pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
 
-    // 2) pintar el resultado en el bloque de tirada (queda fijo)
-    const outcomeText = (typeof res.roll !== 'undefined')
-      ? ` · ${res.roll} → ${res.outcome}`
-      : ` · ${res.outcome || 'resultado'}`;
+    const outcomeText = (typeof res.roll !== 'undefined') ? ` · ${res.roll} → ${res.outcome}` : ` · ${res.outcome || 'resultado'}`;
     lastRoll = { skill, outcomeText };
     updateRollCta();
 
-    // 3) notificar al Máster el outcome para que continúe la narración
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
       history,
-      character_id: Number(character?.id) || null, // <-- SOLO id numérico
+      character_id: Number(character?.id) || null,
       stage: mapStageForDM(step)
     });
 
-    const nextText = (follow && follow.text) ? follow.text : res.text;
-    pushDM(nextText || res.text || 'La situación evoluciona…');
+    handleIncomingDMText((follow && follow.text) ? follow.text : res.text);
 
   } catch (e) {
     dlog('resolveRoll error', e?.data || e);
@@ -554,7 +513,7 @@ async function resolveRoll() {
   } finally {
     busy = false;
     pendingRoll = null;
-    updateRollCta();   // <- oculta el bloque fijo
+    updateRollCta();
     render();
   }
 }
@@ -567,17 +526,10 @@ async function handleConfirmDecision(decision) {
   const { type } = pendingConfirm;
 
   try {
-    // 1) Actualizar personaje/step si SÍ
     if (decision === 'yes') {
       if (type === 'name') {
         if (!character) {
-          character = {
-            name: pendingConfirm.name,
-            species: '',
-            role: '',
-            publicProfile: true,
-            lastLocation: 'Tatooine — Cantina de Mos Eisley'
-          };
+          character = { name: pendingConfirm.name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
         } else {
           character.name = pendingConfirm.name;
         }
@@ -587,7 +539,6 @@ async function handleConfirmDecision(decision) {
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert name fail', e?.data || e); }
         step = 'species'; save(KEY_STEP, step);
-
       } else if (type === 'build') {
         if (!character) {
           character = { name: 'Aventurer@', species: pendingConfirm.species, role: pendingConfirm.role, publicProfile: true };
@@ -604,7 +555,6 @@ async function handleConfirmDecision(decision) {
       }
     }
 
-    // 2) Enviar ACK al Máster y procesar su respuesta
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<CONFIRM_ACK TYPE="${type}" DECISION="${decision}">>`,
@@ -613,36 +563,14 @@ async function handleConfirmDecision(decision) {
       stage: mapStageForDM(step)
     });
 
-    let nextText = (follow && follow.text) ? follow.text : '';
-
-    // Encadenados: parsear confirm si llega otra
-    const conf2 = parseConfirmTag(nextText);
-    if (conf2) {
-      pendingConfirm = conf2.pending;
-      save(KEY_CONFIRM, pendingConfirm);
-      updateConfirmCta();
-      nextText = conf2.cleaned || nextText;
-    } else {
-      pendingConfirm = null; save(KEY_CONFIRM, pendingConfirm);
-      updateConfirmCta();
-    }
-
-    // Encadenados: parsear roll si llega
-    const roll2 = parseRollTag(nextText);
-    if (roll2) {
-      pendingRoll = { skill: roll2.skill };
-      updateRollCta();
-      nextText = roll2.cleaned || nextText;
-    }
-
-    if (nextText) pushDM(nextText);
+    handleIncomingDMText((follow && follow.text) ? follow.text : '');
 
   } catch (e) {
     dlog('handleConfirmDecision error', e?.data || e);
     alert(e.message || 'No se pudo procesar la confirmación');
   } finally {
     busyConfirm = false;
-    render(); // refrescar UI
+    render();
   }
 }
 
@@ -668,7 +596,7 @@ function migrateGuestToUser(userId) {
 }
 
 // ============================================================
-//                 /dm/resume helper (saludo/mini-resumen)
+//                 /dm/resume helper
 // ============================================================
 async function showResumeIfAny() {
   try {
@@ -701,30 +629,18 @@ async function doAuth(kind) {
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
-    // Migrar contenido guest a usuario real (si existía)
     migrateGuestToUser(user.id);
 
-    // reset keys/estado de usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-    msgs = load(KEY_MSGS, []);
-    character = load(KEY_CHAR, null);
-    step = load(KEY_STEP, 'name');
-    pendingConfirm = load(KEY_CONFIRM, null);
+    msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
-    // Intentar recuperar personaje — si 404, lo ignoramos y seguimos con sesión OK
     let me = null;
-    try {
-      me = await apiGet('/world/characters/me');
-    } catch (e) {
-      if (e?.response?.status !== 404) throw e; // sólo ignoramos 404
-      dlog('characters/me not found (se ignora y se continúa)', e?.data || e);
-    }
-
+    try { me = await apiGet('/world/characters/me'); }
+    catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
 
-    // Si el chat está vacío tras login, pedimos /dm/resume para saludar con resumen
     if (msgs.length === 0) {
       await showResumeIfAny();
       if (msgs.length === 0 && character?.name && step !== 'done') {
@@ -735,25 +651,23 @@ async function doAuth(kind) {
 
     render();
 
-    // 🔸 Kickoff onboarding si todavía no está completado (arranca al Máster)
+    // Kickoff onboarding si no está completado — AHORA PINTA EL TEXTO
     if (msgs.length === 0 && step !== 'done') {
       try {
-        await api('/dm/respond', {
+        const kick = await api('/dm/respond', {
           message: '',
           history: [],
           character_id: Number(character?.id) || null,
           stage: mapStageForDM(step)
         });
+        handleIncomingDMText(kick.text);
       } catch (e) { dlog('kickoff fail', e?.data || e); }
     }
 
   } catch (e) {
     dlog('doAuth error:', e?.data || e);
     let code = '';
-    try {
-      code = (e.data?.json?.error) || (await e.response?.json?.())?.error || '';
-    } catch {}
-
+    try { code = (e.data?.json?.error) || (await e.response?.json?.())?.error || ''; } catch {}
     const friendly = {
       INVALID_CREDENTIALS: 'Usuario (3–24 minúsculas/números/_) y PIN de 4 dígitos.',
       USERNAME_TAKEN: 'Ese usuario ya existe.',
@@ -762,7 +676,6 @@ async function doAuth(kind) {
       unauthorized: 'No autorizado.',
       not_found: 'Recurso no encontrado.',
     };
-
     authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
   }
 }
