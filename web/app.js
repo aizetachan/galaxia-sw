@@ -128,7 +128,7 @@ let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
 let pendingRoll = null; // { skill?: string }
-let lastRoll = null;    // { skill: string, outcomeText: string }
+
 
 
 // ============================================================
@@ -157,14 +157,11 @@ resolveBtn.addEventListener('click', resolveRoll);
 authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => {
-  if (pendingRoll) {
-    const skill = pendingRoll.skill || 'Acción';
-    lastRoll = { skill, outcomeText: ' · cancelada' }; // se queda fijo en el bloque
-    pushDM(`🎲 **Tirada cancelada** (${skill})`);
-  }
+  pushDM('🎲 Tirada cancelada (… )');  // si quieres que quede constancia en el chat
   pendingRoll = null;
-  updateRollCta();
+  updateRollCta();   // <- oculta el bloque fijo
 });
+
 
 
 // ============================================================
@@ -314,35 +311,15 @@ function updatePlaceholder() {
   inputEl.placeholder = placeholders[step] || placeholders.done;
 }
 function updateRollCta() {
-  const actionsEl = rollCta.querySelector('.roll-cta__actions');
-
   if (pendingRoll) {
-    rollTitleEl.textContent = 'Tirada:';
-    rollSkillEl.textContent = ` ${pendingRoll.skill || 'Acción'}`;
-    rollOutcomeEl.textContent = ' · pendiente';
     rollCta.classList.remove('hidden');
-    if (actionsEl) actionsEl.style.display = '';
-    resolveBtn.disabled = false;
-    cancelBtn.disabled = false;
-    return;
+    rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill}` : '';
+  } else {
+    rollCta.classList.add('hidden');
+    rollSkillEl.textContent = '';
   }
-
-  if (lastRoll) {
-    rollTitleEl.textContent = 'Tirada:';
-    rollSkillEl.textContent = ` ${lastRoll.skill || 'Acción'}`;
-    rollOutcomeEl.textContent = lastRoll.outcomeText || '';
-    rollCta.classList.remove('hidden');
-    if (actionsEl) actionsEl.style.display = 'none'; // ocultar botones una vez resuelta/cancelada
-    resolveBtn.disabled = true;
-    cancelBtn.disabled = true;
-    return;
-  }
-
-  // sin tirada activa ni última tirada -> ocultar
-  rollCta.classList.add('hidden');
-  rollOutcomeEl.textContent = '';
-  rollSkillEl.textContent = '';
 }
+
 
 
 // --- Detectar etiqueta de tirada en el texto del Máster ---
@@ -484,8 +461,8 @@ async function resolveRoll() {
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
-    // limpiamos la tirada pendiente; el bloque permanece mostrando lastRoll
     pendingRoll = null;
+    updateRollCta();   // <- oculta el bloque fijo
     render();
   }
 }
