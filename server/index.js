@@ -71,8 +71,11 @@ app.post('/api/auth/register', async (req, res) => {
   console.log('[AUTH/register] body=', req.body);
   try {
     const { username, pin } = req.body || {};
-    const user = await register(username, pin);
-    return res.json(user);
+    // Crea el usuario
+    await register(username, pin);
+    // Auto-login para devolver el mismo payload que /login
+    const payload = await login(username, pin); // -> { token, user }
+    return res.json(payload);
   } catch (e) {
     console.error('[AUTH/register] error', e);
     return res.status(400).json({ error: e.message || 'error' });
