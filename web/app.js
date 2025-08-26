@@ -394,7 +394,14 @@ async function send() {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-      try { await api('/world/characters', { character }); } catch (e) { dlog('create char fail', e?.data || e); }
+      try {  const r = await api('/world/characters', { character });
+  if (r?.character?.id) {
+    character.id = r.character.id;      // <- guardamos el ID que nos devuelve el server
+    save(KEY_CHAR, character);
+  }
+} catch (e) {
+  dlog('create char fail', e?.data || e);
+}
       step = 'species'; save(KEY_STEP, step);
     } else if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
@@ -402,7 +409,16 @@ async function send() {
       if (key) {
         character.species = map[key];
         save(KEY_CHAR, character);
-        try { await api('/world/characters', { character }); } catch (e) { dlog('update species fail', e?.data || e); }
+        try {
+          const r = await api('/world/characters', { character });
+          if (r?.character?.id && !character.id) {
+            character.id = r.character.id;
+          }
+          save(KEY_CHAR, character);
+        } catch (e) {
+          dlog('update species fail', e?.data || e);
+        }
+        
         step = 'role'; save(KEY_STEP, step);
       }
     } else if (step === 'role') {
@@ -411,7 +427,16 @@ async function send() {
       if (key) {
         character.role = map[key];
         save(KEY_CHAR, character);
-        try { await api('/world/characters', { character }); } catch (e) { dlog('update role fail', e?.data || e); }
+        try {
+          const r = await api('/world/characters', { character });
+          if (r?.character?.id && !character.id) {
+            character.id = r.character.id;
+          }
+          save(KEY_CHAR, character);
+        } catch (e) {
+          dlog('update role fail', e?.data || e);
+        }
+        
         step = 'done'; save(KEY_STEP, step);
       }
     }
