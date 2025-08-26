@@ -121,6 +121,28 @@ async function getRecentChatSummary(userId, limit = 200) {
   return { lines, lastTs };
 }
 
+/* ========= Política de idioma y de dados para el Máster ========= */
+const languagePolicy = [
+  'IDIOMA:',
+  '- Responde por defecto en español.',
+  '- Si el jugador escribe de forma clara en otro idioma o lo solicita explícitamente, responde en ese idioma.',
+].join('\n');
+
+const dicePolicy = [
+  'CUÁNDO PEDIR TIRADA:',
+  '- Pide una tirada siempre que exista: riesgo real de fracaso; oposición activa (otro personaje, facción o entorno); incertidumbre en el resultado; o que el desenlace pueda cambiar de forma significativa la narrativa.',
+  '- Casos típicos: combate, persecuciones, uso de la Fuerza, intentos de manipulación o diplomacia, hackeos, exploraciones peligrosas, decisiones críticas y cualquier situación no resoluble solo por lógica.',
+  '- No pidas tirada si la acción es rutinaria/segura o sin impacto relevante.',
+  '',
+  'CÓMO PEDIRLA:',
+  '- Emite exactamente: <<ROLL SKILL="<Habilidad>" REASON="<Motivo breve>">>.',
+  '- Solicita UNA única tirada por acción; si hay varios aspectos, elige la habilidad más pertinente.',
+  '- Si hay oposición directa, menciónalo en REASON (p. ej., "oposición del guardia").',
+  '',
+  'RESOLUCIÓN:',
+  '- Tras recibir <<DICE_OUTCOME SKILL="..." OUTCOME="success|mixed|fail">>, aplica consecuencias según las reglas y continúa la escena con claridad.',
+].join('\n');
+
 /* ========= llamada robusta a OpenAI ========= */
 function isGpt5(model) {
   return /^gpt-5/i.test(model || '');
@@ -200,9 +222,15 @@ async function handleDM(req, res) {
 
     const system = [
       'Eres el Máster de un juego de rol en una galaxia compartida.',
-      'Responde SIEMPRE en español, 2–6 frases, enfocado a acción y consecuencias.',
+      // Idioma adaptable (español por defecto).
+      languagePolicy,
+      // Estilo de respuesta y continuidad.
+      'Responde conciso (2–6 frases), orientado a acción y consecuencias.',
       'Integra continuidad a partir del estado persistido y del historial reciente del jugador.',
-      'Propón 2–3 opciones claras para el siguiente paso del jugador.',
+      // No listar opciones salvo que el jugador las pida.
+      'No enumeres opciones a menos que el jugador las pida explícitamente.',
+      // Política de dados (cuándo y cómo pedir tirada).
+      dicePolicy,
       brief ? ('\nContexto del mundo:\n' + brief) : '',
       historyBlock,
     ].join('\n');
@@ -291,4 +319,5 @@ router.get('/resume', optionalAuth, async (req, res) => {
 /* ========= rutas ========= */
 router.post('/', optionalAuth, handleDM);
 router.post('/respond', optionalAuth, handleDM);
+
 export default router;
