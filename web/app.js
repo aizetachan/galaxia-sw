@@ -7,20 +7,31 @@ function dgroup(label, fn) {
   try { fn?.(); } finally { console.groupEnd(); }
 }
 
-// === Config dinámico del backend ===
+// === Config dinámico del backend ===========================================
 function getMeta(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
 }
+function getQuery(name) {
+  try { return new URL(location.href).searchParams.get(name) || ''; } catch { return ''; }
+}
+function joinUrl(base, path) {
+  const b = String(base || '').replace(/\/+$/,'');
+  const p = String(path || '').replace(/^\/+/, '');
+  return `${b}/${p}`;
+}
 
-// Fallback de producción por defecto (ajústalo si tu API vive en otro host)
+// Fallback de producción por defecto (ajusta si tu API vive en otro host)
 const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
+// Clave de caché
+const API_STORE_KEY = 'sw:api-base';
 
-// Valor inicial (se puede sobreescribir en ensureApiBase)
+// Valor inicial (puede sobreescribirse en ensureApiBase)
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   getMeta('api-base') ||
   (typeof location !== 'undefined' ? (location.origin + '/api') : '');
 
+// Estado visual opcional
 function setServerStatus(ok, msg) {
   const el = document.getElementById('server-status');
   if (!el) return;
@@ -29,13 +40,18 @@ function setServerStatus(ok, msg) {
   el.classList.toggle('bad', !ok);
 }
 
-// Comprobar si /health responde JSON 2xx
+// Comprueba /health (debe ser JSON y 2xx)
 async function probeHealth(base) {
   const url = joinUrl(base, '/health');
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      mode: 'cors',
+      signal: ctrl.signal
+    });
     const ct = r.headers.get('content-type') || '';
     const text = await r.text();
     dlog('probe', { base, status: r.status, ct });
@@ -55,19 +71,26 @@ async function probeHealth(base) {
   }
 }
 
-// Probar en orden varias bases hasta que /health responda bien
+// Descubre y fija la API (orden: ?api → <meta> → localStorage → window → origin/api → prod)
 async function ensureApiBase() {
-  const candidates = []
-    .concat(API_BASE || [])
-    .concat(getMeta('api-base') || [])
-    .concat(typeof window !== 'undefined' && window.API_FALLBACK ? [window.API_FALLBACK] : [])
-    .concat(getMeta('api-fallback') || [])
-    .concat(typeof location !== 'undefined' ? [location.origin + '/api', location.origin] : [])
-    .concat(DEFAULT_API_BASE) // <- fallback duro
-    .filter(Boolean)
-    .map(s => String(s).replace(/\/+$/,''));
+  const override = getQuery('api');                 // ?api=https://mi-api.xyz/api
+  const metaTag  = getMeta('api-base');             // <meta name="api-base" content="...">
+  const cached   = localStorage.getItem(API_STORE_KEY) || '';
+  const windowSet= (typeof window !== 'undefined' && window.API_BASE) || '';
+  const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
 
-  // Únicos, conservando orden
+  const candidates = [
+    override,
+    metaTag,
+    cached,
+    windowSet,
+    origin,
+    DEFAULT_API_BASE,
+  ]
+  .filter(Boolean)
+  .map(s => String(s).replace(/\/+$/,''));
+
+  // únicos en orden
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
 
@@ -78,23 +101,20 @@ async function ensureApiBase() {
     dgroup(`probe ${base}`, () => console.log(result));
     if (result.ok) {
       API_BASE = base;
+      window.API_BASE = API_BASE;                // útil para depurar en consola
+      localStorage.setItem(API_STORE_KEY, base); // cachea la buena
       dlog('Using API_BASE =', API_BASE);
       setServerStatus(true, 'Server: OK');
       return;
     }
   }
+
+  // Si nada funcionó, conserva el valor inicial pero marca fallo
   console.warn('[API] No API base found. Using initial:', API_BASE || '(empty)');
   setServerStatus(false, 'Server: FAIL (no health)');
 }
 
-// === Helpers de URL (evita redirecciones por slash)
-function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');
-  const p = String(path || '').replace(/^\/+/, '');
-  return `${b}/${p}`;
-}
-
-// === State ===
+// === State ==================================================================
 let AUTH = { token: null, user: null };
 const baseKey = (suffix) => (AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `sw:guest:${suffix}`);
 let KEY_MSGS = baseKey('msgs');
@@ -105,7 +125,7 @@ let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
 let pendingRoll = null; // { skill?: string }
 
-// === DOM ===
+// === DOM ====================================================================
 const chatEl = document.getElementById('chat');
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
@@ -127,7 +147,7 @@ authLoginBtn.addEventListener('click', () => doAuth('login'));
 authRegisterBtn.addEventListener('click', () => doAuth('register'));
 cancelBtn.addEventListener('click', () => { pendingRoll = null; updateRollCta(); });
 
-// === Boot ===
+// === Boot ===================================================================
 (async function boot() {
   dlog('Boot start');
   await ensureApiBase();
@@ -168,7 +188,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   dlog('Boot done');
 })();
 
-// === Utils ===
+// === Utils ==================================================================
 function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 function now() { return Date.now(); }
@@ -239,7 +259,7 @@ async function apiGet(path) {
   return data.json ?? {};
 }
 
-// === Render ===
+// === Render ================================================================
 function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character }));
   chatEl.innerHTML = msgs.map(m => `
@@ -282,7 +302,7 @@ function parseRollTag(txt = '') {
   return { skill, cleaned };
 }
 
-// === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA ===
+// === Hablar con el Máster (LLM) — UNA SOLA RESPUESTA =======================
 async function talkToDM(message) {
   dlog('talkToDM start', { message, step, character });
   try {
@@ -310,7 +330,7 @@ async function talkToDM(message) {
   }
 }
 
-// === Send flow ===
+// === Send flow =============================================================
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
   dlog('send', { value, step });
