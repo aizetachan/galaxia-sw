@@ -1,6 +1,7 @@
 // server/world.js
 import { Router } from 'express';
 import { q } from './db.js';
+import { optionalAuth } from './auth.js'; // <- para leer req.auth si hay token
 
 const router = Router();
 
@@ -21,6 +22,87 @@ function applyStatePatch(current,patch){ const out={...current};
   if(patch?.tags){ const cur=new Set(Array.isArray(current.tags)?current.tags:[]); const adds=patch.tags?.add||[]; const rems=patch.tags?.remove||[];
     adds.forEach(t=>cur.add(t)); rems.forEach(t=>cur.delete(t)); out.tags=[...cur]; }
   return out; }
+
+// Normalizador de strings cortos (para inserts/updates)
+function s(v, max = 200){
+  if (v == null) return null;
+  const t = String(v).trim();
+  return t ? t.slice(0, max) : null;
+}
+
+/* ========= NUEVO: Perfil del personaje por usuario logueado ========= */
+// GET /api/world/characters/me
+router.get('/world/characters/me', optionalAuth, async (req, res) => {
+  try {
+    const userId = req.auth?.userId || null;
+    if (!userId) return res.status(200).json({ ok: true, character: null });
+
+    const { rows } = await q(
+      `SELECT id, name, species, role,
+              public_profile AS "publicProfile",
+              last_location AS "lastLocation",
+              owner_user_id AS "ownerUserId"
+         FROM characters
+        WHERE owner_user_id = $1
+        LIMIT 1`,
+      [userId]
+    );
+    return res.status(200).json({ ok: true, character: rows[0] || null });
+  } catch (e) {
+    console.error('[WORLD] /world/characters/me error:', e?.message || e);
+    return res.status(200).json({ ok: true, character: null });
+  }
+});
+
+// POST /api/world/characters  (crea/actualiza el personaje del usuario)
+router.post('/world/characters', optionalAuth, async (req, res) => {
+  try {
+    const userId = req.auth?.userId || null;
+    const c = req.body?.character || {};
+
+    const name = s(c.name, 80);
+    const species = s(c.species, 40);
+    const role = s(c.role, 40);
+    const publicProfile = typeof c.publicProfile === 'boolean' ? c.publicProfile : true;
+    const lastLocation = s(c.lastLocation, 120);
+
+    if (userId) {
+      // UPSERT por owner_user_id (único)
+      const { rows } = await q(
+        `INSERT INTO characters (name, species, role, public_profile, last_location, owner_user_id)
+              VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (owner_user_id) DO UPDATE
+             SET name=COALESCE(EXCLUDED.name, characters.name),
+                 species=COALESCE(EXCLUDED.species, characters.species),
+                 role=COALESCE(EXCLUDED.role, characters.role),
+                 public_profile=EXCLUDED.public_profile,
+                 last_location=COALESCE(EXCLUDED.last_location, characters.last_location),
+                 updated_at=now()
+         RETURNING id, name, species, role,
+                   public_profile AS "publicProfile",
+                   last_location AS "lastLocation",
+                   owner_user_id AS "ownerUserId"`,
+        [name, species, role, publicProfile, lastLocation, userId]
+      );
+      return res.status(200).json({ ok: true, character: rows[0] });
+    }
+
+    // Invitado: crea personaje sin owner_user_id
+    const { rows } = await q(
+      `INSERT INTO characters (name, species, role, public_profile, last_location)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, name, species, role,
+                 public_profile AS "publicProfile",
+                 last_location AS "lastLocation",
+                 owner_user_id AS "ownerUserId"`,
+      [name, species, role, publicProfile, lastLocation]
+    );
+    return res.status(200).json({ ok: true, character: rows[0] });
+  } catch (e) {
+    console.error('[WORLD] /world/characters error:', e?.message || e);
+    return res.status(200).json({ ok: false, error: 'world_save_failed' });
+  }
+});
 
 /* ---- Contexto ---- */
 router.get('/world/context', async (req,res)=>{ try{

@@ -3,22 +3,21 @@ import express from 'express';
 import cors from 'cors';
 
 import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world.js';         // /characters, ...
+import worldRouter from './world.js';         // /world/..., /characters/...
 import { register, login, requireAuth } from './auth.js';
 
 const app = express();
 
 /* ====== Logging ====== */
-// Logger mínimo siempre activo (no depende de morgan)
 app.use((req, _res, next) => {
   console.log('[REQ]', req.method, req.url, 'Origin=', req.headers.origin || '-', 'UA=', req.headers['user-agent'] || '-');
   next();
 });
 
-// Intentar cargar morgan de forma opcional (no rompe si no está o falla)
+// morgan opcional
 let morganMW = null;
 try {
-  const m = await import('morgan');           // ESM top-level await
+  const m = await import('morgan');
   morganMW = m.default || m;
   console.log('[BOOT] morgan loaded');
 } catch (e) {
@@ -43,15 +42,14 @@ const corsOpts = {
     console.warn('[CORS] blocked:', origin, 'Allowed=', ALLOWED);
     return cb(null, false);
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOpts));
-// Responde preflight para cualquier ruta (incluye /api/*)
-app.options('*', cors(corsOpts));
+app.options('*', cors(corsOpts)); // preflight
 
 /* ====== Salud (en /health y /api/health) ====== */
 function healthPayload() {
@@ -97,10 +95,8 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   return res.json({ user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-// Logout opcional (no borra histórico, solo la sesión si lo implementas)
 app.post('/api/auth/logout', requireAuth, async (_req, res) => {
   try {
-    // Si guardas sesiones en DB y quieres invalidarlas, hazlo aquí.
     return res.json({ ok: true });
   } catch (e) {
     console.error('[AUTH/logout] error', e);
@@ -108,11 +104,16 @@ app.post('/api/auth/logout', requireAuth, async (_req, res) => {
   }
 });
 
-/* ====== DM y World (bajo /api/*) ====== */
+/* ====== DM y World ====== */
+// DM queda exactamente igual (expectativa del front: /api/dm/respond)
 app.use('/api/dm', dmRouter);
-app.use('/api/world', worldRouter);
 
-/* ====== Tiradas ====== */
+// 🔧 IMPORTANTE: montamos worldRouter en /api (no en /api/world)
+// Porque dentro del router usamos prefijos /world/... y /characters/...
+// Resultado final: /api/world/..., /api/characters/:id/state, etc.
+app.use('/api', worldRouter);
+
+/* ====== Tiradas demo ====== */
 app.post('/api/roll', async (req, res) => {
   const { skill } = req.body || {};
   const n = Math.floor(Math.random() * 20) + 1;
@@ -125,7 +126,7 @@ app.post('/api/roll', async (req, res) => {
 /* ====== Raíz opcional ====== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
 
-/* ====== 404 en /api/* (debug útil) ====== */
+/* ====== 404 en /api/* ====== */
 app.use('/api', (req, res) => {
   console.warn('[API 404]', req.method, req.originalUrl);
   return res.status(404).json({ error: 'not_found', path: req.originalUrl });
@@ -134,7 +135,6 @@ app.use('/api', (req, res) => {
 /* ====== Manejador global de errores ====== */
 app.use((err, req, res, _next) => {
   console.error('[API ERROR]', err?.stack || err?.message || err);
-  // Nunca devolver HTML de error al front
   return res.status(500).json({ error: 'internal_server_error' });
 });
 
