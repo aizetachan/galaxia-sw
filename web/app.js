@@ -323,7 +323,7 @@ async function talkToDM(message) {
     const res = await api('/dm/respond', {
       message,
       history,
-      character,
+      character_id: Number(character?.id) || null, // <-- SOLO id numérico
       stage: step
     });
 
@@ -411,12 +411,14 @@ async function resolveRoll() {
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
   try {
-    const res = await api('/roll', { skill, character });
+    // /api/roll no necesita character; evitamos arrastrar UUIDs de guest
+    const res = await api('/roll', { skill });
+
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
       history,
-      character,
+      character_id: Number(character?.id) || null, // <-- SOLO id numérico
       stage: step
     });
     const nextText = (follow && follow.text) ? follow.text : res.text;
@@ -507,7 +509,6 @@ async function doAuth(kind) {
   }
 }
 
-// (helper opcional que usas más abajo)
 function extractTargetName(text) {
   const t = (text || '').trim();
   let m = t.match(/^(?:pregunto|preguntar|preguntas|averiguar|buscar)\s+por\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})/i);
