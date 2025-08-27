@@ -504,7 +504,7 @@ function updatePlaceholder() {
     name: 'Tu nombre en el HoloNet…',
     species: 'Elige especie (Humano, Twi\'lek, Wookiee, Zabrak, Droide)…',
     role: 'Elige rol (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…',
-    done: 'Escribe tu acción o pregunta…'
+    done: 'Habla con el Master'
   };
   inputEl.placeholder = placeholders[step] || placeholders.done;
 }
