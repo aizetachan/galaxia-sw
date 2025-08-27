@@ -245,3 +245,30 @@
   #resolve-btn:active{
     transform: none;
   }
+
+  /* Estados de auth (presentación) */
+body.is-guest #guest-card { display: block; }
+body.is-guest #chat,
+body.is-guest .composer,
+body.is-guest #roll-cta,
+body.is-guest #confirm-cta { display: none; }
+
+body.is-logged #guest-card { display: none; }
+
+/* Detalles visuales de la tarjeta (opcional, usa tus tokens) */
+#guest-card .guest-info{
+  border:1px solid var(--holo);
+  background:var(--surface);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:18px 20px;
+  max-width:760px;
+  margin:16px auto 0 auto;
+  text-align:center;
+}
+#guest-card .guest-title{
+  margin:0 0 6px 0;
+  letter-spacing:.12em;
+  font-weight:700;
+  color:var(--holo);
+}

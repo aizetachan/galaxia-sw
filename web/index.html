@@ -16,30 +16,42 @@
       <span id="server-status" class="badge muted">Server: …</span>
     </header>
 
-    <section class="auth-panel">
-      <div class="auth-row">
-        <input
-          id="auth-username"
-          placeholder="Usuario"
-          autocomplete="username"
-          autocapitalize="none"
-          spellcheck="false"
-        />
-        <input
-          id="auth-pin"
-          placeholder="PIN (4 dígitos)"
-          maxlength="4"
-          inputmode="numeric"
-          pattern="[0-9]{4}"
-          autocomplete="one-time-code"
-        />
-        <button id="auth-login">Entrar</button>
-        <button id="auth-register" class="outline">Crear</button>
-        <span id="auth-status" class="muted"></span>
-      </div>
-    </section>
-
+    <!-- Tarjeta de bienvenida para invitados (mismo marco que el chat) -->
     <main class="chat-wrap">
+      <section id="guest-card" class="chat" hidden>
+        <div class="guest-info">
+          <h3 class="guest-title">MASTER:</h3>
+          <p>
+            Bienvenid@ a <strong>Galaxia SW</strong>, un mundo vivo compartido.
+            Crea un usuario y un PIN de 4 dígitos para empezar. Cuando inicies sesión,
+            el Máster te dará la bienvenida y comenzará la historia.
+          </p>
+        </div>
+
+        <!-- Reutilizamos tus mismos IDs/clases para no romper nada -->
+        <div class="auth-row" style="margin-top:16px">
+          <input
+            id="auth-username"
+            placeholder="Usuario"
+            autocomplete="username"
+            autocapitalize="none"
+            spellcheck="false"
+          />
+          <input
+            id="auth-pin"
+            placeholder="PIN (4 dígitos)"
+            maxlength="4"
+            inputmode="numeric"
+            pattern="[0-9]{4}"
+            autocomplete="one-time-code"
+          />
+          <button id="auth-login">Entrar</button>
+          <button id="auth-register" class="outline">Crear</button>
+          <span id="auth-status" class="muted"></span>
+        </div>
+      </section>
+
+      <!-- Chat real (se muestra solo cuando hay sesión) -->
       <section id="chat" class="chat"></section>
 
       <!-- CTA de tirada -->

@@ -140,6 +140,29 @@ const rollOutcomeEl = document.getElementById('roll-outcome');
 // (Confirmación inline dentro del chat)
 
 // ============================================================
+//        UI auth state (guest vs. logged) — SOLO PRESENTACIÓN
+// ============================================================
+function isLogged() {
+  return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
+}
+function updateAuthUI() {
+  const logged = isLogged();
+  document.body.classList.toggle('is-guest', !logged);
+  document.body.classList.toggle('is-logged', logged);
+  const card = document.getElementById('guest-card');
+  if (card) card.hidden = !!logged; // si no existe, no pasa nada
+}
+// disponible por si quieres llamarlo externamente
+window.updateAuthUI = updateAuthUI;
+// refleja cambios desde otras pestañas/ventanas
+window.addEventListener('storage', (e) => {
+  if (e.key === 'sw:auth') {
+    try { AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null; } catch { AUTH = null; }
+  }
+  updateAuthUI();
+});
+
+// ============================================================
 //                       Utils / helpers
 // ============================================================
 function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
@@ -329,6 +352,9 @@ function setConfirmLoading(on) {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
+  // pinta estado visual de auth (guest/logged)
+  updateAuthUI();
+
   if ((AUTH?.user?.id) && msgs.length === 0) {
     await showResumeIfAny();
   }
@@ -366,18 +392,14 @@ function render() {
     const label     = escapeHtml(m.user) + ':';
   
     // Burbujas: USER se ancla a la derecha y ajusta al contenido
-    // - display:flex + align-items:flex-end empuja los hijos (meta/text) a la derecha
-    // - max-width limita el ancho; fit-content encoge si es corto
     const msgBoxStyle = isUser
       ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
       : 'width:fit-content; max-width:min(72ch, 92%);';
   
-    // Texto:
-    // - USER => texto a la IZQUIERDA dentro de la burbuja y ocupando su ancho
-    // - DM   => sin cambios
+    // Texto dentro de la burbuja
     const textStyle = isUser ? 'text-align:left; width:100%;' : '';
   
-    // Hora (fuera de la burbuja), misma alineación que la burbuja
+    // Hora (fuera de la burbuja)
     const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
     const timeBoxStyle = isUser
       ? timeBoxBase + 'width:fit-content; margin-left:auto;'
@@ -397,37 +419,33 @@ function render() {
     `;
   }).join('');
   
+  // 2) si hay confirmación, añadir bloque INLINE dentro del chat
+  if (pendingConfirm) {
+    const summary = (pendingConfirm.type === 'name')
+      ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
+      : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
 
-
-
-// 2) si hay confirmación, añadir bloque INLINE dentro del chat
-if (pendingConfirm) {
-  const summary = (pendingConfirm.type === 'name')
-    ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
-    : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
-
-  html += `
-    <!-- Burbuja DM -->
-    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 85%);">
-      <div class="meta meta--label">Máster:</div>
-      <div class="text">
-        <div class="confirm-cta-card">
-          <strong>Confirmación:</strong> <span>${summary}</span>
-          <div class="roll-cta__actions" style="margin-top:6px">
-            <button id="confirm-yes-inline" type="button">Sí</button>
-            <button id="confirm-no-inline" type="button" class="outline">No</button>
+    html += `
+      <!-- Burbuja DM -->
+      <div class="msg dm" style="width:fit-content; max-width:min(72ch, 85%);">
+        <div class="meta meta--label">Máster:</div>
+        <div class="text">
+          <div class="confirm-cta-card">
+            <strong>Confirmación:</strong> <span>${summary}</span>
+            <div class="roll-cta__actions" style="margin-top:6px">
+              <button id="confirm-yes-inline" type="button">Sí</button>
+              <button id="confirm-no-inline" type="button" class="outline">No</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Hora DM -->
-    <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px; width:fit-content;">
-      <div class="meta meta--time" style="line-height:1;">${hhmm(now())}</div>
-    </div>
-  `;
-}
-
+      <!-- Hora DM -->
+      <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px; width:fit-content;">
+        <div class="meta meta--time" style="line-height:1;">${hhmm(now())}</div>
+      </div>
+    `;
+  }
 
   chatEl.innerHTML = html;
   chatEl.scrollTop = chatEl.scrollHeight;
@@ -808,20 +826,20 @@ async function doAuth(kind) {
 
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
-        // ---- FIX: limpiar bienvenida 'guest' al registrarse y arrancar onboarding
-        if (kind === 'register') {
-          const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
-          const esSoloBienvenida = Array.isArray(msgs) && msgs.length <= 1 &&
-                                   t0.includes('HoloCanal') && t0.includes('inicia sesión');
-          if (esSoloBienvenida) {
-            msgs = [];
-            save(KEY_MSGS, msgs);
-          }
-          // arrancamos onboarding por el nombre
-          step = 'name'; save(KEY_STEP, step);
-          pendingConfirm = null; save(KEY_CONFIRM, null);
-        }
-    
+
+    // ---- FIX: limpiar bienvenida 'guest' al registrarse y arrancar onboarding
+    if (kind === 'register') {
+      const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
+      const esSoloBienvenida = Array.isArray(msgs) && msgs.length <= 1 &&
+                               t0.includes('HoloCanal') && t0.includes('inicia sesión');
+      if (esSoloBienvenida) {
+        msgs = [];
+        save(KEY_MSGS, msgs);
+      }
+      // arrancamos onboarding por el nombre
+      step = 'name'; save(KEY_STEP, step);
+      pendingConfirm = null; save(KEY_CONFIRM, null);
+    }
 
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
@@ -829,6 +847,8 @@ async function doAuth(kind) {
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
+    // pinta estado visual de auth (guest/logged)
+    updateAuthUI();
 
     if (msgs.length === 0) {
       await showResumeIfAny();
