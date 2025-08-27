@@ -512,51 +512,56 @@ function inflateTranscriptFromResume(text) {
 function summarizeResumeEvents(rawText, maxItems = 6) {
   const bullets = [];
   const seen = new Set();
+  const short = (s) => String(s).replace(/\s{2,}/g, ' ').trim().slice(0, 180);
 
-  // 1) Ubicación inicial si viene en el texto
-  const loc = rawText.match(/Salud de nuevo.*? en ([^.]+)\./i);
-  if (loc && loc[1]) bullets.push(`Ubicación: ${loc[1].trim()}`);
-
-  // 2) Tiradas (desde tags)
-  const outcomeRe = /<<\s*DICE_OUTCOME\b[^>]*SKILL="([^"]+)"[^>]*OUTCOME="([^"]+)"[^>]*>>/gi;
-  let m;
-  while ((m = outcomeRe.exec(rawText)) !== null) {
-    const skill = m[1]; const outcome = m[2];
-    bullets.push(`Tirada (${skill}): ${outcome}`);
-  }
-
-  // 3) Hechos destacados limpiando comandos
+  // 0) quitar tags/protocolos y trocear en partes "Máster:/Jugador:"
   const cleaned = stripProtoTags(rawText).replace(/\(kickoff\)/ig, '').trim();
   const parts = cleaned.split(/\s*·\s*/g).map(s => s.trim()).filter(Boolean);
+  const dmParts   = parts.map(p => p.match(/^(?:Máster|Master):\s*(.+)$/i)?.[1]).filter(Boolean);
+  const userParts = parts.map(p => p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i)?.[1]).filter(Boolean);
 
-  const IGNORE_DM = [
-    /^Bienvenid/i, /^¿Cómo se va a llamar/i, /^Cuéntame qué tipo/i,
-    /^Confirmaci/i, /^Resumen anterior/i
-  ];
-  const IGNORE_USER = [/^<<|>>/, /^\/\w+/, /^confirmo/i];
+  // 1) Ubicación de reenganche (si venía al principio)
+  const loc = rawText.match(/Salud de nuevo.*?\s+en\s+([^.—]+)[.—]/i);
+  if (loc && loc[1]) bullets.push(`Ubicación actual: ${short(loc[1])}`);
 
-  for (const p of parts) {
-    let type = null, txt = null;
-    const mDM   = p.match(/^(Máster|Master):\s*(.+)$/i);
-    const mUser = p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i);
-
-    if (mDM)   { type = 'dm';   txt = mDM[2]; }
-    else if (mUser) { type = 'user'; txt = mUser[1]; }
-    else continue;
-
-    if (type === 'dm'   && IGNORE_DM.some(re => re.test(txt))) continue;
-    if (type === 'user' && IGNORE_USER.some(re => re.test(txt))) continue;
-    if (txt.includes('CONFIRM_ACK')) continue;
-    if (txt.length < 12) continue;
-
-    txt = txt.replace(/\s{2,}/g, ' ').trim();
-    const key = txt.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      bullets.push((type === 'user' ? 'Acción: ' : '') + txt);
+  // Helper para elegir la PRIMERA frase DM que cumpla un patrón
+  const pick = (regexp, label) => {
+    for (const t of dmParts) {
+      const m = t.match(regexp);
+      if (m) {
+        const key = (label + '|' + m[0]).toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          bullets.push(`${label}: ${short(t)}`);
+          return true;
+        }
+      }
     }
-  }
+    return false;
+  };
 
+  // 2) Pistas/objetos importantes (NO tiradas)
+  pick(/\b(minidat|chip|coordenad|esquema|holoc|llave|contraseñ|mensaje cifrado|paquete|datacard)\b/i, 'Pista/objeto');
+
+  // 3) Objetivo/Destino inmediato
+  pick(/\b(dirígete|ve a|reúnete|entrega|llega a|punto de encuentro|Faro|muelle|cantina|puerto|mercado)\b/i, 'Objetivo');
+
+  // 4) Tiempo límite / ventana temporal
+  pick(/\b(media hora|\d+\s*(?:minutos?|horas?)|plazo|en\s+\d+\s*(?:minutos?|horas?))\b/i, 'Tiempo límite');
+
+  // 5) Amenazas activas
+  pick(/\b(dron(?:es)?|patrullas?|guardias?|imperiales?|alarma|persecución|enemig|cazarrecompensas)\b/i, 'Amenaza');
+
+  // 6) Estado del personaje (lo que porta/consiguió)
+  pick(/\b(tienes|llevas|guardas|consigues|obtienes|te entregan|recibes)\b/i, 'Estado');
+
+  // 7) Última acción del jugador (para retomar)
+  const lastUser = userParts.reverse().find(t =>
+    t && !/^\/\w+/.test(t) && !/confirmo/i.test(t) && t.length > 6
+  );
+  if (lastUser) bullets.push(`Última acción: ${short(lastUser)}`);
+
+  // Limita y devuelve
   return bullets.slice(0, maxItems);
 }
 

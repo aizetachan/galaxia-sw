@@ -272,41 +272,43 @@ body.is-logged #guest-card { display: none; }
   font-weight:700;
   color:var(--holo);
 }
-/* ===== Centrado de inputs y botones SOLO en pantalla de inicio ===== */
-body.is-guest #guest-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;          /* centra el contenido del card */
+/* ===== Tamaño fijo de inputs/botones SOLO en pantalla inicial (guest) ===== */
+body.is-guest #guest-card { --field-h: 46px; }    /* altura uniforme */
+@media (max-width: 700px) {
+  body.is-guest #guest-card { --field-h: 44px; }  /* un poco más compacto en móvil */
 }
 
+body.is-guest #guest-card .auth-row input,
+body.is-guest #guest-card .auth-row button {
+  height: var(--field-h);
+  min-height: var(--field-h);
+  max-height: var(--field-h);
+  line-height: calc(var(--field-h) - 2px); /* ajusta por el borde */
+  padding: 0 14px;                         /* sin padding vertical para no crecer */
+  box-sizing: border-box;
+  font-size: 16px;                         /* evita auto-zoom de iOS */
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+}
+
+/* Mantener centrado y con buen ancho */
 body.is-guest #guest-card .auth-row {
   display: flex;
   align-items: center;
-  justify-content: center;      /* centra la fila completa */
+  justify-content: center;
   gap: 14px;
-  margin: 20px auto 0;
   width: 100%;
-  max-width: 900px;             /* para que no se “abra” demasiado */
+  max-width: 900px;
+  margin: 20px auto 0;
 }
 
-body.is-guest #guest-card .auth-row input {
-  flex: 0 1 260px;              /* tamaños cómodos y consistentes */
-}
+body.is-guest #guest-card .auth-row input { flex: 0 1 260px; }
+body.is-guest #guest-card .auth-row button { flex: 0 0 auto; padding-inline: 20px; }
 
-body.is-guest #guest-card .auth-row button {
-  flex: 0 0 auto;
-  padding-inline: 20px;
-}
-
-/* En móviles: apilar en columna y ocupar ancho cómodo */
+/* En móvil: apilado, pero con la misma altura fija */
 @media (max-width: 700px) {
-  body.is-guest #guest-card .auth-row {
-    flex-direction: column;
-    gap: 10px;
-    max-width: 480px;
-  }
+  body.is-guest #guest-card .auth-row { flex-direction: column; max-width: 480px; gap: 10px; }
   body.is-guest #guest-card .auth-row input,
-  body.is-guest #guest-card .auth-row button {
-    width: 100%;
-  }
+  body.is-guest #guest-card .auth-row button { width: 100%; }
 }
