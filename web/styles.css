@@ -479,7 +479,7 @@ body.is-guest #guest-card .auth-row input {
     flex-direction:column;
     padding-left:8px;
     padding-right:8px;
-    padding-top:4px; padding-bottom:4px;
+    padding-bottom:4px;
   }
 
   /* El log de mensajes crece (sin height fijo) */
