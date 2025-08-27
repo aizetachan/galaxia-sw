@@ -493,3 +493,32 @@ body.is-guest #guest-card .auth-row input {
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 }
+/* ===== Barra de identidad (usuario + personaje) ===== */
+.identity-bar{ margin:4px 0 8px 0; }
+.identity-bar .id-row{
+  display:flex; gap:12px; align-items:baseline;
+}
+.identity-bar .id-user{
+  /* mismo estilo visual que el título (GALACTIC) */
+  font-size:20px; font-weight:600; letter-spacing:.02em;
+}
+.identity-bar .id-char{
+  font-size:13px; opacity:.7;
+}
+
+/* mobile: respeta el padding lateral que pusimos al chat */
+@media (max-width:768px){
+  .identity-bar{ margin-left:0; margin-right:0; }
+}
+/* ===== Mobile: ocultar título y descripción del header ===== */
+@media (max-width: 768px){
+  .app-header h1,
+  .app-header .muted { 
+    display: none;
+  }
+  /* opcional: compactar un poco el header en móvil */
+  .app-header{
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}

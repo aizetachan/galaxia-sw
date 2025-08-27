@@ -123,7 +123,40 @@ const UI = {
 // ============================================================
 //                        DOM
 // ============================================================
-const chatEl = document.getElementById('chat');
+const chatEl = document.getElementById('chat');   // <— ANCLAJE
+
+/* === BEGIN identity-bar (usuario + personaje) === */
+const chatWrap = document.querySelector('.chat-wrap');
+let identityEl = document.getElementById('identity-bar');
+
+if (!identityEl) {
+  identityEl = document.createElement('section');
+  identityEl.id = 'identity-bar';
+  identityEl.className = 'identity-bar hidden';
+  // lo insertamos justo antes del chat ⇒ mismo ancho/flujo que el chat
+  chatWrap.insertBefore(identityEl, chatEl);
+}
+
+// Llama a esta función cuando el usuario esté logeado (no guest)
+function setIdentityBar(userName, characterName){
+  const u = String(userName || '').trim();
+  const isGuest = /guest/i.test(u);
+  if (!u || isGuest){
+    identityEl.classList.add('hidden');
+    identityEl.innerHTML = '';
+    return;
+  }
+  const c = String(characterName || '').trim();
+
+  identityEl.innerHTML = `
+    <div class="id-row">
+      <div class="id-user">${escapeHtml(u)}</div>
+      <div class="id-char">${escapeHtml(c)}</div>
+    </div>
+  `;
+  identityEl.classList.remove('hidden');
+}
+/* === END identity-bar === */
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
 const authLoginBtn = document.getElementById('auth-login');
