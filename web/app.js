@@ -11,16 +11,13 @@ function dgroup(label, fn) {
 //               Config API (robusta, sin <meta>)
 // ============================================================
 const API_STORE_KEY = 'sw:api_base';
-const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api'; // <- cámbialo si tu API vive en otro host
+const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
 
 function getMeta(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
 }
 function getQuery(name) {
-  try {
-    const u = new URL(location.href);
-    return u.searchParams.get(name) || '';
-  } catch { return ''; }
+  try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
 }
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
@@ -28,7 +25,6 @@ function joinUrl(base, path) {
   return `${b}/${p}`;
 }
 
-// Valor inicial (se sobreescribe en ensureApiBase)
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   getMeta('api-base') ||
@@ -58,24 +54,14 @@ async function probeHealth(base) {
       const j = JSON.parse(txt);
       if (j && (j.ok === true || 'ts' in j)) return { ok: true, json: j };
       return { ok: false, reason: 'json-no-ok', json: j };
-    } catch {
-      return { ok: false, reason: 'json-parse', text: txt };
-    }
+    } catch { return { ok: false, reason: 'json-parse', text: txt }; }
   } catch (e) {
     return { ok: false, reason: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error') };
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 /**
- * Descubre y fija la API (nuevo orden: preferimos ventana/origen sobre caché)
- * 1) ?api=...
- * 2) window.API_BASE
- * 3) location.origin + '/api'
- * 4) <meta name="api-base">
- * 5) DEFAULT_API_BASE
- * 6) localStorage 'sw:api_base' (AL FINAL para evitar bases antiguas)
+ * Preferimos ventana/origen sobre caché para evitar API antiguas.
  */
 async function ensureApiBase() {
   const override = getQuery('api');
@@ -143,11 +129,7 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-// Confirm CTA
-const confirmCta = document.getElementById('confirm-cta');
-const confirmSummaryEl = document.getElementById('confirm-summary');
-const confirmYesBtn = document.getElementById('confirm-yes');
-const confirmNoBtn  = document.getElementById('confirm-no');
+// (Mantenemos el confirm-cta fijo oculto; ahora usamos versión inline dentro del chat)
 
 // ============================================================
 //                       Utils / helpers
@@ -247,8 +229,7 @@ async function apiGet(path) {
       AUTH = null;
       localStorage.removeItem('sw:auth');
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); 
-      // Limpieza de confirmación fantasma para invitado
+      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name');
       pendingConfirm = null; save(KEY_CONFIRM, null);
     }
   } catch (e) {
@@ -264,7 +245,7 @@ async function apiGet(path) {
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
 
-  // Listeners (tras construir estado y DOM)
+  // Listeners
   sendBtn.addEventListener('click', send);
   inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
   resolveBtn.addEventListener('click', resolveRoll);
@@ -275,8 +256,6 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
     pendingRoll = null;
     updateRollCta();
   });
-  if (confirmYesBtn) confirmYesBtn.addEventListener('click', () => handleConfirmDecision('yes'));
-  if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDecision('no'));
 
   render();
   dlog('Boot done');
@@ -286,17 +265,49 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
 //                         Render
 // ============================================================
 function render() {
-  dgroup('render', () => console.log({ msgsCount: msgs.length, step, character }));
-  chatEl.innerHTML = msgs.map(m => `
+  dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
+
+  // 1) pintar mensajes
+  let html = msgs.map(m => `
     <div class="msg ${m.kind}">
       <div class="meta">[${hhmm(m.ts)}] ${escapeHtml(m.user)}</div>
       <div class="text">${formatMarkdown(m.text)}</div>
     </div>
   `).join('');
+
+  // 2) si hay confirmación, añadir bloque INLINE dentro del chat
+  if (pendingConfirm) {
+    const summary = (pendingConfirm.type === 'name')
+      ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
+      : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
+
+    html += `
+      <div class="msg dm">
+        <div class="meta">[${hhmm(now())}] Máster</div>
+        <div class="text">
+          <div class="confirm-cta-card">
+            <strong>Confirmación:</strong> <span>${summary}</span>
+            <div class="roll-cta__actions" style="margin-top:8px">
+              <button id="confirm-yes-inline" type="button">Sí</button>
+              <button id="confirm-no-inline" type="button" class="outline">No</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  chatEl.innerHTML = html;
   chatEl.scrollTop = chatEl.scrollHeight;
+
+  // 3) actualizaciones varias
   updatePlaceholder();
   updateRollCta();
-  updateConfirmCta();
+
+  // 4) bind de los botones inline (si existen)
+  const yes = document.getElementById('confirm-yes-inline');
+  const no  = document.getElementById('confirm-no-inline');
+  if (yes) yes.onclick = () => handleConfirmDecision('yes');
+  if (no)  no.onclick  = () => handleConfirmDecision('no');
 }
 
 function updatePlaceholder() {
@@ -328,50 +339,41 @@ function parseRollTag(txt = '') {
   return { skill, cleaned };
 }
 
-// --- Detectar etiqueta de confirmación ---
+// --- Detectar etiqueta de confirmación (robusto y global) ---
 function parseConfirmTag(txt = '') {
-  const re = /<<\s*CONFIRM\b([^>]*)>>/i;
-  const m = re.exec(txt);
-  if (!m) return null;
-  const attrsStr = m[1] || '';
+  // Captura cualquier <<CONFIRM ...>> con saltos de línea y espacios, global y no-greedy
+  const tagRe = /<<\s*CONFIRM\b([\s\S]*?)>>/gi;
+  let match, lastAttrs = null;
+  let cleaned = txt;
+  // Elimina TODAS las apariciones de la etiqueta del texto mostrado
+  cleaned = cleaned.replace(tagRe, '').trim();
+  // Busca de nuevo para recuperar la última etiqueta (para pendingConfirm)
+  while ((match = tagRe.exec(txt)) !== null) lastAttrs = match[1] || '';
+
+  if (!lastAttrs) return null;
+
   const attrs = {};
-  for (const mm of attrsStr.matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) {
+  for (const mm of String(lastAttrs).matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) {
     attrs[mm[1].toUpperCase()] = mm[2];
   }
   let pending = null;
   if (attrs.NAME) pending = { type: 'name', name: attrs.NAME };
   else if (attrs.SPECIES && attrs.ROLE) pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
-  const cleaned = txt.replace(re, '').trim();
   return { pending, cleaned };
 }
 
 // ====== CTA de Confirmación ======
 function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build'; return s || 'name'; }
 
-function updateConfirmCta() {
-  if (!confirmCta || !confirmSummaryEl) return;
-  if (!pendingConfirm) {
-    confirmCta.classList.add('hidden');
-    confirmSummaryEl.textContent = '—';
-    return;
-  }
-  confirmSummaryEl.textContent =
-    (pendingConfirm.type === 'name')
-      ? `¿Confirmas el nombre: “${pendingConfirm.name}”?`
-      : `¿Confirmas: ${pendingConfirm.species} — ${pendingConfirm.role}?`;
-  confirmCta.classList.remove('hidden');
-}
-
 // ====== Helper central para pintar respuestas del Máster ======
 function handleIncomingDMText(rawText) {
   let txt = rawText || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
 
-  // Confirmación
+  // Confirmación (limpia etiquetas y levanta pendingConfirm)
   const conf = parseConfirmTag(txt);
   if (conf) {
     pendingConfirm = conf.pending;
     save(KEY_CONFIRM, pendingConfirm);
-    updateConfirmCta();
     txt = conf.cleaned || txt;
   }
 
@@ -379,7 +381,6 @@ function handleIncomingDMText(rawText) {
   const roll = parseRollTag(txt);
   if (roll) {
     pendingRoll = { skill: roll.skill };
-    updateRollCta();
     txt = roll.cleaned || `Necesitamos una tirada para **${roll.skill}**. Pulsa “Resolver tirada”.`;
   }
 
@@ -390,7 +391,7 @@ function handleIncomingDMText(rawText) {
 //                     Hablar con el Máster
 // ============================================================
 async function talkToDM(message) {
-  dlog('talkToDM start', { message, step, character });
+  dlog('talkToDM start', { message, step, character, pendingConfirm });
   try {
     const history = msgs.slice(-8);
     const res = await api('/dm/respond', {
@@ -411,22 +412,21 @@ async function talkToDM(message) {
 // ============================================================
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
-  dlog('send', { value, step });
 
-  // Si hay confirmación pendiente, no avances el flujo antiguo; deja que lo gestione el Máster.
+  // 🚫 Si hay confirmación pendiente, no dejamos que el Máster conteste nada más
   if (pendingConfirm && step !== 'done') {
-    pushUser(value);
-    await talkToDM(value);
+    // (opcional) puedes mostrar un aviso propio en UI si quieres
     inputEl.value = '';
     return;
   }
+
+  dlog('send', { value, step });
 
   // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/world/characters', charPayload(character)); }
-    catch (e) { dlog('privacy update fail', e?.data || e); }
+    try { await api('/world/characters', charPayload(character)); } catch (e) { dlog('privacy update fail', e?.data || e); }
     inputEl.value = ''; return;
   }
 
@@ -436,7 +436,7 @@ async function send() {
     localStorage.removeItem(KEY_STEP);
     localStorage.removeItem(KEY_CONFIRM);
     msgs = []; character = null; step = 'name'; pendingRoll = null; pendingConfirm = null;
-    pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo te llamas en la red del HoloNet?`);
+    pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo se va a llamar tu personaje?`);
     inputEl.value = ''; return;
   }
 
@@ -536,9 +536,7 @@ async function handleConfirmDecision(decision) {
       if (type === 'name') {
         if (!character) {
           character = { name: pendingConfirm.name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
-        } else {
-          character.name = pendingConfirm.name;
-        }
+        } else { character.name = pendingConfirm.name; }
         save(KEY_CHAR, character);
         try {
           const r = await api('/world/characters', charPayload(character));
@@ -561,10 +559,9 @@ async function handleConfirmDecision(decision) {
       }
     }
 
-    // Limpiar CTA siempre (tanto si YES como NO)
+    // limpiar CTA y notificar al Máster
     pendingConfirm = null;
     save(KEY_CONFIRM, null);
-    updateConfirmCta();
 
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
@@ -620,9 +617,7 @@ async function showResumeIfAny() {
       }
       pushDM(r.text);
     }
-  } catch (e) {
-    dlog('resume fail', e?.data || e);
-  }
+  } catch (e) { dlog('resume fail', e?.data || e); }
 }
 
 // ============================================================
@@ -640,23 +635,18 @@ async function doAuth(kind) {
     AUTH = { token, user };
     localStorage.setItem('sw:auth', JSON.stringify(AUTH));
 
-    // Migrar contenido guest a usuario real (si existía)
     migrateGuestToUser(user.id);
 
-    // reset keys/estado de usuario
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
-    // Intentar recuperar personaje — si 404, lo ignoramos y seguimos con sesión OK
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
     catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
-
     if (me?.character) { character = me.character; save(KEY_CHAR, character); }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
 
-    // Si el chat está vacío tras login, pedimos /dm/resume para saludar con resumen
     if (msgs.length === 0) {
       await showResumeIfAny();
       if (msgs.length === 0 && character?.name && step !== 'done') {
@@ -667,7 +657,7 @@ async function doAuth(kind) {
 
     render();
 
-    // Kickoff onboarding si no está completado — pinta el primer mensaje
+    // Kickoff onboarding si no está completado
     if (msgs.length === 0 && step !== 'done') {
       try {
         const kick = await api('/dm/respond', {
