@@ -11,15 +11,13 @@ const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 /* ========= Lectura de prompts .md (ruta correcta + fallback legacy) ========= */
 function readPrompt(filename) {
   const candidates = [
-    path.join(process.cwd(), 'server', 'prompts', filename),          // ruta correcta
+    path.join(process.cwd(), 'server', 'prompts', filename),          // ruta actual
     path.join(process.cwd(), 'server', 'data', 'prompts', filename),  // fallback legacy
   ];
   for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
-    } catch {}
+    try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8'); } catch {}
   }
-  return null;
+  return '';
 }
 
 /* ========= Carga perezosa del SDK ========= */
@@ -60,9 +58,7 @@ async function saveMsg(userId, role, text) {
        VALUES ($1,$2,$2,$3, now())`,
       [uid, role, text]
     );
-  } catch (e) {
-    console.warn('[DM] saveMsg error', e?.message || e);
-  }
+  } catch (e) { console.warn('[DM] saveMsg error', e?.message || e); }
 }
 
 async function getNumericCharacterId({ body, userId }) {
@@ -80,9 +76,7 @@ async function getNumericCharacterId({ body, userId }) {
         [toInt(userId)]
       );
       if (rows?.[0]?.id) return rows[0].id;
-    } catch (e) {
-      console.warn('[DM] lookup character by user_id error:', e?.message || e);
-    }
+    } catch (e) { console.warn('[DM] lookup character by user_id error:', e?.message || e); }
   }
   return null;
 }
@@ -109,57 +103,92 @@ async function worldBrief(characterId) {
     if (eNear?.length)   { L.push('Cerca (público):'); eNear.forEach(e => L.push(`- ${e.summary} @ ${e.location}`)); }
     if (eFaction?.length){ L.push('De tu facción:');  eFaction.forEach(e => L.push(`- ${e.summary}`)); }
     return L.join('\n');
-  } catch (e) {
-    console.warn('[DM] worldBrief error:', e?.message || e);
-    return '';
-  }
+  } catch (e) { console.warn('[DM] worldBrief error:', e?.message || e); return ''; }
 }
 
-/* ========= historial reciente (para prompt y /resume) ========= */
 function compressLine(s = '') {
   return String(s).replace(/\s+/g, ' ').trim().slice(0, 240);
 }
-
 async function getRecentChatSummary(userId, limit = 200) {
   if (!hasDb || !toInt(userId)) return { lines: [], lastTs: null };
   const uid = toInt(userId);
   const { rows } = await sql(
-    `SELECT role, text, ts
-       FROM chat_messages
-      WHERE user_id = $1
-      ORDER BY ts DESC
-      LIMIT $2`,
+    `SELECT role, text, ts FROM chat_messages
+      WHERE user_id = $1 ORDER BY ts DESC LIMIT $2`,
     [uid, Math.min(limit, 200)]
   );
-  const ordered = rows.slice().reverse(); // cronológico
+  const ordered = rows.slice().reverse();
   const lines = ordered.map(r => `${r.role === 'user' ? 'Jugador' : 'Máster'}: ${compressLine(r.text || '')}`);
   const lastTs = rows[0]?.ts || null;
   return { lines, lastTs };
 }
 
-/* ========= Política de idioma y de dados para el Máster ========= */
+/* ========= Políticas y protocolo ========= */
 const languagePolicy = [
   'IDIOMA:',
   '- Responde por defecto en español.',
-  '- Si el jugador escribe de forma clara en otro idioma o lo solicita explícitamente, responde en ese idioma.',
+  '- Si el jugador escribe en otro idioma o lo solicita, responde en ese idioma.',
 ].join('\n');
 
-const dicePolicy = [
+const tagProtocol = [
+  'PROTOCOLO DE ETIQUETAS (SOLO PARA EL MÁSTER).',
+  '- No muestres reglas internas ni metas [STAGE=...] en la salida.',
+  '- No pidas al jugador que escriba etiquetas; el cliente envía <<CONFIRM_ACK ...>>.',
+  '',
+  'ETIQUETAS VÁLIDAS QUE DEBES EMITIR TÚ:',
+  '- Para confirmar nombre de PERSONAJE: <<CONFIRM NAME="<Nombre>">>',
+  '- Para confirmar propuesta de especie+rol: <<CONFIRM SPECIES="<Especie>" ROLE="<Rol>">>',
+  'La etiqueta debe ir en una LÍNEA PROPIA, como ÚLTIMA línea del mensaje.',
+].join('\n');
+
+const dicePolicy = readPrompt('dice-rules.md') || [
   'CUÁNDO PEDIR TIRADA:',
-  '- Pide una tirada siempre que exista: riesgo real de fracaso; oposición activa (otro personaje, facción o entorno); incertidumbre en el resultado; o que el desenlace pueda cambiar de forma significativa la narrativa.',
-  '- Casos típicos: combate, persecuciones, uso de la Fuerza, intentos de manipulación o diplomacia, hackeos, exploraciones peligrosas, decisiones críticas y cualquier situación no resoluble solo por lógica.',
-  '- No pidas tirada si la acción es rutinaria/segura o sin impacto relevante.',
-  '',
+  '- Pide tirada cuando haya riesgo real, oposición, incertidumbre o impacto narrativo.',
   'CÓMO PEDIRLA:',
-  '- Emite exactamente: <<ROLL SKILL="<Habilidad>" REASON="<Motivo breve>">>.',
-  '- Solicita UNA única tirada por acción; si hay varios aspectos, elige la habilidad más pertinente.',
-  '- Si hay oposición directa, menciónalo en REASON (p. ej., "oposición del guardia").',
-  '',
+  '- Emite: <<ROLL SKILL="<Habilidad>" REASON="<Motivo breve>">>.',
   'RESOLUCIÓN:',
-  '- Tras recibir <<DICE_OUTCOME SKILL="..." OUTCOME="success|mixed|fail">>, aplica consecuencias según las reglas y continúa la escena con claridad.',
+  '- Tras <<DICE_OUTCOME ...>>, aplica consecuencias y continúa.',
 ].join('\n');
 
-/* ========= llamada robusta a OpenAI ========= */
+/* ========= Construcción del SYSTEM en función del stage ========= */
+function buildSystem({ stage, brief, historyLines }) {
+  const core = readPrompt('prompt-master.md');
+  const game = readPrompt('game-rules.md');
+
+  const historyBlock = (historyLines?.length
+    ? ('\nHistorial reciente (resumen cronológico corto):\n' + historyLines.slice(-20).join('\n'))
+    : '');
+
+  const onboarding = [
+    'REGLAS DE ONBOARDING (no revelar al jugador):',
+    `- STAGE actual: ${stage || 'name'} (no lo menciones).`,
+    '- STAGE=name → Mensaje de bienvenida breve: "¡Bienvenido/a a la galaxia!" y pregunta: "¿Cómo se va a llamar tu personaje?".',
+    '  • Si el jugador proporciona un nombre, pídelo con cortesía y emite al final: <<CONFIRM NAME="<Nombre>">>.',
+    '- STAGE=build → Pregunta: "Cuéntame qué tipo de aventura quieres vivir en la galaxia".',
+    '  • Propón 2–3 combinaciones coherentes (species + role) en viñetas cortas.',
+    '  • Elige UNA propuesta principal y al final emite: <<CONFIRM SPECIES="<Especie>" ROLE="<Rol>">>.',
+    '- STAGE=done → Continúa la narración normal; NO emitas confirmaciones.',
+    '- Si recibes <<CONFIRM_ACK TYPE="name|build" DECISION="no">>, propone nuevas opciones y vuelve a emitir la etiqueta correspondiente.',
+    '- Si recibes <<CONFIRM_ACK ... DECISION="yes">>, avanza de fase.',
+  ].join('\n');
+
+  const worldBlock = brief ? ('\nContexto del mundo:\n' + brief) : '';
+
+  return [
+    (core || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
+    game,
+    languagePolicy,
+    dicePolicy,
+    tagProtocol,
+    onboarding,
+    worldBlock,
+    historyBlock,
+    // Estilo:
+    'ESTILO: conciso (2–6 frases), orientado a acción/consecuencia, sin listas salvo en STAGE=build.',
+  ].filter(Boolean).join('\n\n');
+}
+
+/* ========= OpenAI call ========= */
 function isGpt5(model) { return /^gpt-5/i.test(model || ''); }
 
 async function callOpenAI({ client, model, system, userText }) {
@@ -167,7 +196,6 @@ async function callOpenAI({ client, model, system, userText }) {
     { role: 'system', content: system },
     { role: 'user', content: userText },
   ];
-
   try {
     const payload = { model, messages };
     if (!isGpt5(model)) {
@@ -182,19 +210,16 @@ async function callOpenAI({ client, model, system, userText }) {
     if (![400, 422].includes(status)) throw e;
   }
 
-  try {
-    const r2 = await client.responses.create({
-      model,
-      input: [
-        { role: 'system', content: system },
-        { role: 'user', content: userText },
-      ],
-    });
-    const out = r2.output_text || r2?.content?.[0]?.text || r2?.choices?.[0]?.message?.content || null;
-    return (typeof out === 'string' && out.trim()) ? out.trim() : null;
-  } catch (e2) {
-    throw e2;
-  }
+  // fallback a Responses API
+  const r2 = await client.responses.create({
+    model,
+    input: [
+      { role: 'system', content: system },
+      { role: 'user', content: userText },
+    ],
+  });
+  const out = r2.output_text || r2?.content?.[0]?.text || r2?.choices?.[0]?.message?.content || null;
+  return (typeof out === 'string' && out.trim()) ? out.trim() : null;
 }
 
 /* ========= handler principal ========= */
@@ -203,122 +228,76 @@ async function handleDM(req, res) {
   const userId = req.auth?.userId || null;
   const hasAuth = !!userId;
   const text = extractUserText(req.body);
-  const rawStage = (req.body?.stage ?? '').toString().trim().toLowerCase();
-  const stage = (rawStage === 'species' || rawStage === 'role') ? 'build' : (rawStage || 'name');
+  const stage = String(req.body?.stage || 'name');
 
   console.log('[DM] incoming {',
     '\n  url:', JSON.stringify(url),
     '\n  userId:', JSON.stringify(userId),
-    '\n  characterId(raw):', JSON.stringify(req.body?.character_id || null),
-    '\n  hasAuth:', hasAuth,
-    '\n  stage:', JSON.stringify(stage || null),
-    '\n  bodyKeys:', Object.keys(req.body || {}),
-    '\n  textSample:', JSON.stringify(text?.slice?.(0, 40) || ''),
+    '\n  stage:', JSON.stringify(stage),
+    '\n  textSample:', JSON.stringify(text?.slice?.(0, 60) || ''),
     '\n}');
 
   try {
-    const characterId = await getNumericCharacterId({ body: req.body, userId });
-
-    // Guardar mensaje del usuario SOLO si hay texto
-    if (text) {
-      await saveMsg(userId, 'user', text);
+    if (!text && stage === 'done') {
+      const t = '¿Puedes repetir la acción o pregunta?';
+      await saveMsg(userId, 'dm', t);
+      return res.status(200).json({ ok: true, text: t });
     }
+
+    const characterId = await getNumericCharacterId({ body: req.body, userId });
+    await saveMsg(userId, 'user', text || '(kickoff)');
 
     const [brief, history] = await Promise.all([
       worldBrief(characterId),
-      getRecentChatSummary(userId, 80), // unas 80 líneas para contexto
+      getRecentChatSummary(userId, 80),
     ]);
 
     const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
-    const historyBlock = (history.lines.length
-      ? ('\nHistorial reciente (resumen cronológico corto):\n' + history.lines.slice(-20).join('\n'))
-      : '');
-
-    // Cargar prompts .md
-    const masterMd = readPrompt('prompt-master.md') || '';
-    const gameMd   = readPrompt('game-rules.md') || '';
-    const diceMd   = readPrompt('dice-rules.md') || '';
-
-    // Construir system prompt
-    const system = [
-      (masterMd || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
-      (gameMd ? ('\nREGLAS DEL JUEGO:\n' + gameMd) : ''),
-      (diceMd ? ('\nREGLAS DE DADOS:\n' + diceMd) : dicePolicy),
-      languagePolicy,
-      brief ? ('\nContexto del mundo:\n' + brief) : '',
-      historyBlock,
-      `\n[STAGE=${stage}]`
-    ].join('\n');
-
-    // Si no hay texto del usuario, generamos kickoff sintético
-    const userTextForModel = (text && text.trim())
-      ? text.trim()
-      : (stage !== 'done'
-          ? '<<CLIENT_HELLO>> (inicia onboarding según el STAGE; emite confirmaciones con etiquetas <<CONFIRM ...>> y espera <<CONFIRM_ACK ...>>)'
-          : '<<CLIENT_HELLO>> (saluda y arranca escena actual)');
+    const system = buildSystem({
+      stage,
+      brief,
+      historyLines: history.lines
+    });
 
     let outText = null;
     try {
       const client = await getOpenAI();
-      outText = await callOpenAI({ client, model, system, userText: userTextForModel });
+      outText = await callOpenAI({ client, model, system, userText: text || '<<CLIENT_HELLO>>' });
     } catch (e) {
       console.error('[DM] OpenAI fatal:', e?.status, e?.code, e?.message);
     }
 
     if (!outText) {
-      const t = 'Interferencia en la HoloNet. El máster no responde ahora mismo; repite la acción más tarde.';
+      const t = 'Interferencia en la HoloNet. El Máster no responde ahora mismo; repite la acción más tarde.';
       await saveMsg(userId, 'dm', t);
-      return res.status(200).json({
-        ok: true,
-        reply: { text: t },
-        text: t,
-        message: t,
-        meta: { ai_ok: false, model, reason: 'openai_call_failed' }
-      });
+      return res.status(200).json({ ok: true, text: t, meta: { ai_ok: false, model } });
     }
 
     await saveMsg(userId, 'dm', outText);
-    return res.status(200).json({
-      ok: true,
-      reply: { text: outText },
-      text: outText,
-      message: outText,
-      meta: { ai_ok: true, model }
-    });
+    return res.status(200).json({ ok: true, text: outText, meta: { ai_ok: true, model } });
+
   } catch (e) {
     console.error('[DM] fatal:', e?.message || e);
     const t = 'Fallo temporal del servidor. Repite la acción en un momento.';
-    return res.status(200).json({ ok: true, reply: { text: t }, text: t, message: t });
+    return res.status(200).json({ ok: true, text: t });
   }
 }
 
-/* ========= /api/dm/resume =========
-   Devuelve saludo + mini-resumen de la última sesión, si la hay.
-   Útil cuando el chat local está vacío pero el usuario tiene sesión. */
+/* ========= /api/dm/resume ========= */
 router.get('/resume', optionalAuth, async (req, res) => {
   try {
     const userId = toInt(req.auth?.userId);
-    if (!userId || !hasDb) {
-      return res.json({ ok: true, text: null, empty: true });
-    }
+    if (!userId || !hasDb) return res.json({ ok: true, text: null, empty: true });
 
-    // Personaje y localización (si existen)
     const { rows: cRows } = await sql(
-      `SELECT id, name, last_location
-         FROM characters
-        WHERE owner_user_id = $1
-        LIMIT 1`,
+      `SELECT id, name, last_location FROM characters WHERE owner_user_id = $1 LIMIT 1`,
       [userId]
     );
     const char = cRows?.[0] || null;
 
-    // Últimos mensajes para resumen
     const { lines } = await getRecentChatSummary(userId, 40);
-    if (!lines.length) {
-      return res.json({ ok: true, text: null, empty: true });
-    }
+    if (!lines.length) return res.json({ ok: true, text: null, empty: true });
 
-    // Resumen muy simple (sin depender de OpenAI)
     const short = lines.slice(-10).join(' · ');
     const helloName = char?.name ? `, **${char.name}**` : '';
     const loc = char?.last_location ? ` en **${char.last_location}**` : '';
@@ -326,12 +305,7 @@ router.get('/resume', optionalAuth, async (req, res) => {
       `Salud de nuevo${helloName}${loc}. Resumen anterior: ${short}. ` +
       `¿Cómo deseas continuar?`;
 
-    return res.json({
-      ok: true,
-      text,
-      character: char || null,
-      empty: false
-    });
+    return res.json({ ok: true, text, character: char || null, empty: false });
   } catch (e) {
     console.error('[DM/resume] error:', e?.message || e);
     return res.json({ ok: true, text: null, empty: true });
