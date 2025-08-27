@@ -2,29 +2,20 @@
 import { Router } from 'express';
 import { q } from './db.js';
 import { optionalAuth } from './auth.js';
+import { randomUUID } from 'crypto';
 
 const router = Router();
-// Prefijo interno de este router (se montará en /api desde index.js)
-const PFX = '/world';
 
-/* -------------------------- Helpers generales -------------------------- */
-const ensureInt = (v, fb = null) => {
+// ---------------------- helpers util ----------------------
+function ensureInt(v, fallback = null) {
   const n = Number(v);
-  return Number.isFinite(n) ? n : fb;
-};
-const pick = (obj, keys) => {
+  return Number.isFinite(n) ? n : fallback;
+}
+function pick(obj, keys) {
   const out = {};
   for (const k of keys) if (k in obj) out[k] = obj[k];
   return out;
-};
-// Normalizador de strings cortos (para inserts/updates)
-function s(v, max = 200) {
-  if (v == null) return null;
-  const t = String(v).trim();
-  return t ? t.slice(0, max) : null;
 }
-
-/* --------------------------- Rules / State utils --------------------------- */
 function rollFormula(formula) {
   const m = String(formula).trim().match(/^(\d+)d(\d+)([+-]\d+)?$/i);
   if (!m) throw new Error('Fórmula inválida, usa p.ej. "2d6+1"');
@@ -44,7 +35,6 @@ function outcomeFromDC(total, dc) {
 }
 function applyStatePatch(current, patch) {
   const out = { ...current };
-
   if (patch?.attrs) {
     out.attrs = { ...(current.attrs || {}) };
     for (const [k, v] of Object.entries(patch.attrs)) {
@@ -56,13 +46,12 @@ function applyStatePatch(current, patch) {
       }
     }
   }
-
   if (patch?.inventory) {
     const cur = Array.isArray(current.inventory) ? [...current.inventory] : [];
     for (const it of patch.inventory) {
       const { op, id, qty = 1 } = it || {};
       if (!id || !op) continue;
-      const idx = cur.findIndex(x => x.id === id);
+      const idx = cur.findIndex((x) => x.id === id);
       if (op === 'add') {
         if (idx >= 0) cur[idx] = { ...cur[idx], qty: (cur[idx].qty || 0) + qty };
         else cur.push({ id, qty });
@@ -74,23 +63,28 @@ function applyStatePatch(current, patch) {
     }
     out.inventory = cur;
   }
-
   if (patch?.tags) {
     const cur = new Set(Array.isArray(current.tags) ? current.tags : []);
     const adds = patch.tags?.add || [];
     const rems = patch.tags?.remove || [];
-    adds.forEach(t => cur.add(t));
-    rems.forEach(t => cur.delete(t));
+    adds.forEach((t) => cur.add(t));
+    rems.forEach((t) => cur.delete(t));
     out.tags = [...cur];
   }
-
   return out;
 }
 
-/* ========================= Characters ========================= */
+// Normalizador de strings cortos (para inserts/updates)
+function s(v, max = 200) {
+  if (v == null) return null;
+  const t = String(v).trim();
+  return t ? t.slice(0, max) : null;
+}
 
-/** GET /api/world/characters/me */
-router.get(`${PFX}/characters/me`, optionalAuth, async (req, res) => {
+// ===========================================================
+//    Perfil del personaje del usuario logueado (GET /me)
+// ===========================================================
+router.get('/world/characters/me', optionalAuth, async (req, res) => {
   try {
     const userId = req.auth?.userId || null;
     if (!userId) return res.status(200).json({ ok: true, character: null });
@@ -98,103 +92,88 @@ router.get(`${PFX}/characters/me`, optionalAuth, async (req, res) => {
     const { rows } = await q(
       `SELECT id, name, species, role,
               public_profile AS "publicProfile",
-              last_location  AS "lastLocation",
-              owner_user_id  AS "ownerUserId"
+              last_location AS "lastLocation",
+              owner_user_id AS "ownerUserId"
          FROM characters
         WHERE owner_user_id = $1
         LIMIT 1`,
-      [String(userId)]
+      [userId]
     );
     return res.status(200).json({ ok: true, character: rows[0] || null });
   } catch (e) {
-    console.error('[WORLD] GET /characters/me error:', e?.message || e);
+    console.error('[WORLD] /world/characters/me error:', e?.message || e);
     return res.status(200).json({ ok: true, character: null });
   }
 });
 
-/** POST /api/world/characters  (upsert por owner_user_id si hay sesión) */
-router.post(`${PFX}/characters`, optionalAuth, async (req, res) => {
+// ===========================================================
+//      Crear/actualizar personaje (POST /world/characters)
+//      Arreglado: siempre generamos id en INSERT
+// ===========================================================
+router.post('/world/characters', optionalAuth, async (req, res) => {
+  const hasAuth = !!req.auth?.userId;
   const userId = req.auth?.userId || null;
 
-  // Acepta { character:{...} } o payload plano
-  const raw = (req.body && (req.body.character || req.body)) || {};
-  const name          = s(raw.name, 80);
-  const species       = s(raw.species, 40);
-  const role          = s(raw.role, 40);
-  const publicProfile = (typeof raw.publicProfile === 'boolean') ? raw.publicProfile : true;
-  const lastLocation  = s(raw.lastLocation, 120);
-
-  console.log('[WORLD] POST /characters INCOMING', {
-    hasAuth: !!userId,
-    userId,
-    bodyKeys: Object.keys(req.body || {}),
-    normalized: { name, species, role, publicProfile, lastLocation }
-  });
-
   try {
+    const c = req.body?.character || {};
+    const name = s(c.name, 80);
+    const species = s(c.species, 40);
+    const role = s(c.role, 40);
+    const publicProfile = typeof c.publicProfile === 'boolean' ? c.publicProfile : true;
+    const lastLocation = s(c.lastLocation, 120);
+
+    // Logging útil
+    console.log('[WORLD] POST /characters INCOMING', {
+      hasAuth,
+      userId,
+      bodyKeys: Object.keys(req.body || {}),
+      normalized: { name, species, role, publicProfile, lastLocation }
+    });
+
     if (userId) {
-      // Upsert manual por owner_user_id (columna es TEXT en tu schema)
-      const { rows: ex } = await q(
-        `SELECT id FROM characters WHERE owner_user_id = $1 LIMIT 1`,
-        [String(userId)]
-      );
-
-      if (ex?.[0]?.id) {
-        const id = ex[0].id;
-        const { rows } = await q(
-          `UPDATE characters
-              SET name           = COALESCE($2, name),
-                  species        = COALESCE($3, species),
-                  role           = COALESCE($4, role),
-                  public_profile = COALESCE($5, public_profile),
-                  last_location  = COALESCE($6, last_location),
-                  updated_at     = now()
-            WHERE id = $1
-          RETURNING id, name, species, role,
-                    public_profile AS "publicProfile",
-                    last_location  AS "lastLocation",
-                    owner_user_id  AS "ownerUserId"`,
-          [id, name, species, role, publicProfile, lastLocation]
-        );
-        console.log('[WORLD] POST /characters -> UPDATE OK', { id: rows[0]?.id });
-        return res.status(200).json({ ok: true, character: rows[0], mode: 'update' });
-      }
-
+      // UPSERT por owner_user_id; en INSERT aportamos id manualmente
+      const newId = randomUUID();
       const { rows } = await q(
-        `INSERT INTO characters (name, species, role, public_profile, last_location, owner_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO characters (id, name, species, role, public_profile, last_location, owner_user_id)
+              VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (owner_user_id) DO UPDATE
+             SET name=COALESCE(EXCLUDED.name, characters.name),
+                 species=COALESCE(EXCLUDED.species, characters.species),
+                 role=COALESCE(EXCLUDED.role, characters.role),
+                 public_profile=EXCLUDED.public_profile,
+                 last_location=COALESCE(EXCLUDED.last_location, characters.last_location),
+                 updated_at=now()
          RETURNING id, name, species, role,
                    public_profile AS "publicProfile",
-                   last_location  AS "lastLocation",
-                   owner_user_id  AS "ownerUserId"`,
-        [name, species, role, publicProfile, lastLocation, String(userId)]
+                   last_location AS "lastLocation",
+                   owner_user_id AS "ownerUserId"`,
+        [newId, name, species, role, publicProfile, lastLocation, userId]
       );
-      console.log('[WORLD] POST /characters -> INSERT OK', { id: rows[0]?.id });
-      return res.status(200).json({ ok: true, character: rows[0], mode: 'insert' });
+      return res.status(200).json({ ok: true, character: rows[0] });
     }
 
-    // Invitado (sin owner_user_id)
+    // Invitado: INSERT con id manual
+    const newId = randomUUID();
     const { rows } = await q(
-      `INSERT INTO characters (name, species, role, public_profile, last_location)
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO characters (id, name, species, role, public_profile, last_location)
+       VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING id, name, species, role,
                  public_profile AS "publicProfile",
-                 last_location  AS "lastLocation",
-                 owner_user_id  AS "ownerUserId"`,
-      [name, species, role, publicProfile, lastLocation]
+                 last_location AS "lastLocation",
+                 owner_user_id AS "ownerUserId"`,
+      [newId, name, species, role, publicProfile, lastLocation]
     );
-    console.log('[WORLD] POST /characters -> INSERT GUEST OK', { id: rows[0]?.id });
-    return res.status(200).json({ ok: true, character: rows[0], mode: 'guest-insert' });
-
+    return res.status(200).json({ ok: true, character: rows[0] });
   } catch (e) {
     console.error('[WORLD] /characters DB error:', e?.message || e);
     return res.status(200).json({ ok: false, error: 'world_save_failed' });
   }
 });
 
-/* ========================= Contexto / Inbox ========================= */
-
-router.get(`${PFX}/context`, async (req, res) => {
+// ===========================================================
+//                    Contexto del mundo
+// ===========================================================
+router.get('/world/context', async (req, res) => {
   try {
     const characterId = ensureInt(req.query.character_id);
     const limit = Math.min(ensureInt(req.query.limit, 20) || 20, 100);
@@ -203,7 +182,7 @@ router.get(`${PFX}/context`, async (req, res) => {
     const { rows: charRows } = await q(
       `SELECT c.*, cs.attrs, cs.inventory, cs.tags
          FROM characters c
-    LEFT JOIN character_state cs ON cs.character_id = c.id
+         LEFT JOIN character_state cs ON cs.character_id = c.id
         WHERE c.id = $1`,
       [characterId]
     );
@@ -211,57 +190,65 @@ router.get(`${PFX}/context`, async (req, res) => {
     const character = charRows[0];
 
     const { rows: nearby } = await q(
-      `SELECT e.* FROM events e
-        WHERE e.visibility='public'
+      `SELECT e.*
+         FROM events e
+        WHERE e.visibility = 'public'
           AND e.location IS NOT NULL
-          AND e.location=$1
-        ORDER BY e.ts DESC LIMIT $2`,
+          AND e.location = $1
+        ORDER BY e.ts DESC
+        LIMIT $2`,
       [character.last_location || null, limit]
     );
 
     const { rows: facEvents } = await q(
-      `SELECT e.* FROM faction_memberships fm
-        JOIN events e
-          ON e.visibility='faction' AND e.faction_id=fm.faction_id
-       WHERE fm.character_id=$1
-       ORDER BY e.ts DESC LIMIT $2`,
+      `SELECT e.*
+         FROM faction_memberships fm
+         JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
+        WHERE fm.character_id = $1
+        ORDER BY e.ts DESC
+        LIMIT $2`,
       [characterId, limit]
     );
 
     const { rows: targeted } = await q(
-      `SELECT e.* FROM event_targets t
-        JOIN events e ON e.id=t.event_id
-       WHERE t.target_character_id=$1
-       ORDER BY e.ts DESC LIMIT $2`,
+      `SELECT e.*
+         FROM event_targets t
+         JOIN events e ON e.id = t.event_id
+        WHERE t.target_character_id = $1
+        ORDER BY e.ts DESC
+        LIMIT $2`,
       [characterId, limit]
     );
 
     const { rows: myActs } = await q(
-      `SELECT e.* FROM events e
-        WHERE e.actor_character_id=$1
-        ORDER BY e.ts DESC LIMIT $2`,
+      `SELECT e.*
+         FROM events e
+        WHERE e.actor_character_id = $1
+        ORDER BY e.ts DESC
+        LIMIT $2`,
       [characterId, Math.min(limit, 10)]
     );
 
     const { rows: unreadRows } = await q(
-      `SELECT COUNT(*)::int AS c FROM (
-        SELECT e.id
-          FROM event_targets t
-          JOIN events e ON e.id=t.event_id
-         WHERE t.target_character_id=$1
-        UNION
-        SELECT e.id
-          FROM faction_memberships fm
-          JOIN events e ON e.visibility='faction' AND e.faction_id=fm.faction_id
-         WHERE fm.character_id=$1
-        UNION
-        SELECT e.id
-          FROM events e
-          JOIN characters c ON c.id=$1
-         WHERE e.visibility='public' AND e.location=c.last_location
-      ) x
-      LEFT JOIN event_reads r ON r.event_id=x.id AND r.character_id=$1
-      WHERE r.event_id IS NULL`,
+      `SELECT COUNT(*)::int AS c
+         FROM (
+           SELECT e.id
+             FROM event_targets t
+             JOIN events e ON e.id = t.event_id
+            WHERE t.target_character_id = $1
+           UNION
+           SELECT e.id
+             FROM faction_memberships fm
+             JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
+            WHERE fm.character_id = $1
+           UNION
+           SELECT e.id
+             FROM events e
+             JOIN characters c ON c.id = $1
+            WHERE e.visibility = 'public' AND e.location = c.last_location
+         ) x
+         LEFT JOIN event_reads r ON r.event_id = x.id AND r.character_id = $1
+        WHERE r.event_id IS NULL`,
       [characterId]
     );
 
@@ -279,46 +266,56 @@ router.get(`${PFX}/context`, async (req, res) => {
   }
 });
 
-router.get(`${PFX}/inbox`, async (req, res) => {
+// ===========================================================
+//                         Inbox
+// ===========================================================
+router.get('/world/inbox', async (req, res) => {
   try {
     const characterId = ensureInt(req.query.character_id);
     const limit = Math.min(ensureInt(req.query.limit, 50) || 50, 200);
     if (!characterId) return res.status(400).json({ ok: false, error: 'character_id requerido' });
+
     const { rows } = await q(
-      `SELECT e.* FROM (
-         SELECT e.id FROM event_targets t
-          JOIN events e ON e.id=t.event_id
-         WHERE t.target_character_id=$1
-        UNION
-         SELECT e.id FROM faction_memberships fm
-          JOIN events e ON e.visibility='faction' AND e.faction_id=fm.faction_id
-         WHERE fm.character_id=$1
-        UNION
-         SELECT e.id FROM events e
-          JOIN characters c ON c.id=$1
-         WHERE e.visibility='public' AND e.location=c.last_location
-       ) x
-       LEFT JOIN event_reads r ON r.event_id=x.id AND r.character_id=$1
-       JOIN events e ON e.id=x.id
-       WHERE r.event_id IS NULL
-       ORDER BY e.ts DESC LIMIT $2`,
+      `SELECT e.*
+         FROM (
+           SELECT e.id
+             FROM event_targets t
+             JOIN events e ON e.id = t.event_id
+            WHERE t.target_character_id = $1
+           UNION
+           SELECT e.id
+             FROM faction_memberships fm
+             JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
+            WHERE fm.character_id = $1
+           UNION
+           SELECT e.id
+             FROM events e
+             JOIN characters c ON c.id = $1
+            WHERE e.visibility = 'public' AND e.location = c.last_location
+         ) x
+         LEFT JOIN event_reads r ON r.event_id = x.id AND r.character_id = $1
+         JOIN events e ON e.id = x.id
+        WHERE r.event_id IS NULL
+        ORDER BY e.ts DESC
+        LIMIT $2`,
       [characterId, limit]
     );
+
     res.json({ ok: true, events: rows });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-router.post(`${PFX}/events/read`, async (req, res) => {
+router.post('/events/read', async (req, res) => {
   try {
     const cid = ensureInt(req.body?.character_id);
     const eid = ensureInt(req.body?.event_id);
     if (!cid || !eid) return res.status(400).json({ ok: false, error: 'character_id y event_id requeridos' });
     await q(
-      `INSERT INTO event_reads(character_id,event_id,read_at)
+      `INSERT INTO event_reads(character_id, event_id, read_at)
        VALUES ($1,$2,now())
-       ON CONFLICT (character_id,event_id) DO NOTHING`,
+       ON CONFLICT (character_id, event_id) DO NOTHING`,
       [cid, eid]
     );
     res.json({ ok: true });
@@ -327,16 +324,17 @@ router.post(`${PFX}/events/read`, async (req, res) => {
   }
 });
 
-/* ========================= Character State ========================= */
-
-router.get(`${PFX}/characters/:id/state`, async (req, res) => {
+// ===========================================================
+//                         State
+// ===========================================================
+router.get('/characters/:id/state', async (req, res) => {
   try {
     const id = ensureInt(req.params.id);
     const { rows } = await q(
       `SELECT c.*, cs.attrs, cs.inventory, cs.tags
          FROM characters c
-    LEFT JOIN character_state cs ON cs.character_id = c.id
-        WHERE c.id=$1`,
+         LEFT JOIN character_state cs ON cs.character_id = c.id
+        WHERE c.id = $1`,
       [id]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
@@ -346,7 +344,7 @@ router.get(`${PFX}/characters/:id/state`, async (req, res) => {
   }
 });
 
-router.patch(`${PFX}/characters/:id/state`, async (req, res) => {
+router.patch('/characters/:id/state', async (req, res) => {
   try {
     const id = ensureInt(req.params.id);
     const { patch = {}, note = null, event_id = null } = req.body || {};
@@ -355,25 +353,24 @@ router.patch(`${PFX}/characters/:id/state`, async (req, res) => {
               COALESCE(cs.inventory,'[]'::jsonb) AS inventory,
               COALESCE(cs.tags,'{}'::text[]) AS tags
          FROM character_state cs
-        WHERE cs.character_id=$1`,
+        WHERE cs.character_id = $1`,
       [id]
     );
     const current = curRows[0] || { attrs: {}, inventory: [], tags: [] };
     const merged = applyStatePatch(current, patch);
 
     await q(
-      `INSERT INTO character_state(character_id,attrs,inventory,tags,updated_at)
-       VALUES ($1,$2::jsonb,$3::jsonb,$4::text[],now())
+      `INSERT INTO character_state(character_id, attrs, inventory, tags, updated_at)
+            VALUES ($1,$2::jsonb,$3::jsonb,$4::text[],now())
        ON CONFLICT (character_id) DO UPDATE SET
-         attrs=EXCLUDED.attrs,
-         inventory=EXCLUDED.inventory,
-         tags=EXCLUDED.tags,
-         updated_at=now()`,
+            attrs=EXCLUDED.attrs,
+            inventory=EXCLUDED.inventory,
+            tags=EXCLUDED.tags,
+            updated_at=now()`,
       [id, JSON.stringify(merged.attrs || {}), JSON.stringify(merged.inventory || []), merged.tags || []]
     );
-
     await q(
-      `INSERT INTO character_state_history(character_id,event_id,patch,note)
+      `INSERT INTO character_state_history(character_id, event_id, patch, note)
        VALUES ($1,$2,$3::jsonb,$4)`,
       [id, event_id, JSON.stringify(patch || {}), note]
     );
@@ -384,42 +381,48 @@ router.patch(`${PFX}/characters/:id/state`, async (req, res) => {
   }
 });
 
-/* ========================= Tiradas & Eventos ========================= */
-
-router.post(`${PFX}/rolls`, async (req, res) => {
+// ===========================================================
+//                    Tiradas & Eventos
+// ===========================================================
+router.post('/rolls', async (req, res) => {
   try {
     const { character_id, user_id, skill = null, formula, target_dc = null } = req.body || {};
     const cid = ensureInt(character_id);
     const uid = ensureInt(user_id);
     if (!cid || !formula) return res.status(400).json({ ok: false, error: 'character_id y formula requeridos' });
-
     const detail = rollFormula(formula);
     const outcome = outcomeFromDC(detail.total, ensureInt(target_dc));
-
     const { rows } = await q(
       `INSERT INTO dice_rolls(character_id,user_id,skill,formula,target_dc,roll_detail,outcome)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
        RETURNING *`,
       [cid, uid, skill, formula, ensureInt(target_dc), JSON.stringify(detail), outcome]
     );
-
     res.json({ ok: true, roll: rows[0] });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-router.post(`${PFX}/events`, async (req, res) => {
+router.post('/events', async (req, res) => {
   try {
     const b = req.body || {};
-    const allowed = pick(b, ['summary', 'kind', 'visibility', 'location', 'actor_character_id', 'payload', 'faction_id']);
+    const allowed = pick(b, [
+      'summary',
+      'kind',
+      'visibility',
+      'location',
+      'actor_character_id',
+      'payload',
+      'faction_id'
+    ]);
     if (!allowed.summary) return res.status(400).json({ ok: false, error: 'summary requerido' });
     if (!allowed.visibility) allowed.visibility = 'public';
     const payload = allowed.payload ? JSON.stringify(allowed.payload) : null;
 
     const { rows: evRows } = await q(
-      `INSERT INTO events(ts,actor,location,summary,visibility,user_id,actor_character_id,kind,payload,faction_id)
-       VALUES (now(),COALESCE($1,'system'),$2,$3,$4,NULL,$5,$6,$7::jsonb,$8)
+      `INSERT INTO events(ts, actor, location, summary, visibility, user_id, actor_character_id, kind, payload, faction_id)
+       VALUES (now(), COALESCE($1,'system'), $2, $3, $4, NULL, $5, $6, $7::jsonb, $8)
        RETURNING *`,
       [
         b.actor || null,
@@ -438,7 +441,9 @@ router.post(`${PFX}/events`, async (req, res) => {
     if (targets.length) {
       const values = targets.map((t, i) => `($1,$${i + 2})`).join(',');
       await q(
-        `INSERT INTO event_targets(event_id,target_character_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+        `INSERT INTO event_targets(event_id, target_character_id)
+         VALUES ${values}
+         ON CONFLICT DO NOTHING`,
         [event.id, ...targets]
       );
     }
@@ -449,54 +454,56 @@ router.post(`${PFX}/events`, async (req, res) => {
   }
 });
 
-/* ========================= Timeline ========================= */
-
-router.get(`${PFX}/characters/:id/timeline`, async (req, res) => {
+// ===========================================================
+//                         Timeline
+// ===========================================================
+router.get('/characters/:id/timeline', async (req, res) => {
   try {
     const id = ensureInt(req.params.id);
     const limit = Math.min(ensureInt(req.query.limit, 100) || 100, 300);
-
     const [a, b, c, d] = await Promise.all([
       q(
         `SELECT e.*, 'event_actor' AS kind
            FROM events e
-          WHERE e.actor_character_id=$1
-          ORDER BY e.ts DESC LIMIT $2`,
+          WHERE e.actor_character_id = $1
+          ORDER BY e.ts DESC
+          LIMIT $2`,
         [id, limit]
       ),
       q(
         `SELECT e.*, 'event_target' AS kind
            FROM event_targets t
-           JOIN events e ON e.id=t.event_id
-          WHERE t.target_character_id=$1
-          ORDER BY e.ts DESC LIMIT $2`,
+           JOIN events e ON e.id = t.event_id
+          WHERE t.target_character_id = $1
+          ORDER BY e.ts DESC
+          LIMIT $2`,
         [id, limit]
       ),
       q(
         `SELECT h.*, 'state_change' AS kind
            FROM character_state_history h
-          WHERE h.character_id=$1
-          ORDER BY h.ts DESC LIMIT $2`,
+          WHERE h.character_id = $1
+          ORDER BY h.ts DESC
+          LIMIT $2`,
         [id, limit]
       ),
       q(
         `SELECT r.*, 'roll' AS kind
            FROM dice_rolls r
-          WHERE r.character_id=$1
-          ORDER BY r.ts DESC LIMIT $2`,
+          WHERE r.character_id = $1
+          ORDER BY r.ts DESC
+          LIMIT $2`,
         [id, limit]
       )
     ]);
-
     const merged = [
-      ...a.rows.map(x => ({ ...x, ts: x.ts || x.created_at })),
-      ...b.rows.map(x => ({ ...x, ts: x.ts || x.created_at })),
+      ...a.rows.map((x) => ({ ...x, ts: x.ts || x.created_at })),
+      ...b.rows.map((x) => ({ ...x, ts: x.ts || x.created_at })),
       ...c.rows,
       ...d.rows
     ]
       .sort((x, y) => new Date(y.ts) - new Date(x.ts))
       .slice(0, limit);
-
     res.json({ ok: true, items: merged });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
