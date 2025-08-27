@@ -508,15 +508,68 @@ function inflateTranscriptFromResume(text) {
   return out;
 }
 
+/* ===== INSERTAR AQUÍ ===== */
+function summarizeResumeEvents(rawText, maxItems = 6) {
+  const bullets = [];
+  const seen = new Set();
+
+  // 1) Ubicación inicial si viene en el texto
+  const loc = rawText.match(/Salud de nuevo.*? en ([^.]+)\./i);
+  if (loc && loc[1]) bullets.push(`Ubicación: ${loc[1].trim()}`);
+
+  // 2) Tiradas (desde tags)
+  const outcomeRe = /<<\s*DICE_OUTCOME\b[^>]*SKILL="([^"]+)"[^>]*OUTCOME="([^"]+)"[^>]*>>/gi;
+  let m;
+  while ((m = outcomeRe.exec(rawText)) !== null) {
+    const skill = m[1]; const outcome = m[2];
+    bullets.push(`Tirada (${skill}): ${outcome}`);
+  }
+
+  // 3) Hechos destacados limpiando comandos
+  const cleaned = stripProtoTags(rawText).replace(/\(kickoff\)/ig, '').trim();
+  const parts = cleaned.split(/\s*·\s*/g).map(s => s.trim()).filter(Boolean);
+
+  const IGNORE_DM = [
+    /^Bienvenid/i, /^¿Cómo se va a llamar/i, /^Cuéntame qué tipo/i,
+    /^Confirmaci/i, /^Resumen anterior/i
+  ];
+  const IGNORE_USER = [/^<<|>>/, /^\/\w+/, /^confirmo/i];
+
+  for (const p of parts) {
+    let type = null, txt = null;
+    const mDM   = p.match(/^(Máster|Master):\s*(.+)$/i);
+    const mUser = p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i);
+
+    if (mDM)   { type = 'dm';   txt = mDM[2]; }
+    else if (mUser) { type = 'user'; txt = mUser[1]; }
+    else continue;
+
+    if (type === 'dm'   && IGNORE_DM.some(re => re.test(txt))) continue;
+    if (type === 'user' && IGNORE_USER.some(re => re.test(txt))) continue;
+    if (txt.includes('CONFIRM_ACK')) continue;
+    if (txt.length < 12) continue;
+
+    txt = txt.replace(/\s{2,}/g, ' ').trim();
+    const key = txt.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      bullets.push((type === 'user' ? 'Acción: ' : '') + txt);
+    }
+  }
+
+  return bullets.slice(0, maxItems);
+}
+
 async function showResumeOnDemand() {
   try {
     const r = await apiGet('/dm/resume');
     if (r?.ok && r.text) {
-      const plain = stripProtoTags(r.text)
-        .replace(/\s*·\s*/g, '\n• ')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-      pushDM(`**Resumen de tu partida:**\n${plain}`);
+      const bullets = summarizeResumeEvents(r.text, 6);
+      if (bullets.length) {
+        pushDM(`**Resumen (eventos clave):**\n- ${bullets.join('\n- ')}`);
+      } else {
+        pushDM('No encontré eventos destacados en tu sesión.');
+      }
     } else {
       pushDM('No hay resumen disponible.');
     }
@@ -525,6 +578,7 @@ async function showResumeOnDemand() {
     pushDM('No se pudo obtener el resumen ahora.');
   }
 }
+
 
 
 // --- Detectar etiqueta de tirada ---
