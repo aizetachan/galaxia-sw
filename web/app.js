@@ -126,23 +126,19 @@ const UI = {
 const chatEl = document.getElementById('chat');   // <— ANCLAJE
 
 
-/* === BEGIN identity-bar harden === */
+/* === BEGIN identity-bar (seguro) === */
 const chatWrap = document.querySelector('.chat-wrap');
 let identityEl = document.getElementById('identity-bar');
-
 if (!identityEl) {
   identityEl = document.createElement('section');
   identityEl.id = 'identity-bar';
   identityEl.className = 'identity-bar hidden';
+  chatWrap.insertBefore(identityEl, chatEl); // misma anchura que el chat
 }
-if (identityEl.parentElement !== chatWrap) {
-  chatWrap.insertBefore(identityEl, chatEl); // asegúralo fuera del header
-}
-
 function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
-  const isGuest = /^guest$/i.test(u); // guest exacto
-  if (!u || isGuest){
+  const isGuest = /^guest$/i.test(u);
+  if (!u || isGuest) {
     identityEl.classList.add('hidden');
     identityEl.innerHTML = '';
     return;
@@ -152,10 +148,10 @@ function setIdentityBar(userName, characterName){
     <div class="id-row">
       <div class="id-user">${escapeHtml(u)}</div>
       <div class="id-char">${escapeHtml(c)}</div>
-    </div>
-  `;
+    </div>`;
   identityEl.classList.remove('hidden');
 }
+/* === END identity-bar === */
 
 /* auto-hydratación básica (por si ya tienes sesión cargada) */
 (function hydrateIdentity(){
@@ -492,6 +488,16 @@ function render() {
   }
 
   chatEl.innerHTML = html;
+  /* hidrata barra de identidad antes de pintar el chat */
+const _userName =
+(window.state?.user?.name) ||
+localStorage.getItem('sw:username') ||
+document.getElementById('auth-username')?.value || '';
+const _charName =
+(window.state?.character?.name) ||
+localStorage.getItem('sw:character') || '';
+setIdentityBar(_userName, _charName);
+
   chatEl.scrollTop = chatEl.scrollHeight;
 
   // 3) actualizaciones varias
