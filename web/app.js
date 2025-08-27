@@ -1128,13 +1128,13 @@ function extractTargetName(text) {
 }
 // ===== Vídeo de fondo en la tarjeta de invitado (#guest-card) =====
 (function setupGuestCardVideo(){
-  // Ahora mismo solo tienes WEBM. Si añades MP4, mete otra entrada en este array.
+  // RUTAS RELATIVAS a web/index.html
   const VIDEO_SOURCES = [
-    { src: '/assets/video/hero-home-720p.webm', type: 'video/webm' },
-    { src: 'assets/video/hero-home-720p.mp4',  type: 'video/mp4' },
-    // { src: '/assets/video/hero-home-720p.mp4',  type: 'video/mp4'  },
+    { src: 'assets/video/hero-home-720p.webm', type: 'video/webm' }, // ← sin barra inicial
+    // Si más adelante añades MP4, descomenta la siguiente línea y sube el archivo:
+    // { src: 'assets/video/hero-home-720p.mp4',  type: 'video/mp4'  },
   ];
-  const POSTER = ''; // opcional: '/assets/posters/hero-home.jpg'
+  const POSTER = null; // p.ej. 'assets/posters/hero-home.jpg' si quieres poster
 
   function createVideo(){
     const v = document.createElement('video');
@@ -1160,18 +1160,11 @@ function extractTargetName(text) {
     return !!el && !el.hasAttribute('hidden');
   }
 
-  // Alternativa por si dependes de la barra de identidad
-  function isLogged(){
-    const bar = document.getElementById('identity-bar');
-    return !!bar && !bar.hasAttribute('hidden');
-  }
-
   function mount(){
     if (navigator.connection?.saveData) return unmount(); // ahorro de datos
     const wrap = document.getElementById('guest-card');
     if (!wrap) return;
-    if (!guestCardVisible()) return unmount();
-
+    if (!guestCardVisible() || isLogged()) return unmount(); // usa el isLogged() GLOBAL (AUTH)
     let v = document.getElementById('guest-card-video');
     if (!v) {
       v = createVideo();
@@ -1183,9 +1176,8 @@ function extractTargetName(text) {
   function unmount(){
     const v = document.getElementById('guest-card-video');
     if (!v) return;
+    try { v.pause(); } catch {}
     try {
-      v.pause();
-      // libera buffers
       v.removeAttribute('src');
       while (v.firstChild) v.removeChild(v.firstChild);
       v.load();
@@ -1193,11 +1185,7 @@ function extractTargetName(text) {
     v.remove();
   }
 
-  // Aplica en carga
-  const apply = () => {
-    if (guestCardVisible() && !isLogged()) mount();
-    else unmount();
-  };
+  const apply = () => { guestCardVisible() && !isLogged() ? mount() : unmount(); };
 
   if (document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', apply, { once:true });
@@ -1205,30 +1193,22 @@ function extractTargetName(text) {
     apply();
   }
 
-  // Pausa si la pestaña no está visible (ahorro de CPU/GPU)
   document.addEventListener('visibilitychange', () => {
     const v = document.getElementById('guest-card-video');
     if (!v) return;
     if (document.hidden) v.pause(); else v.play?.().catch(()=>{});
   });
 
-  // Re-aplicar cuando cambie el estado de sesión
+  // Re-aplicar cuando cambie el estado de sesión/visibilidad
   const orig = window.updateIdentityFromState;
   window.updateIdentityFromState = function(...args){
     try { return orig?.apply(this, args); }
     finally { apply(); }
   };
-
-  // Observar cambios de visibilidad del propio #guest-card
   const card = document.getElementById('guest-card');
   if (card && window.MutationObserver){
     new MutationObserver(apply).observe(card, { attributes:true, attributeFilter:['hidden','class','style'] });
   }
-
-  // Observar la barra de identidad por si cambia sin llamar a la función anterior
-  const bar = document.getElementById('identity-bar');
-  if (bar && window.MutationObserver){
-    new MutationObserver(apply).observe(bar, { attributes:true, attributeFilter:['hidden','class','style'] });
-  }
 })();
+
 
