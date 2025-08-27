@@ -125,7 +125,8 @@ const UI = {
 // ============================================================
 const chatEl = document.getElementById('chat');   // <— ANCLAJE
 
-/* === BEGIN identity-bar (usuario + personaje) === */
+
+/* === BEGIN identity-bar harden === */
 const chatWrap = document.querySelector('.chat-wrap');
 let identityEl = document.getElementById('identity-bar');
 
@@ -133,21 +134,20 @@ if (!identityEl) {
   identityEl = document.createElement('section');
   identityEl.id = 'identity-bar';
   identityEl.className = 'identity-bar hidden';
-  // lo insertamos justo antes del chat ⇒ mismo ancho/flujo que el chat
-  chatWrap.insertBefore(identityEl, chatEl);
+}
+if (identityEl.parentElement !== chatWrap) {
+  chatWrap.insertBefore(identityEl, chatEl); // asegúralo fuera del header
 }
 
-// Llama a esta función cuando el usuario esté logeado (no guest)
 function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
-  const isGuest = /guest/i.test(u);
+  const isGuest = /^guest$/i.test(u); // guest exacto
   if (!u || isGuest){
     identityEl.classList.add('hidden');
     identityEl.innerHTML = '';
     return;
   }
   const c = String(characterName || '').trim();
-
   identityEl.innerHTML = `
     <div class="id-row">
       <div class="id-user">${escapeHtml(u)}</div>
@@ -156,7 +156,18 @@ function setIdentityBar(userName, characterName){
   `;
   identityEl.classList.remove('hidden');
 }
-/* === END identity-bar === */
+
+/* auto-hydratación básica (por si ya tienes sesión cargada) */
+(function hydrateIdentity(){
+  const inputUser = document.getElementById('auth-username')?.value || '';
+  const storedUser = localStorage.getItem('sw:username') || '';
+  const storedChar = localStorage.getItem('sw:character') || '';
+  const user = (window.state?.user?.name || storedUser || inputUser || '').trim();
+  const char = (window.state?.character?.name || storedChar || '').trim();
+  setIdentityBar(user, char);
+})();
+/* === END identity-bar harden === */
+
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
 const authLoginBtn = document.getElementById('auth-login');
@@ -541,7 +552,17 @@ function inflateTranscriptFromResume(text) {
   return out;
 }
 
-/* ===== INSERTAR AQUÍ ===== */
+// === Estado de cliente para el Máster (onboarding) ===
+function getClientState() {
+  return {
+    step,
+    name: (character?.name || pendingConfirm?.name || null),
+    species: (character?.species || pendingConfirm?.species || null),
+    role: (character?.role || pendingConfirm?.role || null),
+    pendingConfirm: (pendingConfirm || null)
+  };
+}
+
 function summarizeResumeEvents(rawText, maxItems = 6) {
   const bullets = [];
   const seen = new Set();
@@ -682,7 +703,8 @@ async function talkToDM(message) {
       message,
       history,
       character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step)
+      stage: mapStageForDM(step),
+      clientState: getClientState()
     });
     handleIncomingDMText(res.text);
   } catch (e) {
@@ -822,8 +844,10 @@ async function resolveRoll() {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
       history,
       character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step)
+      stage: mapStageForDM(step),
+      clientState: getClientState()
     });
+    
 
     // 3) AHORA sí: publicamos el resultado de la tirada y, a continuación, la respuesta del Máster
     pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
@@ -897,8 +921,10 @@ async function handleConfirmDecision(decision) {
       message: `<<CONFIRM_ACK TYPE="${type}" DECISION="${decision}">>`,
       history,
       character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step)
+      stage: mapStageForDM(step),
+      clientState: getClientState()
     });
+    
 
     handleIncomingDMText((follow && follow.text) ? follow.text : '');
 
@@ -1036,8 +1062,10 @@ async function doAuth(kind) {
           message: '',
           history: [],
           character_id: Number(character?.id) || null,
-          stage: mapStageForDM(step)
+          stage: mapStageForDM(step),
+          clientState: getClientState()
         });
+        
         handleIncomingDMText(kick.text);
       } catch (e) { dlog('kickoff fail', e?.data || e); }
     }

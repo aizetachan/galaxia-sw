@@ -495,6 +495,7 @@ body.is-guest #guest-card .auth-row input {
 }
 /* ===== Barra de identidad (usuario + personaje) ===== */
 .identity-bar{ margin:4px 0 8px 0; }
+
 .identity-bar .id-row{
   display:flex; gap:12px; align-items:baseline;
 }
@@ -508,5 +509,12 @@ body.is-guest #guest-card .auth-row input {
 
 /* mobile: respeta el padding lateral que pusimos al chat */
 @media (max-width:768px){
-  .identity-bar{ margin-left:0; margin-right:0; }
+  .identity-bar{ margin-left:0; margin-right:0;display:block}
+}
+/* ===== Mobile: ocultar título y descripción del header ===== */
+@media (max-width: 768px){
+  .app-header h1,
+  .app-header .muted { 
+    display: none;
+  }
 }
