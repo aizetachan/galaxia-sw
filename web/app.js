@@ -181,14 +181,7 @@ window.updateIdentityFromState = updateIdentityFromState;
 
 
 /* auto-hydratación básica (por si ya tienes sesión cargada) */
-(function hydrateIdentity(){
-  const inputUser = document.getElementById('auth-username')?.value || '';
-  const storedUser = localStorage.getItem('sw:username') || '';
-  const storedChar = localStorage.getItem('sw:character') || '';
-  const user = (window.state?.user?.name || storedUser || inputUser || '').trim();
-  const char = (window.state?.character?.name || storedChar || '').trim();
-  setIdentityBar(user, char);
-})();
+
 /* === END identity-bar harden === */
 
 const authUserEl = document.getElementById('auth-username');
@@ -517,15 +510,6 @@ function render() {
   updateIdentityFromState();
 
   chatEl.innerHTML = html;
-  /* hidrata barra de identidad antes de pintar el chat */
-const _userName =
-(window.state?.user?.name) ||
-localStorage.getItem('sw:username') ||
-document.getElementById('auth-username')?.value || '';
-const _charName =
-(window.state?.character?.name) ||
-localStorage.getItem('sw:character') || '';
-setIdentityBar(_userName, _charName);
 
   chatEl.scrollTop = chatEl.scrollHeight;
 
