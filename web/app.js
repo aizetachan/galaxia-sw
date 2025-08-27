@@ -112,6 +112,14 @@ let pendingRoll = null; // { skill?: string }
 let pendingConfirm = load(KEY_CONFIRM, null); // { type:'name'|'build', name?, species?, role? }
 let lastRoll = null;
 
+// Estados de carga UI
+const UI = {
+  sending: false,
+  authLoading: false,
+  authKind: null, // 'login' | 'register'
+  confirmLoading: false,
+};
+
 // ============================================================
 //                        DOM
 // ============================================================
@@ -204,6 +212,57 @@ async function apiGet(path) {
     throw err;
   }
   return data.json ?? {};
+}
+
+// ============================================================
+//                Helpers de estados de CARGA (UI)
+// ============================================================
+function setSending(on) {
+  UI.sending = !!on;
+  try {
+    sendBtn.disabled = !!on;
+    inputEl.disabled = !!on;
+    sendBtn.classList.toggle('loading', !!on);
+    sendBtn.setAttribute('aria-busy', !!on);
+    if (!on) inputEl.disabled = false;
+  } catch {}
+}
+
+function setAuthLoading(on, kind = null) {
+  UI.authLoading = !!on;
+  UI.authKind = on ? kind : null;
+  try {
+    authUserEl.disabled = !!on;
+    authPinEl.disabled = !!on;
+    authLoginBtn.disabled = !!on;
+    authRegisterBtn.disabled = !!on;
+
+    // Spinner visual en el botón correspondiente
+    authLoginBtn.classList.toggle('loading', !!on && kind === 'login');
+    authRegisterBtn.classList.toggle('loading', !!on && kind === 'register');
+    if (!on) {
+      authLoginBtn.classList.remove('loading');
+      authRegisterBtn.classList.remove('loading');
+    }
+  } catch {}
+}
+
+function setConfirmLoading(on) {
+  UI.confirmLoading = !!on;
+  try {
+    const yes = document.getElementById('confirm-yes-inline');
+    const no  = document.getElementById('confirm-no-inline');
+    if (yes) {
+      yes.disabled = !!on;
+      yes.classList.toggle('loading', !!on);
+      yes.setAttribute('aria-busy', !!on);
+    }
+    if (no) {
+      no.disabled = !!on;
+      no.classList.toggle('loading', !!on);
+      no.setAttribute('aria-busy', !!on);
+    }
+  } catch {}
 }
 
 // ============================================================
@@ -309,6 +368,11 @@ function render() {
   const no  = document.getElementById('confirm-no-inline');
   if (yes) yes.onclick = () => handleConfirmDecision('yes');
   if (no)  no.onclick  = () => handleConfirmDecision('no');
+
+  // 5) si había cargas en curso al re-renderizar, refléjalas
+  setConfirmLoading(UI.confirmLoading);
+  setSending(UI.sending);
+  setAuthLoading(UI.authLoading, UI.authKind);
 }
 
 function updatePlaceholder() {
@@ -412,13 +476,16 @@ async function send() {
   if (pendingConfirm && step !== 'done') { inputEl.value = ''; return; }
 
   dlog('send', { value, step });
+  setSending(true);
+  inputEl.value = ''; // vaciar ya
 
   // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
     try { await api('/world/characters', charPayload(character)); } catch (e) { dlog('privacy update fail', e?.data || e); }
-    inputEl.value = ''; return;
+    setSending(false);
+    return;
   }
 
   if (value === '/restart') {
@@ -428,7 +495,8 @@ async function send() {
     localStorage.removeItem(KEY_CONFIRM);
     msgs = []; character = null; step = 'name'; pendingRoll = null; pendingConfirm = null;
     pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo se va a llamar tu personaje?`);
-    inputEl.value = ''; return;
+    setSending(false);
+    return;
   }
 
   pushUser(value);
@@ -436,17 +504,18 @@ async function send() {
   // --- Onboarding por fases ---
   if (step !== 'done') {
     if (step === 'name') {
-      // 1) Guardamos provisionalmente y pedimos confirmación (sin hablar con el Máster)
+      // 1) Tomamos el nombre y pedimos confirmación (sin hablar con el Máster todavía)
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
 
+      // Levantamos la CTA de confirmación de NOMBRE
       pendingConfirm = { type: 'name', name };
       save(KEY_CONFIRM, pendingConfirm);
 
       render();               // pinta el bloque de confirmación inline
-      inputEl.value = '';
-      return;                 // ⛔ no llamamos a talkToDM hasta que confirme
+      setSending(false);      // desbloquear UI porque no llamamos a la API
+      return;
     }
 
     if (step === 'species') {
@@ -477,19 +546,27 @@ async function send() {
       }
     }
 
-    await talkToDM(value);
-    inputEl.value = '';
+    try { await talkToDM(value); }
+    finally { setSending(false); }
     return;
   }
 
-  await talkToDM(value);
-  inputEl.value = '';
+  try { await talkToDM(value); }
+  finally { setSending(false); }
 }
 
 let busy = false;
 async function resolveRoll() {
   if (!pendingRoll || busy) return;
   busy = true;
+
+  // Spinner en el botón "Resolver tirada"
+  try {
+    resolveBtn.disabled = true;
+    resolveBtn.classList.add('loading');
+    resolveBtn.setAttribute('aria-busy', 'true');
+  } catch {}
+
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
 
@@ -519,6 +596,11 @@ async function resolveRoll() {
     pendingRoll = null;
     updateRollCta();
     render();
+    try {
+      resolveBtn.disabled = false;
+      resolveBtn.classList.remove('loading');
+      resolveBtn.removeAttribute('aria-busy');
+    } catch {}
   }
 }
 
@@ -527,6 +609,7 @@ let busyConfirm = false;
 async function handleConfirmDecision(decision) {
   if (!pendingConfirm || busyConfirm) return;
   busyConfirm = true;
+  setConfirmLoading(true);
   const { type } = pendingConfirm;
 
   try {
@@ -537,7 +620,6 @@ async function handleConfirmDecision(decision) {
         } else { character.name = pendingConfirm.name; }
         save(KEY_CHAR, character);
 
-        // Guardamos el nombre confirmado
         try {
           const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
@@ -581,6 +663,7 @@ async function handleConfirmDecision(decision) {
     alert(e.message || 'No se pudo procesar la confirmación');
   } finally {
     busyConfirm = false;
+    setConfirmLoading(false);
     render();
   }
 }
@@ -627,11 +710,14 @@ async function showResumeIfAny() {
 //                     Auth (robusto con 404)
 // ============================================================
 async function doAuth(kind) {
+  if (UI.authLoading) return;
   const username = (authUserEl.value || '').trim();
   const pin = (authPinEl.value || '').trim();
   if (!username || !/^\d{4}$/.test(pin)) { authStatusEl.textContent = 'Usuario y PIN (4 dígitos)'; return; }
 
   dlog('doAuth', { kind, username });
+  setAuthLoading(true, kind);
+
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
@@ -686,6 +772,8 @@ async function doAuth(kind) {
       not_found: 'Recurso no encontrado.',
     };
     authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
+  } finally {
+    setAuthLoading(false);
   }
 }
 

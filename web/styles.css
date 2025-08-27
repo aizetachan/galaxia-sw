@@ -53,6 +53,32 @@
   a,button{ transition:.15s ease all }
   strong{ font-weight:600 }
   :focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+
+  /* Spinner para cualquier <button> con la clase .loading */
+  button.loading{
+    position: relative;
+    /* oculta el texto sin tocar el color (el spinner hereda currentColor) */
+    text-indent: -9999px;
+    overflow: hidden;
+  }
+  button.loading::after{
+    content: "";
+    position: absolute;
+    inset: 0;               /* centra el spinner */
+    margin: auto;
+    width: 1.1em;
+    height: 1.1em;
+    border: 2px solid currentColor;  /* usa el color del botón (p.ej. #fff) */
+    border-right-color: transparent; /* hueco para efecto spinner */
+    border-radius: 50%;
+    animation: sw-spin .6s linear infinite;
+  }
+  @keyframes sw-spin { to { transform: rotate(360deg); } }
+  
+  /* opcional: apariencia de deshabilitado */
+  button:disabled { opacity: .6; cursor: not-allowed; }
+
+
   
   /* -------- 2) HEADER / FOOTER -------- */
   .app-header,.app-footer{ padding:16px 20px }
