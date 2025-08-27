@@ -366,39 +366,44 @@ function render() {
     const metaAlign  = (m.kind === 'user') ? 'text-right' : '';
     const label      = escapeHtml(m.user) + ':'; // no cambiamos estilos ni lógica
     return `
-      <div class="msg-row" style="display:flex; justify-content:${rowJustify}; margin:8px 0;">
+      <div class="msg-row" style="display:flex; justify-content:${rowJustify}; margin:4px 0;">
         <div class="msg-stack" style="display:flex; flex-direction:column; align-items:${stackAlign}; max-width:100%;">
           <div class="msg ${m.kind}">
             <div class="meta ${metaAlign}">${label}</div>
             <div class="text">${formatMarkdown(m.text)}</div>
           </div>
-          <div class="meta ${metaAlign}" style="margin-top:2px;">${hhmm(m.ts)}</div>
+          <div class="meta ${metaAlign}" style="margin-top:0px;">${hhmm(m.ts)}</div>
         </div>
       </div>
     `;
   }).join('');
 
 
-  // 2) si hay confirmación, añadir bloque INLINE dentro del chat
-  if (pendingConfirm) {
-    const summary = (pendingConfirm.type === 'name')
-      ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
-      : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
+// 2) si hay confirmación, añadir bloque INLINE dentro del chat
+if (pendingConfirm) {
+  const summary = (pendingConfirm.type === 'name')
+    ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
+    : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
 
-    html += `
-      <div class="msg dm">
-        <div class="meta">[${hhmm(now())}] Máster</div>
-        <div class="text">
-          <div class="confirm-cta-card">
-            <strong>Confirmación:</strong> <span>${summary}</span>
-            <div class="roll-cta__actions" style="margin-top:2px">
-              <button id="confirm-yes-inline" type="button">Sí</button>
-              <button id="confirm-no-inline" type="button" class="outline">No</button>
+  html += `
+    <div class="msg-row" style="display:flex; justify-content:flex-start; margin:4px 0;">  <!-- menos gap entre mensajes -->
+      <div class="msg-stack" style="display:flex; flex-direction:column; align-items:flex-start; max-width:100%;">
+        <div class="msg dm" style="margin-bottom:0;">                                                             <!-- pegamos hora -->
+          <div class="meta meta--label">Máster:</div>                                                             <!-- mismo tamaño que la hora -->
+          <div class="text">
+            <div class="confirm-cta-card">
+              <strong>Confirmación:</strong> <span>${summary}</span>
+              <div class="roll-cta__actions" style="margin-top:6px">
+                <button id="confirm-yes-inline" type="button">Sí</button>
+                <button id="confirm-no-inline" type="button" class="outline">No</button>
+              </div>
             </div>
           </div>
+          <div class="meta meta--time" style="margin-top:2px; line-height:1;">${hhmm(now())}</div>               <!-- hora con mismo tamaño y poco gap -->
         </div>
-      </div>`;
-  }
+      </div>
+    </div>`;
+}
 
   chatEl.innerHTML = html;
   chatEl.scrollTop = chatEl.scrollHeight;
