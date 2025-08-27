@@ -258,7 +258,7 @@ body.is-logged #guest-card { display: none; }
 /* Detalles visuales de la tarjeta (opcional, usa tus tokens) */
 #guest-card .guest-info{
   border:1px solid var(--holo);
-  background:var(--surface);
+  background:#000000.10;
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:18px 20px;
