@@ -129,7 +129,7 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-// (Mantenemos el confirm-cta fijo oculto; ahora usamos versión inline dentro del chat)
+// (Confirm CTA inline dentro del chat)
 
 // ============================================================
 //                       Utils / helpers
@@ -150,17 +150,6 @@ function formatMarkdown(t = '') {
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
-
-// Payload plano + anidado para /world/characters
-function charPayload(c) {
-  return {
-    name: c?.name || '',
-    species: c?.species || '',
-    role: c?.role || '',
-    publicProfile: c?.publicProfile ?? true,
-    character: c || null,
-  };
-}
 
 // ---- Fetch helpers
 async function readMaybeJson(res) {
@@ -341,15 +330,11 @@ function parseRollTag(txt = '') {
 
 // --- Detectar etiqueta de confirmación (robusto y global) ---
 function parseConfirmTag(txt = '') {
-  // Captura cualquier <<CONFIRM ...>> con saltos de línea y espacios, global y no-greedy
   const tagRe = /<<\s*CONFIRM\b([\s\S]*?)>>/gi;
   let match, lastAttrs = null;
   let cleaned = txt;
-  // Elimina TODAS las apariciones de la etiqueta del texto mostrado
   cleaned = cleaned.replace(tagRe, '').trim();
-  // Busca de nuevo para recuperar la última etiqueta (para pendingConfirm)
   while ((match = tagRe.exec(txt)) !== null) lastAttrs = match[1] || '';
-
   if (!lastAttrs) return null;
 
   const attrs = {};
@@ -415,7 +400,6 @@ async function send() {
 
   // 🚫 Si hay confirmación pendiente, no dejamos que el Máster conteste nada más
   if (pendingConfirm && step !== 'done') {
-    // (opcional) puedes mostrar un aviso propio en UI si quieres
     inputEl.value = '';
     return;
   }
@@ -426,7 +410,7 @@ async function send() {
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/world/characters', charPayload(character)); } catch (e) { dlog('privacy update fail', e?.data || e); }
+    try { await api('/world/characters', { character }); } catch (e) { dlog('privacy update fail', e?.data || e); }
     inputEl.value = ''; return;
   }
 
@@ -448,7 +432,7 @@ async function send() {
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
       try {
-        const r = await api('/world/characters', charPayload(character));
+        const r = await api('/world/characters', { character });
         if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
       } catch (e) { dlog('create char fail', e?.data || e); }
       step = 'species'; save(KEY_STEP, step);
@@ -459,7 +443,7 @@ async function send() {
         character.species = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', charPayload(character));
+          const r = await api('/world/characters', { character });
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update species fail', e?.data || e); }
@@ -472,7 +456,7 @@ async function send() {
         character.role = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', charPayload(character));
+          const r = await api('/world/characters', { character });
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update role fail', e?.data || e); }
@@ -539,7 +523,7 @@ async function handleConfirmDecision(decision) {
         } else { character.name = pendingConfirm.name; }
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', charPayload(character));
+          const r = await api('/world/characters', { character });
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert name fail', e?.data || e); }
         step = 'species'; save(KEY_STEP, step);
@@ -552,7 +536,7 @@ async function handleConfirmDecision(decision) {
         }
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', charPayload(character));
+          const r = await api('/world/characters', { character });
           if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert build fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
