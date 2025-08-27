@@ -10,7 +10,8 @@
     --text:#e7e9ee;
     --muted:#8ea3b6;
   
-    --holo:#4091EA;                 /* azul holográfico (ya usabas este) */
+    --holo:#4091EA; 
+    --holo-light:#4091EA80;                /* azul holográfico (ya usabas este) */
     --holo-soft: rgba(64,145,234,.20);
     --accent:#ffe81f;               /* amarillo “crawl” */
   
@@ -128,12 +129,12 @@
   /* Roles (conservamos tus clases específicas) */
   .msg.user{
     background:#000;
-    border:1px solid #ffffff;
+    border:1px solid #ffffff90;
     box-shadow: inset 0 0 0 1px #ffffff22;
   }
   .msg.dm{
     background:#000;
-    border:1px solid var(--holo);
+    border:1px solid var(--holo-light);
     box-shadow: inset 0 0 0 1px var(--holo-soft);
   }
   .msg .meta{ opacity:.6; font-size:12px; margin-bottom:2px }
