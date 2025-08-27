@@ -217,32 +217,71 @@ async function apiGet(path) {
 // ============================================================
 //                Helpers de estados de CARGA (UI)
 // ============================================================
+
+// Bloquea/desbloquea el ancho actual del botón para que no “salte”
+function lockWidth(el, on) {
+  if (!el) return;
+  if (on) {
+    if (!el.dataset.w) el.dataset.w = el.offsetWidth + 'px';
+    el.style.width = el.dataset.w;
+  } else {
+    el.style.width = '';
+    delete el.dataset.w;
+  }
+}
+
 function setSending(on) {
   UI.sending = !!on;
   try {
     sendBtn.disabled = !!on;
     inputEl.disabled = !!on;
-    sendBtn.classList.toggle('loading', !!on);
-    sendBtn.setAttribute('aria-busy', !!on);
-    if (!on) inputEl.disabled = false;
+
+    if (on) {
+      // Congela ancho + spinner
+      lockWidth(sendBtn, true);
+      sendBtn.classList.add('loading');
+      // Mantén un texto accesible (aunque quede oculto visualmente por CSS)
+      if (!sendBtn.dataset.prev) sendBtn.dataset.prev = sendBtn.textContent || 'Enviar';
+      sendBtn.textContent = sendBtn.dataset.prev;
+    } else {
+      // Suelta ancho + spinner
+      sendBtn.classList.remove('loading');
+      lockWidth(sendBtn, false);
+      sendBtn.textContent = sendBtn.dataset.prev || 'Enviar';
+      inputEl.disabled = false;
+    }
   } catch {}
 }
 
 function setAuthLoading(on, kind = null) {
   UI.authLoading = !!on;
   UI.authKind = on ? kind : null;
+
+  // Botón afectado (login o register)
+  const targetBtn = (kind === 'login') ? authLoginBtn
+                   : (kind === 'register') ? authRegisterBtn
+                   : null;
+
   try {
+    // Deshabilita campos y ambos botones mientras cargamos
     authUserEl.disabled = !!on;
     authPinEl.disabled = !!on;
     authLoginBtn.disabled = !!on;
     authRegisterBtn.disabled = !!on;
 
-    // Spinner visual en el botón correspondiente
-    authLoginBtn.classList.toggle('loading', !!on && kind === 'login');
-    authRegisterBtn.classList.toggle('loading', !!on && kind === 'register');
-    if (!on) {
-      authLoginBtn.classList.remove('loading');
-      authRegisterBtn.classList.remove('loading');
+    if (on && targetBtn) {
+      // Congela ancho + spinner SOLO en el botón usado
+      lockWidth(targetBtn, true);
+      targetBtn.classList.add('loading');
+      if (!targetBtn.dataset.prev) targetBtn.dataset.prev = targetBtn.textContent || (kind === 'login' ? 'Entrar' : 'Crear');
+      targetBtn.textContent = targetBtn.dataset.prev; // Texto accesible
+    } else {
+      // Limpia ambos por si acaso
+      for (const b of [authLoginBtn, authRegisterBtn]) {
+        b.classList.remove('loading');
+        lockWidth(b, false);
+        if (b.dataset.prev) b.textContent = b.dataset.prev;
+      }
     }
   } catch {}
 }
@@ -252,15 +291,18 @@ function setConfirmLoading(on) {
   try {
     const yes = document.getElementById('confirm-yes-inline');
     const no  = document.getElementById('confirm-no-inline');
-    if (yes) {
-      yes.disabled = !!on;
-      yes.classList.toggle('loading', !!on);
-      yes.setAttribute('aria-busy', !!on);
-    }
-    if (no) {
-      no.disabled = !!on;
-      no.classList.toggle('loading', !!on);
-      no.setAttribute('aria-busy', !!on);
+
+    // Deshabilita ambos botones de confirmación
+    if (yes) yes.disabled = !!on;
+    if (no)  no.disabled  = !!on;
+
+    if (on) {
+      // Congela ancho + spinner en ambos (así el bloque no se “mueve”)
+      if (yes) { lockWidth(yes, true); yes.classList.add('loading'); yes.textContent = 'Sí'; }
+      if (no)  { lockWidth(no,  true); no.classList.add('loading');  no.textContent  = 'No'; }
+    } else {
+      if (yes) { yes.classList.remove('loading'); lockWidth(yes, false); yes.textContent = 'Sí'; }
+      if (no)  { no.classList.remove('loading');  lockWidth(no,  false); no.textContent  = 'No'; }
     }
   } catch {}
 }
