@@ -272,3 +272,41 @@ body.is-logged #guest-card { display: none; }
   font-weight:700;
   color:var(--holo);
 }
+/* ===== Centrado de inputs y botones SOLO en pantalla de inicio ===== */
+body.is-guest #guest-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;          /* centra el contenido del card */
+}
+
+body.is-guest #guest-card .auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;      /* centra la fila completa */
+  gap: 14px;
+  margin: 20px auto 0;
+  width: 100%;
+  max-width: 900px;             /* para que no se “abra” demasiado */
+}
+
+body.is-guest #guest-card .auth-row input {
+  flex: 0 1 260px;              /* tamaños cómodos y consistentes */
+}
+
+body.is-guest #guest-card .auth-row button {
+  flex: 0 0 auto;
+  padding-inline: 20px;
+}
+
+/* En móviles: apilar en columna y ocupar ancho cómodo */
+@media (max-width: 700px) {
+  body.is-guest #guest-card .auth-row {
+    flex-direction: column;
+    gap: 10px;
+    max-width: 480px;
+  }
+  body.is-guest #guest-card .auth-row input,
+  body.is-guest #guest-card .auth-row button {
+    width: 100%;
+  }
+}
