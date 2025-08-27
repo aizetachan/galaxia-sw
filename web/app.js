@@ -827,24 +827,41 @@ async function doAuth(kind) {
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
-    // ---- FIX: limpiar bienvenida 'guest' al registrarse y arrancar onboarding
-    if (kind === 'register') {
-      const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
-      const esSoloBienvenida = Array.isArray(msgs) && msgs.length <= 1 &&
-                               t0.includes('HoloCanal') && t0.includes('inicia sesión');
-      if (esSoloBienvenida) {
-        msgs = [];
-        save(KEY_MSGS, msgs);
-      }
-      // arrancamos onboarding por el nombre
-      step = 'name'; save(KEY_STEP, step);
-      pendingConfirm = null; save(KEY_CONFIRM, null);
-    }
+// ---- FIX: limpiar bienvenida 'guest' también en LOGIN ----
+{
+  const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
+  const esSoloBienvenida =
+    Array.isArray(msgs) &&
+    msgs.length <= 1 &&
+    t0.includes('HoloCanal') &&
+    t0.includes('inicia sesión');
+
+  // Si solo tenemos la bienvenida copiada desde guest, la limpiamos
+  if (esSoloBienvenida) {
+    msgs = [];
+    save(KEY_MSGS, msgs);
+  }
+
+  // En REGISTRO forzamos onboarding por nombre; en LOGIN no
+  if (kind === 'register') {
+    step = 'name';                    // empieza onboarding
+    save(KEY_STEP, step);
+    pendingConfirm = null;
+    save(KEY_CONFIRM, null);
+  }
+}
+
 
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
     catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
-    if (me?.character) { character = me.character; save(KEY_CHAR, character); }
+    if (me?.character) {
+      character = me.character;
+      save(KEY_CHAR, character);
+      // usuario existente → saltamos onboarding
+      step = 'done';
+      save(KEY_STEP, step);
+    }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
     // pinta estado visual de auth (guest/logged)
