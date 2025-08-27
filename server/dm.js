@@ -150,8 +150,17 @@ const dicePolicy = readPrompt('dice-rules.md') || [
   '- Tras <<DICE_OUTCOME ...>>, aplica consecuencias y continúa.',
 ].join('\n');
 
+/* === Política para primera escena tras el onboarding (sin tirada) === */
+const introPolicy = [
+  'PRIMERA ESCENA (tras onboarding):',
+  '- Si el mensaje del jugador contiene <<CONFIRM_ACK TYPE="build"...>>, trata esa respuesta como el arranque de aventura.',
+  '- En tu PRIMER mensaje tras eso, NO emitas <<ROLL ...>>.',
+  '- Comienza con una breve descripción del lugar y un gancho suave sin riesgo inmediato.',
+  '- Espera al menos una intervención del jugador antes de cualquier tirada.',
+].join('\n');
+
 /* ========= Construcción del SYSTEM en función del stage ========= */
-function buildSystem({ stage, brief, historyLines }) {
+function buildSystem({ stage, brief, historyLines, isIntroStart }) {
   const core = readPrompt('prompt-master.md');
   const game = readPrompt('game-rules.md');
 
@@ -163,7 +172,7 @@ function buildSystem({ stage, brief, historyLines }) {
     'REGLAS DE ONBOARDING (no revelar al jugador):',
     `- STAGE actual: ${stage || 'name'} (no lo menciones).`,
     '- STAGE=name → Mensaje de bienvenida breve: "¡Bienvenido/a a la galaxia!" y pregunta: "¿Cómo se va a llamar tu personaje?".',
-    '  • Si el jugador proporciona un nombre, pídelo con cortesía y emite al final: <<CONFIRM NAME="<Nombre>">>.',
+    '  • Si el jugador proporciona un nombre, confírmalo al final con: <<CONFIRM NAME="<Nombre>">>.',
     '- STAGE=build → Pregunta: "Cuéntame qué tipo de aventura quieres vivir en la galaxia".',
     '  • Propón 2–3 combinaciones coherentes (species + role) en viñetas cortas.',
     '  • Elige UNA propuesta principal y al final emite: <<CONFIRM SPECIES="<Especie>" ROLE="<Rol>">>.',
@@ -181,6 +190,7 @@ function buildSystem({ stage, brief, historyLines }) {
     dicePolicy,
     tagProtocol,
     onboarding,
+    isIntroStart ? introPolicy : '',          // <<--- inyecta aquí la política de primera escena
     worldBlock,
     historyBlock,
     // Estilo:
@@ -228,12 +238,14 @@ async function handleDM(req, res) {
   const userId = req.auth?.userId || null;
   const hasAuth = !!userId;
   const text = extractUserText(req.body);
+  const isIntroStart = /<<\s*CONFIRM_ACK[^>]*\bTYPE\s*=\s*"build"/i.test(text || '');
   const stage = String(req.body?.stage || 'name');
 
   console.log('[DM] incoming {',
     '\n  url:', JSON.stringify(url),
     '\n  userId:', JSON.stringify(userId),
     '\n  stage:', JSON.stringify(stage),
+    '\n  isIntroStart:', isIntroStart,
     '\n  textSample:', JSON.stringify(text?.slice?.(0, 60) || ''),
     '\n}');
 
@@ -256,7 +268,8 @@ async function handleDM(req, res) {
     const system = buildSystem({
       stage,
       brief,
-      historyLines: history.lines
+      historyLines: history.lines,
+      isIntroStart,               // <<--- pasa el flag
     });
 
     let outText = null;

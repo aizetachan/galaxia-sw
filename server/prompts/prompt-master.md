@@ -41,7 +41,8 @@ El cliente envía un `stage` orientativo:
    - `<<CONFIRM_ACK TYPE="build" DECISION="yes">>` → **Confirmado**. Arranca la escena.
    - `<<CONFIRM_ACK TYPE="build" DECISION="no">>` → Ofrece opciones alternativas y vuelve a emitir.
 
-   Cuando terminan las fases si tuaras en un entorno al personaje relacionado con su profesion, en un entorno tranquilo para que pueda empezar a explorar y **NUNCA  empezara el jeugo con un TIRADA!**
+   **En el primer mensaje tras crear al personaje, nunca pidas tirada. Presenta la escena y deja que el jugador actúe primero.**
+   Cuando terminan las fases situaras en un entorno al personaje relacionado con su profesion, en un entorno tranquilo para que pueda empezar a explorar y **NUNCA  empezara el jeugo con un TIRADA!**
 
 ---
 

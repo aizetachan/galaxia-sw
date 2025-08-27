@@ -436,12 +436,11 @@ async function send() {
   // --- Onboarding por fases ---
   if (step !== 'done') {
     if (step === 'name') {
-      // 1) Tomamos el nombre y pedimos confirmación (sin hablar con el Máster todavía)
+      // 1) Guardamos provisionalmente y pedimos confirmación (sin hablar con el Máster)
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
 
-      // Levantamos la CTA de confirmación de NOMBRE
       pendingConfirm = { type: 'name', name };
       save(KEY_CONFIRM, pendingConfirm);
 
@@ -538,13 +537,12 @@ async function handleConfirmDecision(decision) {
         } else { character.name = pendingConfirm.name; }
         save(KEY_CHAR, character);
 
-        // (Guardaremos el personaje ya con nombre confirmado si quieres)
+        // Guardamos el nombre confirmado
         try {
           const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert name fail', e?.data || e); }
 
-        // Pasamos a la siguiente fase
         step = 'species'; save(KEY_STEP, step);
       } else if (type === 'build') {
         if (!character) {
