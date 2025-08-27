@@ -361,22 +361,23 @@ function render() {
 
   // 1) pintar mensajes
   let html = msgs.map(m => {
-    const rowJustify = (m.kind === 'user') ? 'flex-end' : 'flex-start';
-    const stackAlign = (m.kind === 'user') ? 'flex-end' : 'flex-start';
-    const metaAlign  = (m.kind === 'user') ? 'text-right' : '';
-    const label      = escapeHtml(m.user) + ':'; // no cambiamos estilos ni lógica
+    const metaAlign = (m.kind === 'user') ? 'text-right' : '';
+    const label = escapeHtml(m.user) + ':'; // etiqueta
+  
     return `
-      <div class="msg-row" style="display:flex; justify-content:${rowJustify}; margin:4px 0;">
-        <div class="msg-stack" style="display:flex; flex-direction:column; align-items:${stackAlign}; max-width:100%;">
-         <div class="msg ${m.kind}" style="margin-bottom:0;">
-        <div class="meta meta--label ${metaAlign}">${label}</div>
+      <!-- Burbuja -->
+      <div class="msg ${m.kind}">
+        <div class="meta ${metaAlign}">${label}</div>
         <div class="text">${formatMarkdown(m.text)}</div>
-        <div class="meta meta--time ${metaAlign}" style="margin-top:2px; line-height:1;">${hhmm(m.ts)}</div>
       </div>
-
+  
+      <!-- Hora: fuera de la burbuja, mismo tamaño que el nombre -->
+      <div class="msg ${m.kind}" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
+        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
       </div>
     `;
   }).join('');
+  
 
 
 // 2) si hay confirmación, añadir bloque INLINE dentro del chat
@@ -385,26 +386,27 @@ if (pendingConfirm) {
     ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
     : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
 
-    html += `
-    <div class="msg-row" style="display:flex; justify-content:flex-start; margin:4px 0;">
-      <div class="msg-stack" style="display:flex; flex-direction:column; align-items:flex-start; max-width:100%;">
-        <div class="msg dm" style="margin-bottom:0;">
-          <div class="meta meta--label">Máster:</div>
-          <div class="text">
-            <div class="confirm-cta-card">
-              <strong>Confirmación:</strong> <span>${summary}</span>
-              <div class="roll-cta__actions" style="margin-top:6px">
-                <button id="confirm-yes-inline" type="button">Sí</button>
-                <button id="confirm-no-inline" type="button" class="outline">No</button>
-              </div>
-            </div>
+  html += `
+    <div class="msg dm"> <!-- BURBUJA -->
+      <div class="meta">Máster:</div>
+      <div class="text">
+        <div class="confirm-cta-card">
+          <strong>Confirmación:</strong> <span>${summary}</span>
+          <div class="roll-cta__actions" style="margin-top:6px">
+            <button id="confirm-yes-inline" type="button">Sí</button>
+            <button id="confirm-no-inline" type="button" class="outline">No</button>
           </div>
-          <div class="meta meta--time" style="margin-top:2px; line-height:1;">${hhmm(now())}</div>
         </div>
       </div>
     </div>
-  `;  
+
+    <!-- Hora DM: fuera, mismo tamaño -->
+    <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
+      <div class="meta" style="line-height:1;">${hhmm(now())}</div>
+    </div>
+  `;
 }
+
 
   chatEl.innerHTML = html;
   chatEl.scrollTop = chatEl.scrollHeight;
