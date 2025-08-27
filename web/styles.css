@@ -532,3 +532,39 @@ body.is-guest #guest-card .auth-row input {
     padding-top: 16px;
     padding-bottom: 16px; }
 }
+
+/* ===== Identity bar: layout + botón salir ===== */
+.identity-bar .id-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between; /* nombres a la izq, botón a la dcha */
+  gap:12px;
+}
+.identity-bar .id-left{
+  display:flex;
+  align-items:baseline;
+  gap:12px;
+}
+.identity-bar .logout-btn{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:28px;            /* aprox. misma altura visual que la barra */
+  min-width:28px;
+  padding:0 8px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.25);
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+}
+.identity-bar .logout-btn:hover{
+  border-color: rgba(255,255,255,.45);
+}
+@media (max-width:768px){
+  .identity-bar .logout-btn{
+    height:26px;
+    min-width:26px;
+    padding:0 6px;
+  }
+}
