@@ -493,6 +493,13 @@ body.is-guest #guest-card .auth-row input {
   .composer{
     padding-bottom: max(0px, env(safe-area-inset-bottom));
   }
+  #send{
+    flex: 0 0 auto;           /* NO crecer en flex */
+    width: auto !important;   /* ancho según contenido */
+    min-width: 0 !important;  /* anula min-width global si lo hubiera */
+    padding: 8px 14px;        /* reduce padding horizontal */
+    font-size: 14px;          /* (opcional) más compacto */
+  }
 }
 /* ===== Barra de identidad (usuario + personaje) ===== */
 .identity-bar{ margin:4px 0 8px 0; }
