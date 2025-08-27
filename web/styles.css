@@ -312,3 +312,60 @@ body.is-guest #guest-card .auth-row button { flex: 0 0 auto; padding-inline: 20p
   body.is-guest #guest-card .auth-row input,
   body.is-guest #guest-card .auth-row button { width: 100%; }
 }
+
+/* ===== Layout fijo: sin scroll global; solo scrollea el chat ===== */
+html, body {
+  height: 100%;
+  overflow: hidden;                 /* <- bloquea scroll de página */
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;                /* asegura cubrir viewport */
+  -webkit-text-size-adjust: 100%;   /* iOS: evita “reflow” raro */
+}
+
+/* Contenedor principal: ocupa el alto disponible y NO scrollea */
+main.chat-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;                 /* <- nada de scroll aquí */
+  min-height: 0;                    /* clave para que el hijo (#chat) pueda overflow:auto */
+}
+
+/* Solo el timeline del chat scrollea */
+#chat {
+  flex: 1 1 auto;
+  overflow-y: auto;                 /* <- único scroll de la app */
+  -webkit-overflow-scrolling: touch;/* scroll suave en iOS */
+  min-height: 0;
+}
+
+/* Elementos bajo el chat permanecen fijos */
+#roll-cta,
+#confirm-cta,
+.composer {
+  flex: 0 0 auto;
+}
+
+/* ===== Modo invitado: sin chat y sin scroll ===== */
+body.is-guest #chat { display: none; }
+body.is-guest main.chat-wrap { overflow: hidden; }
+
+/* ===== Anti-zoom en inputs (móvil) ===== */
+/* Ya lo aplicamos en la pantalla guest; añadimos para el composer del chat */
+.composer input {
+  font-size: 16px;                  /* iOS no hace zoom con >=16px */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* (Por si usas inputs en otros CTAs dentro del chat) */
+input[type="text"],
+input[type="number"],
+input[type="password"],
+textarea {
+  font-size: 16px;
+}
