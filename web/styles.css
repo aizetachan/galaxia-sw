@@ -369,3 +369,63 @@ input[type="password"],
 textarea {
   font-size: 16px;
 }
+
+/* ===== Solo el chat scrollea; el resto fijo en todos los breakpoints ===== */
+
+/* El documento no scrollea */
+html, body {
+  height: 100%;
+  overflow: hidden;                  /* bloquea scroll global */
+  overscroll-behavior: none;         /* sin 'bounce' en iOS/Android */
+}
+
+/* Altura exacta del viewport en móviles con barras dinámicas */
+:root { --vh: 100vh; }
+@supports (height: 100svh) { :root { --vh: 100svh; } }
+@supports (height: 100dvh) { :root { --vh: 100dvh; } }
+
+body {
+  height: var(--vh);
+  min-height: var(--vh);
+  display: grid;                     /* header / main / footer fijos */
+  grid-template-rows: auto 1fr auto;
+  -webkit-text-size-adjust: 100%;
+  margin: 0;
+}
+
+/* Contenedor principal no scrollea: solo su hijo #chat */
+main.chat-wrap {
+  min-height: 0;                     /* <- clave para que #chat pueda overflow */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* El ÚNICO scroll de la app */
+#chat {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch; /* scroll suave en iOS */
+  overscroll-behavior: contain;
+}
+
+/* CTA/Composer pegados sin provocar scroll global */
+#roll-cta, #confirm-cta, .composer { flex: 0 0 auto; }
+
+/* Safe area en el pie y el composer para iOS */
+.app-footer, .composer {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px));
+}
+
+/* Modo invitado: sin chat y sin scroll */
+body.is-guest #chat { display: none; }
+body.is-guest main.chat-wrap { overflow: hidden; }
+
+/* Anti-zoom de inputs (móvil) */
+.composer input,
+body.is-guest #guest-card .auth-row input {
+  font-size: 16px;                   /* evita zoom al enfocar */
+  -webkit-appearance: none;
+  appearance: none;
+}
