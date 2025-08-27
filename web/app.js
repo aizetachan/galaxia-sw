@@ -365,19 +365,23 @@ function render() {
     const metaAlign = isUser ? 'text-right' : '';
     const label     = escapeHtml(m.user) + ':';
   
-    // USER: burbuja a la derecha y ancho según contenido (con límite)
-    const msgBoxStyle  = isUser
-      ? 'width:fit-content; max-width:min(72ch, 60%); margin-left:auto;'
-      : '';
+    // Burbujas: USER se ancla a la derecha y ajusta al contenido
+    // - display:flex + align-items:flex-end empuja los hijos (meta/text) a la derecha
+    // - max-width limita el ancho; fit-content encoge si es corto
+    const msgBoxStyle = isUser
+      ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
+      : 'width:fit-content; max-width:min(72ch, 92%);';
   
-    // USER: texto dentro de la burbuja alineado a la derecha
-    const textStyle    = isUser ? 'text-align:right;' : '';
+    // Texto:
+    // - USER => texto a la IZQUIERDA dentro de la burbuja y ocupando su ancho
+    // - DM   => sin cambios
+    const textStyle = isUser ? 'text-align:left; width:100%;' : '';
   
-    // Hora fuera de la burbuja, mismo tamaño que el nombre y alineación por lado
+    // Hora (fuera de la burbuja), misma alineación que la burbuja
     const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
     const timeBoxStyle = isUser
       ? timeBoxBase + 'width:fit-content; margin-left:auto;'
-      : timeBoxBase;
+      : timeBoxBase + 'width:fit-content;';
   
     return `
       <!-- Burbuja -->
@@ -386,12 +390,13 @@ function render() {
         <div class="text" style="${textStyle}">${formatMarkdown(m.text)}</div>
       </div>
   
-      <!-- Hora: fuera, mismo tamaño que el nombre y misma alineación -->
+      <!-- Hora -->
       <div class="msg ${m.kind}" style="${timeBoxStyle}">
         <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
       </div>
     `;
   }).join('');
+  
 
 
 
@@ -403,7 +408,7 @@ if (pendingConfirm) {
 
   html += `
     <!-- Burbuja DM -->
-    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 90%);">
+    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 80%);">
       <div class="meta meta--label">Máster:</div>
       <div class="text">
         <div class="confirm-cta-card">
