@@ -160,17 +160,20 @@ window.setIdentityBar = setIdentityBar;
 
 
 /* Helper para hidratar SIEMPRE desde el estado real */
+/* Helper para hidratar SIEMPRE desde el estado real de la app */
 function updateIdentityFromState(){
-  // Usuario: usa AUTH (fuente de verdad). Si no, el input.
+  // Usuario: de AUTH (fuente de verdad). Si no hay sesión, del input.
   const user =
     (AUTH?.user?.username) ||
     (document.getElementById('auth-username')?.value || '');
 
-  // Personaje: usa el objeto global 'character' (ya persistido con KEY_CHAR)
+  // Personaje: del objeto 'character' que ya persistes con KEY_CHAR
   const char = character?.name || '';
 
   setIdentityBar(user, char);
 }
+window.updateIdentityFromState = updateIdentityFromState;
+
 window.updateIdentityFromState = updateIdentityFromState;
 
 window.updateIdentityFromState = updateIdentityFromState;
@@ -1074,6 +1077,7 @@ async function doAuth(kind) {
     }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
+    setIdentityBar(user.username, character?.name || '');
     // pinta estado visual de auth (guest/logged)
     updateAuthUI();
     setIdentityBar(user.username, character?.name || '');
