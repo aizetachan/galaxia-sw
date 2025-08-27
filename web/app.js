@@ -237,14 +237,11 @@ function setSending(on) {
     inputEl.disabled = !!on;
 
     if (on) {
-      // Congela ancho + spinner
       lockWidth(sendBtn, true);
       sendBtn.classList.add('loading');
-      // Mantén un texto accesible (aunque quede oculto visualmente por CSS)
       if (!sendBtn.dataset.prev) sendBtn.dataset.prev = sendBtn.textContent || 'Enviar';
       sendBtn.textContent = sendBtn.dataset.prev;
     } else {
-      // Suelta ancho + spinner
       sendBtn.classList.remove('loading');
       lockWidth(sendBtn, false);
       sendBtn.textContent = sendBtn.dataset.prev || 'Enviar';
@@ -257,26 +254,22 @@ function setAuthLoading(on, kind = null) {
   UI.authLoading = !!on;
   UI.authKind = on ? kind : null;
 
-  // Botón afectado (login o register)
   const targetBtn = (kind === 'login') ? authLoginBtn
                    : (kind === 'register') ? authRegisterBtn
                    : null;
 
   try {
-    // Deshabilita campos y ambos botones mientras cargamos
     authUserEl.disabled = !!on;
     authPinEl.disabled = !!on;
     authLoginBtn.disabled = !!on;
     authRegisterBtn.disabled = !!on;
 
     if (on && targetBtn) {
-      // Congela ancho + spinner SOLO en el botón usado
       lockWidth(targetBtn, true);
       targetBtn.classList.add('loading');
       if (!targetBtn.dataset.prev) targetBtn.dataset.prev = targetBtn.textContent || (kind === 'login' ? 'Entrar' : 'Crear');
-      targetBtn.textContent = targetBtn.dataset.prev; // Texto accesible
+      targetBtn.textContent = targetBtn.dataset.prev;
     } else {
-      // Limpia ambos por si acaso
       for (const b of [authLoginBtn, authRegisterBtn]) {
         b.classList.remove('loading');
         lockWidth(b, false);
@@ -291,13 +284,10 @@ function setConfirmLoading(on) {
   try {
     const yes = document.getElementById('confirm-yes-inline');
     const no  = document.getElementById('confirm-no-inline');
-
-    // Deshabilita ambos botones de confirmación
     if (yes) yes.disabled = !!on;
     if (no)  no.disabled  = !!on;
 
     if (on) {
-      // Congela ancho + spinner en ambos (así el bloque no se “mueve”)
       if (yes) { lockWidth(yes, true); yes.classList.add('loading'); yes.textContent = 'Sí'; }
       if (no)  { lockWidth(no,  true); no.classList.add('loading');  no.textContent  = 'No'; }
     } else {
@@ -514,12 +504,11 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
-  // Si hay confirmación pendiente, no dejamos seguir hasta que pulse Sí/No
   if (pendingConfirm && step !== 'done') { inputEl.value = ''; return; }
 
   dlog('send', { value, step });
   setSending(true);
-  inputEl.value = ''; // vaciar ya
+  inputEl.value = '';
 
   // Comandos rápidos
   if ((value === '/privado' || value === '/publico') && character) {
@@ -546,17 +535,15 @@ async function send() {
   // --- Onboarding por fases ---
   if (step !== 'done') {
     if (step === 'name') {
-      // 1) Tomamos el nombre y pedimos confirmación (sin hablar con el Máster todavía)
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
 
-      // Levantamos la CTA de confirmación de NOMBRE
       pendingConfirm = { type: 'name', name };
       save(KEY_CONFIRM, pendingConfirm);
 
-      render();               // pinta el bloque de confirmación inline
-      setSending(false);      // desbloquear UI porque no llamamos a la API
+      render();
+      setSending(false);
       return;
     }
 
@@ -612,14 +599,18 @@ async function resolveRoll() {
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
 
+  // Marca visual de “resolviendo…” en el CTA sin revelar el resultado
   try {
+    rollSkillEl.textContent = pendingRoll.skill
+      ? ` · ${pendingRoll.skill} — resolviendo…`
+      : ' — resolviendo…';
+  } catch {}
+
+  try {
+    // 1) Tirada en servidor (NO mostramos su texto aquí)
     const res = await api('/roll', { skill });
-    pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
 
-    const outcomeText = (typeof res.roll !== 'undefined') ? ` · ${res.roll} → ${res.outcome}` : ` · ${res.outcome || 'resultado'}`;
-    lastRoll = { skill, outcomeText };
-    updateRollCta();
-
+    // 2) Enviamos el OUTCOME al DM y esperamos su respuesta
     const history = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
@@ -628,7 +619,9 @@ async function resolveRoll() {
       stage: mapStageForDM(step)
     });
 
-    handleIncomingDMText((follow && follow.text) ? follow.text : res.text);
+    // 3) Solo mostramos lo que diga el Máster
+    const nextText = follow?.text || 'La situación evoluciona…';
+    handleIncomingDMText(nextText);
 
   } catch (e) {
     dlog('resolveRoll error', e?.data || e);
