@@ -1126,3 +1126,108 @@ function extractTargetName(text) {
   if (m) return m[1].trim();
   return null;
 }
+// ===== Vídeo de fondo en la tarjeta de invitado (#guest-card) =====
+(function setupGuestCardVideo(){
+  // Ahora mismo solo tienes WEBM. Si añades MP4, mete otra entrada en este array.
+  const VIDEO_SOURCES = [
+    { src: '/assets/video/hero-home-720p.webm', type: 'video/webm' },
+    // { src: '/assets/video/hero-home-720p.mp4',  type: 'video/mp4'  },
+  ];
+  const POSTER = ''; // opcional: '/assets/posters/hero-home.jpg'
+
+  function createVideo(){
+    const v = document.createElement('video');
+    v.id = 'guest-card-video';
+    v.className = 'guest__bg';
+    v.autoplay = true;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    v.preload = 'metadata';
+    v.setAttribute('aria-hidden','true');
+    if (POSTER) v.setAttribute('poster', POSTER);
+    VIDEO_SOURCES.forEach(s => {
+      const src = document.createElement('source');
+      src.src = s.src; src.type = s.type;
+      v.appendChild(src);
+    });
+    return v;
+  }
+
+  function guestCardVisible(){
+    const el = document.getElementById('guest-card');
+    return !!el && !el.hasAttribute('hidden');
+  }
+
+  // Alternativa por si dependes de la barra de identidad
+  function isLogged(){
+    const bar = document.getElementById('identity-bar');
+    return !!bar && !bar.hasAttribute('hidden');
+  }
+
+  function mount(){
+    if (navigator.connection?.saveData) return unmount(); // ahorro de datos
+    const wrap = document.getElementById('guest-card');
+    if (!wrap) return;
+    if (!guestCardVisible()) return unmount();
+
+    let v = document.getElementById('guest-card-video');
+    if (!v) {
+      v = createVideo();
+      wrap.prepend(v);           // primer hijo => al fondo del contenedor
+    }
+    v.play?.().catch(()=>{});
+  }
+
+  function unmount(){
+    const v = document.getElementById('guest-card-video');
+    if (!v) return;
+    try {
+      v.pause();
+      // libera buffers
+      v.removeAttribute('src');
+      while (v.firstChild) v.removeChild(v.firstChild);
+      v.load();
+    } catch {}
+    v.remove();
+  }
+
+  // Aplica en carga
+  const apply = () => {
+    if (guestCardVisible() && !isLogged()) mount();
+    else unmount();
+  };
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', apply, { once:true });
+  } else {
+    apply();
+  }
+
+  // Pausa si la pestaña no está visible (ahorro de CPU/GPU)
+  document.addEventListener('visibilitychange', () => {
+    const v = document.getElementById('guest-card-video');
+    if (!v) return;
+    if (document.hidden) v.pause(); else v.play?.().catch(()=>{});
+  });
+
+  // Re-aplicar cuando cambie el estado de sesión
+  const orig = window.updateIdentityFromState;
+  window.updateIdentityFromState = function(...args){
+    try { return orig?.apply(this, args); }
+    finally { apply(); }
+  };
+
+  // Observar cambios de visibilidad del propio #guest-card
+  const card = document.getElementById('guest-card');
+  if (card && window.MutationObserver){
+    new MutationObserver(apply).observe(card, { attributes:true, attributeFilter:['hidden','class','style'] });
+  }
+
+  // Observar la barra de identidad por si cambia sin llamar a la función anterior
+  const bar = document.getElementById('identity-bar');
+  if (bar && window.MutationObserver){
+    new MutationObserver(apply).observe(bar, { attributes:true, attributeFilter:['hidden','class','style'] });
+  }
+})();
+
