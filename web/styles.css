@@ -141,7 +141,7 @@
   
   /* -------- 5) COMPOSER -------- */
   .composer{
-    display:flex; gap:8px; margin:10px 0 8px;
+    display:flex; gap:8px; margin:10px 0 16px;
   }
   .composer input{
     flex:1; padding:10px 12px; border-radius:12px;
@@ -207,7 +207,7 @@
   @media (max-width:600px){
     :root{ --chat-h:50vh }
     .composer{ flex-wrap:wrap }
-    .composer button{ flex:1 1 120px }
+    .composer button{ flex:1 1 80px }
   }
 
   /* Botón "Enviar" plano (sin degradado ni relieve) */
