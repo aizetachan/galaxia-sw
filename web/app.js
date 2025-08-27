@@ -158,17 +158,21 @@ function setIdentityBar(userName, characterName){
 /* Exponer para consola y otros módulos */
 window.setIdentityBar = setIdentityBar;
 
-/* Helper para hidratar desde estado/localStorage cuando renderizamos */
+
+/* Helper para hidratar SIEMPRE desde el estado real */
 function updateIdentityFromState(){
+  // Usuario: usa AUTH (fuente de verdad). Si no, el input.
   const user =
-    (window.state?.user?.name) ||
-    localStorage.getItem('sw:username') ||
-    document.getElementById('auth-username')?.value || '';
-  const char =
-    (window.state?.character?.name) ||
-    localStorage.getItem('sw:character') || '';
+    (AUTH?.user?.username) ||
+    (document.getElementById('auth-username')?.value || '');
+
+  // Personaje: usa el objeto global 'character' (ya persistido con KEY_CHAR)
+  const char = character?.name || '';
+
   setIdentityBar(user, char);
 }
+window.updateIdentityFromState = updateIdentityFromState;
+
 window.updateIdentityFromState = updateIdentityFromState;
 /* === END identity-bar === */
 
@@ -1072,6 +1076,8 @@ async function doAuth(kind) {
     authStatusEl.textContent = `Hola, ${user.username}`;
     // pinta estado visual de auth (guest/logged)
     updateAuthUI();
+    setIdentityBar(user.username, character?.name || '');
+
 
     if (msgs.length === 0) {
       await showResumeIfAny();
