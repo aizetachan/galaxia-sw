@@ -126,19 +126,21 @@ const UI = {
 const chatEl = document.getElementById('chat');   // <— ANCLAJE
 
 
-/* === BEGIN identity-bar (seguro) === */
+
+/* === BEGIN identity-bar (global + seguro) === */
 const chatWrap = document.querySelector('.chat-wrap');
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
   identityEl = document.createElement('section');
   identityEl.id = 'identity-bar';
   identityEl.className = 'identity-bar hidden';
-  chatWrap.insertBefore(identityEl, chatEl); // misma anchura que el chat
+  chatWrap.insertBefore(identityEl, chatEl); // mismo ancho y flujo que el chat
 }
+
 function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
-  if (!u || isGuest) {
+  if (!u || isGuest){
     identityEl.classList.add('hidden');
     identityEl.innerHTML = '';
     return;
@@ -148,10 +150,28 @@ function setIdentityBar(userName, characterName){
     <div class="id-row">
       <div class="id-user">${escapeHtml(u)}</div>
       <div class="id-char">${escapeHtml(c)}</div>
-    </div>`;
+    </div>
+  `;
   identityEl.classList.remove('hidden');
 }
+
+/* Exponer para consola y otros módulos */
+window.setIdentityBar = setIdentityBar;
+
+/* Helper para hidratar desde estado/localStorage cuando renderizamos */
+function updateIdentityFromState(){
+  const user =
+    (window.state?.user?.name) ||
+    localStorage.getItem('sw:username') ||
+    document.getElementById('auth-username')?.value || '';
+  const char =
+    (window.state?.character?.name) ||
+    localStorage.getItem('sw:character') || '';
+  setIdentityBar(user, char);
+}
+window.updateIdentityFromState = updateIdentityFromState;
 /* === END identity-bar === */
+
 
 /* auto-hydratación básica (por si ya tienes sesión cargada) */
 (function hydrateIdentity(){
@@ -486,6 +506,9 @@ function render() {
       </div>
     `;
   }
+
+  updateIdentityFromState();
+chatEl.innerHTML = html;
 
   chatEl.innerHTML = html;
   /* hidrata barra de identidad antes de pintar el chat */
