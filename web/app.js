@@ -664,7 +664,14 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
-  if (pendingConfirm && step !== 'done') { inputEl.value = ''; return; }
+  // Si hay una confirmación pendiente y el usuario escribe,
+// lo tomamos como una nueva propuesta y cancelamos la confirmación actual.
+if (pendingConfirm && step !== 'done') {
+  pendingConfirm = null;
+  save(KEY_CONFIRM, null);
+  render(); // quita el bloque de confirmación inline
+}
+
 
   dlog('send', { value, step });
   setSending(true);

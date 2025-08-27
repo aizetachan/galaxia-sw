@@ -457,4 +457,39 @@ body.is-guest #guest-card .auth-row input {
       min-height: 0;             /* evita forzar altura mínima en pantallas pequeñas */
     }
   }
-  
+  /* ===== Quitar el footer en todos los dispositivos ===== */
+.app-footer { display: none; }
+
+/* ===== Versión mobile: más alto y con padding lateral ===== */
+@media (max-width: 768px){
+  /* Estructura flexible para que <main> ocupe la altura libre del viewport */
+  body{
+    display:flex;
+    flex-direction:column;
+    min-height:100vh;
+  }
+  @supports (height: 100svh){
+    body{ min-height:100svh; }
+  }
+
+  /* El contenedor del chat ocupa todo el espacio disponible */
+  .chat-wrap{
+    flex:1 1 auto;
+    display:flex;
+    flex-direction:column;
+    padding-left:8px;
+    padding-right:8px;
+  }
+
+  /* El log de mensajes crece (sin height fijo) */
+  .chat{
+    flex:1 1 auto;
+    height:auto;   /* sobrescribe el 60vh */
+    min-height:0;  /* evita overflow en pantallas pequeñas */
+  }
+
+  /* Un poco de aire seguro para iOS/Android */
+  .composer{
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
