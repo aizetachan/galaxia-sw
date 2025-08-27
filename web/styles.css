@@ -510,15 +510,3 @@ body.is-guest #guest-card .auth-row input {
 @media (max-width:768px){
   .identity-bar{ margin-left:0; margin-right:0; }
 }
-/* ===== Mobile: ocultar título y descripción del header ===== */
-@media (max-width: 768px){
-  .app-header h1,
-  .app-header .muted { 
-    display: none;
-  }
-  /* opcional: compactar un poco el header en móvil */
-  .app-header{
-    padding-top: 8px;
-    padding-bottom: 8px;
-  }
-}
