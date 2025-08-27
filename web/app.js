@@ -20,9 +20,7 @@ function getQuery(name) {
   try {
     const u = new URL(location.href);
     return u.searchParams.get(name) || '';
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
@@ -60,7 +58,7 @@ async function probeHealth(base) {
       const j = JSON.parse(txt);
       if (j && (j.ok === true || 'ts' in j)) return { ok: true, json: j };
       return { ok: false, reason: 'json-no-ok', json: j };
-    } catch (e) {
+    } catch {
       return { ok: false, reason: 'json-parse', text: txt };
     }
   } catch (e) {
@@ -71,22 +69,22 @@ async function probeHealth(base) {
 }
 
 /**
- * Descubre y fija la API (orden de prioridad):
- * 1) ?api=... en la URL
- * 2) localStorage 'sw:api_base'
- * 3) window.API_BASE (si lo inyectas antes)
+ * Descubre y fija la API (nuevo orden: preferimos ventana/origen sobre caché)
+ * 1) ?api=...
+ * 2) window.API_BASE
+ * 3) location.origin + '/api'
  * 4) <meta name="api-base">
- * 5) location.origin + '/api'
- * 6) DEFAULT_API_BASE
+ * 5) DEFAULT_API_BASE
+ * 6) localStorage 'sw:api_base' (AL FINAL para evitar bases antiguas)
  */
 async function ensureApiBase() {
   const override = getQuery('api');
-  const cached   = localStorage.getItem(API_STORE_KEY) || '';
   const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
-  const metaTag  = getMeta('api-base') || '';
   const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
+  const metaTag  = getMeta('api-base') || '';
+  const cached   = localStorage.getItem(API_STORE_KEY) || '';
 
-  const candidates = [override, cached, winSet, metaTag, origin, DEFAULT_API_BASE]
+  const candidates = [override, winSet, origin, metaTag, DEFAULT_API_BASE, cached]
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/, ''));
 
@@ -249,7 +247,9 @@ async function apiGet(path) {
       AUTH = null;
       localStorage.removeItem('sw:auth');
       KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
+      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); 
+      // Limpieza de confirmación fantasma para invitado
+      pendingConfirm = null; save(KEY_CONFIRM, null);
     }
   } catch (e) {
     dlog('Auth restore error:', e);
@@ -263,6 +263,20 @@ async function apiGet(path) {
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
+
+  // Listeners (tras construir estado y DOM)
+  sendBtn.addEventListener('click', send);
+  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  resolveBtn.addEventListener('click', resolveRoll);
+  authLoginBtn.addEventListener('click', () => doAuth('login'));
+  authRegisterBtn.addEventListener('click', () => doAuth('register'));
+  cancelBtn.addEventListener('click', () => {
+    pushDM('🎲 Tirada cancelada (… )');
+    pendingRoll = null;
+    updateRollCta();
+  });
+  if (confirmYesBtn) confirmYesBtn.addEventListener('click', () => handleConfirmDecision('yes'));
+  if (confirmNoBtn)  confirmNoBtn.addEventListener('click',  () => handleConfirmDecision('no'));
 
   render();
   dlog('Boot done');
