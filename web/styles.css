@@ -520,4 +520,7 @@ body.is-guest #guest-card .auth-row input {
   .app-header .muted { 
     display: none;
   }
+  .app-header{
+    padding-top: 16px;
+    padding-bottom: 16px; }
 }
