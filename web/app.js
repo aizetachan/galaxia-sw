@@ -361,10 +361,20 @@ function render() {
 
   // 1) pintar mensajes
 let html = msgs.map(m => {
-  const rowJustify = (m.kind === 'user') ? 'flex-end' : 'flex-start';
-  const stackAlign = (m.kind === 'user') ? 'flex-end' : 'flex-start';
-  const metaAlign = (m.kind === 'user') ? 'text-right' : '';
-  const label = escapeHtml(m.user) + ':'; // etiqueta
+  const isUser    = (m.kind === 'user');
+  const metaAlign = isUser ? 'text-right' : '';
+  const label     = escapeHtml(m.user) + ':';
+// USER: burbuja a la derecha y ancho según contenido (con límite)
+  const msgBoxStyle  = isUser
+    ? 'width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
+    : '';
+// USER: texto dentro de la burbuja alineado a la derecha
+  const textStyle    = isUser ? 'text-align:right;' : '';
+// Hora fuera de la burbuja, mismo tamaño que el nombre y alineación por lado
+  const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
+  const timeBoxStyle = isUser
+    ? timeBoxBase + 'width:fit-content; margin-left:auto;'
+    : timeBoxBase;
 
   return `
     <!-- Burbuja -->
