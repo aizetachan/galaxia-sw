@@ -485,6 +485,48 @@ function updateRollCta() {
   }
 }
 
+// ===== Resume helpers: limpiar comandos y re-inflar conversación =====
+function stripProtoTags(s = '') {
+  // quita <<...>> y espacios redundantes
+  return String(s).replace(/<<[\s\S]*?>>/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+function inflateTranscriptFromResume(text) {
+  // convierte "Jugador: ..., · Máster: ..." en burbujas reales
+  const cleaned = stripProtoTags(text).replace(/\(kickoff\)/ig, '').trim();
+  const parts = cleaned.split(/\s*·\s*/g).map(p => p.trim()).filter(Boolean);
+  const out = [];
+  const ts = now();
+
+  for (const p of parts) {
+    const mDM   = p.match(/^(Máster|Master):\s*(.*)$/i);
+    const mUser = p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.*)$/i);
+    if (mDM)   out.push({ user: 'Máster', text: mDM[2], kind: 'dm',   ts });
+    else if (mUser) out.push({ user: character?.name || 'Tú', text: mUser[1], kind: 'user', ts });
+    else if (/^Salud de nuevo/i.test(p)) out.push({ user: 'Máster', text: p, kind: 'dm', ts });
+  }
+  return out;
+}
+
+async function showResumeOnDemand() {
+  try {
+    const r = await apiGet('/dm/resume');
+    if (r?.ok && r.text) {
+      const plain = stripProtoTags(r.text)
+        .replace(/\s*·\s*/g, '\n• ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+      pushDM(`**Resumen de tu partida:**\n${plain}`);
+    } else {
+      pushDM('No hay resumen disponible.');
+    }
+  } catch (e) {
+    dlog('resume on demand fail', e?.data || e);
+    pushDM('No se pudo obtener el resumen ahora.');
+  }
+}
+
+
 // --- Detectar etiqueta de tirada ---
 function parseRollTag(txt = '') {
   const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
@@ -574,6 +616,11 @@ async function send() {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
     try { await api('/world/characters', charPayload(character)); } catch (e) { dlog('privacy update fail', e?.data || e); }
+    setSending(false);
+    return;
+  }
+  if (value === '/resumen' || value === '/resume') {
+    await showResumeOnDemand();
     setSending(false);
     return;
   }
@@ -788,21 +835,27 @@ function migrateGuestToUser(userId) {
 }
 
 // ============================================================
-//                 /dm/resume helper
+//                 /dm/resume helper (re-inflado)
 // ============================================================
 async function showResumeIfAny() {
   try {
     const r = await apiGet('/dm/resume');
-    if (r?.ok && !r.empty && r.text) {
+    if (r?.ok && r.text && msgs.length === 0) {
       if (r.character) {
         character = r.character;
         save(KEY_CHAR, character);
-        if (step !== 'done') { step = 'done'; save(KEY_STEP, step); }
+        step = 'done';
+        save(KEY_STEP, step);
       }
-      pushDM(r.text);
+      const transcript = inflateTranscriptFromResume(r.text);
+      if (transcript.length) {
+        msgs = transcript;
+        save(KEY_MSGS, msgs);
+      }
     }
   } catch (e) { dlog('resume fail', e?.data || e); }
 }
+
 
 // ============================================================
 //                     Auth (robusto con 404)
