@@ -360,12 +360,24 @@ function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   // 1) pintar mensajes
-  let html = msgs.map(m => `
-    <div class="msg ${m.kind}">
-      <div class="meta">[${hhmm(m.ts)}] ${escapeHtml(m.user)}</div>
-      <div class="text">${formatMarkdown(m.text)}</div>
-    </div>
-  `).join('');
+  let html = msgs.map(m => {
+    const rowJustify = (m.kind === 'user') ? 'flex-end' : 'flex-start';
+    const stackAlign = (m.kind === 'user') ? 'flex-end' : 'flex-start';
+    const metaAlign  = (m.kind === 'user') ? 'text-right' : '';
+    const label      = escapeHtml(m.user) + ':'; // no cambiamos estilos ni lógica
+    return `
+      <div class="msg-row" style="display:flex; justify-content:${rowJustify}; margin:8px 0;">
+        <div class="msg-stack" style="display:flex; flex-direction:column; align-items:${stackAlign}; max-width:100%;">
+          <div class="msg ${m.kind}">
+            <div class="meta ${metaAlign}">${label}</div>
+            <div class="text">${formatMarkdown(m.text)}</div>
+          </div>
+          <div class="meta ${metaAlign}" style="margin-top:6px;">${hhmm(m.ts)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
 
   // 2) si hay confirmación, añadir bloque INLINE dentro del chat
   if (pendingConfirm) {
@@ -767,6 +779,20 @@ async function doAuth(kind) {
 
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
+        // ---- FIX: limpiar bienvenida 'guest' al registrarse y arrancar onboarding
+        if (kind === 'register') {
+          const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
+          const esSoloBienvenida = Array.isArray(msgs) && msgs.length <= 1 &&
+                                   t0.includes('HoloCanal') && t0.includes('inicia sesión');
+          if (esSoloBienvenida) {
+            msgs = [];
+            save(KEY_MSGS, msgs);
+          }
+          // arrancamos onboarding por el nombre
+          step = 'name'; save(KEY_STEP, step);
+          pendingConfirm = null; save(KEY_CONFIRM, null);
+        }
+    
 
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
