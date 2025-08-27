@@ -129,7 +129,7 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-// (Confirm CTA inline dentro del chat)
+// (Confirmación inline dentro del chat)
 
 // ============================================================
 //                       Utils / helpers
@@ -150,6 +150,18 @@ function formatMarkdown(t = '') {
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
+
+// Payload plano + anidado para /world/characters
+function charPayload(c) {
+  return {
+    name: c?.name || '',
+    species: c?.species || '',
+    role: c?.role || '',
+    publicProfile: c?.publicProfile ?? true,
+    lastLocation: c?.lastLocation || 'Tatooine — Cantina de Mos Eisley',
+    character: c || null,
+  };
+}
 
 // ---- Fetch helpers
 async function readMaybeJson(res) {
@@ -338,9 +350,7 @@ function parseConfirmTag(txt = '') {
   if (!lastAttrs) return null;
 
   const attrs = {};
-  for (const mm of String(lastAttrs).matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) {
-    attrs[mm[1].toUpperCase()] = mm[2];
-  }
+  for (const mm of String(lastAttrs).matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) attrs[mm[1].toUpperCase()] = mm[2];
   let pending = null;
   if (attrs.NAME) pending = { type: 'name', name: attrs.NAME };
   else if (attrs.SPECIES && attrs.ROLE) pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
@@ -354,7 +364,7 @@ function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build';
 function handleIncomingDMText(rawText) {
   let txt = rawText || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
 
-  // Confirmación (limpia etiquetas y levanta pendingConfirm)
+  // Confirmación que venga del Máster
   const conf = parseConfirmTag(txt);
   if (conf) {
     pendingConfirm = conf.pending;
@@ -398,11 +408,8 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
-  // 🚫 Si hay confirmación pendiente, no dejamos que el Máster conteste nada más
-  if (pendingConfirm && step !== 'done') {
-    inputEl.value = '';
-    return;
-  }
+  // Si hay confirmación pendiente, no dejamos seguir hasta que pulse Sí/No
+  if (pendingConfirm && step !== 'done') { inputEl.value = ''; return; }
 
   dlog('send', { value, step });
 
@@ -410,7 +417,7 @@ async function send() {
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
-    try { await api('/world/characters', { character }); } catch (e) { dlog('privacy update fail', e?.data || e); }
+    try { await api('/world/characters', charPayload(character)); } catch (e) { dlog('privacy update fail', e?.data || e); }
     inputEl.value = ''; return;
   }
 
@@ -426,24 +433,31 @@ async function send() {
 
   pushUser(value);
 
+  // --- Onboarding por fases ---
   if (step !== 'done') {
     if (step === 'name') {
+      // 1) Tomamos el nombre y pedimos confirmación (sin hablar con el Máster todavía)
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-      try {
-        const r = await api('/world/characters', { character });
-        if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
-      } catch (e) { dlog('create char fail', e?.data || e); }
-      step = 'species'; save(KEY_STEP, step);
-    } else if (step === 'species') {
+
+      // Levantamos la CTA de confirmación de NOMBRE
+      pendingConfirm = { type: 'name', name };
+      save(KEY_CONFIRM, pendingConfirm);
+
+      render();               // pinta el bloque de confirmación inline
+      inputEl.value = '';
+      return;                 // ⛔ no llamamos a talkToDM hasta que confirme
+    }
+
+    if (step === 'species') {
       const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
       const key = Object.keys(map).find(k => value.toLowerCase().startsWith(k));
       if (key) {
         character.species = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update species fail', e?.data || e); }
@@ -456,13 +470,14 @@ async function send() {
         character.role = map[key];
         save(KEY_CHAR, character);
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; }
           save(KEY_CHAR, character);
         } catch (e) { dlog('update role fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
       }
     }
+
     await talkToDM(value);
     inputEl.value = '';
     return;
@@ -522,10 +537,14 @@ async function handleConfirmDecision(decision) {
           character = { name: pendingConfirm.name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
         } else { character.name = pendingConfirm.name; }
         save(KEY_CHAR, character);
+
+        // (Guardaremos el personaje ya con nombre confirmado si quieres)
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert name fail', e?.data || e); }
+
+        // Pasamos a la siguiente fase
         step = 'species'; save(KEY_STEP, step);
       } else if (type === 'build') {
         if (!character) {
@@ -535,10 +554,12 @@ async function handleConfirmDecision(decision) {
           character.role = pendingConfirm.role;
         }
         save(KEY_CHAR, character);
+
         try {
-          const r = await api('/world/characters', { character });
+          const r = await api('/world/characters', charPayload(character));
           if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('upsert build fail', e?.data || e); }
+
         step = 'done'; save(KEY_STEP, step);
       }
     }
