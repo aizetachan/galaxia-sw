@@ -1131,6 +1131,7 @@ function extractTargetName(text) {
   // Ahora mismo solo tienes WEBM. Si añades MP4, mete otra entrada en este array.
   const VIDEO_SOURCES = [
     { src: '/assets/video/hero-home-720p.webm', type: 'video/webm' },
+    { src: 'assets/video/hero-home-720p.mp4',  type: 'video/mp4' },
     // { src: '/assets/video/hero-home-720p.mp4',  type: 'video/mp4'  },
   ];
   const POSTER = ''; // opcional: '/assets/posters/hero-home.jpg'

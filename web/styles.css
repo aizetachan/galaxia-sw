@@ -258,7 +258,7 @@ body.is-logged #guest-card { display: none; }
 /* Detalles visuales de la tarjeta (opcional, usa tus tokens) */
 #guest-card .guest-info{
   border:1px solid var(--holo);
-  background:#000000.10;
+  background:var(--surface);
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:18px 20px;
@@ -576,16 +576,16 @@ body.is-guest #guest-card .auth-row input {
   overflow: hidden;                 /* respeta bordes y recorta exceso */
 }
 
+#guest-card{ position:relative; overflow:hidden; }
 #guest-card .guest__bg{
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;                /* rellena sin deformar */
-  object-position: 50% 50%;         /* centrado en móvil y desktop */
-  z-index: 0;
-  pointer-events: none;             /* no bloquea inputs */
-  opacity: .6;                      /* 60% opacidad */
-  background: #000;                 /* fallback mientras carga */
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  object-fit:cover; object-position:50% 50%;
+  z-index:0; pointer-events:none;
+  opacity:.6;                /* ← 60% */
+  background:#000;
 }
+#guest-card > *:not(.guest__bg){ position:relative; z-index:1; }
 
 /* Asegura que el contenido quede por encima del vídeo */
 #guest-card > *:not(.guest__bg){ position: relative; z-index: 1; }
