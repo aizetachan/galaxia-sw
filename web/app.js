@@ -408,7 +408,7 @@ if (pendingConfirm) {
 
   html += `
     <!-- Burbuja DM -->
-    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 80%);">
+    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 85%);">
       <div class="meta meta--label">Máster:</div>
       <div class="text">
         <div class="confirm-cta-card">
