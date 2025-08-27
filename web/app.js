@@ -599,16 +599,17 @@ async function resolveRoll() {
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
 
-  // Marca visual de “resolviendo…” en el CTA sin revelar el resultado
+  // Marca visual de “resolviendo…” en el CTA (sin revelar resultado)
   try {
     rollSkillEl.textContent = pendingRoll.skill
       ? ` · ${pendingRoll.skill} — resolviendo…`
       : ' — resolviendo…';
   } catch {}
 
+  let res = null;
   try {
-    // 1) Tirada en servidor (NO mostramos su texto aquí)
-    const res = await api('/roll', { skill });
+    // 1) Tirada en servidor (NO mostramos nada todavía)
+    res = await api('/roll', { skill });
 
     // 2) Enviamos el OUTCOME al DM y esperamos su respuesta
     const history = msgs.slice(-8);
@@ -619,16 +620,18 @@ async function resolveRoll() {
       stage: mapStageForDM(step)
     });
 
-    // 3) Solo mostramos lo que diga el Máster
-    const nextText = follow?.text || 'La situación evoluciona…';
-    handleIncomingDMText(nextText);
+    // 3) AHORA sí: publicamos el resultado de la tirada y, a continuación, la respuesta del Máster
+    pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
+    handleIncomingDMText(follow?.text || res.text || 'La situación evoluciona…');
 
   } catch (e) {
     dlog('resolveRoll error', e?.data || e);
+    // Si hay tirada válida pero falló el follow-up, al menos mostramos el resultado
+    if (res) pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
-    pendingRoll = null;
+    pendingRoll = null;      // oculta el bloque inferior “Tirada: …”
     updateRollCta();
     render();
     try {
@@ -638,6 +641,7 @@ async function resolveRoll() {
     } catch {}
   }
 }
+
 
 // ====== Handler de confirmación Sí/No ======
 let busyConfirm = false;
