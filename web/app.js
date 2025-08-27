@@ -372,7 +372,7 @@ function render() {
             <div class="meta ${metaAlign}">${label}</div>
             <div class="text">${formatMarkdown(m.text)}</div>
           </div>
-          <div class="meta ${metaAlign}" style="margin-top:6px;">${hhmm(m.ts)}</div>
+          <div class="meta ${metaAlign}" style="margin-top:2px;">${hhmm(m.ts)}</div>
         </div>
       </div>
     `;
@@ -391,7 +391,7 @@ function render() {
         <div class="text">
           <div class="confirm-cta-card">
             <strong>Confirmación:</strong> <span>${summary}</span>
-            <div class="roll-cta__actions" style="margin-top:8px">
+            <div class="roll-cta__actions" style="margin-top:2px">
               <button id="confirm-yes-inline" type="button">Sí</button>
               <button id="confirm-no-inline" type="button" class="outline">No</button>
             </div>
