@@ -360,24 +360,26 @@ function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   // 1) pintar mensajes
-  let html = msgs.map(m => {
-    const metaAlign = (m.kind === 'user') ? 'text-right' : '';
-    const label = escapeHtml(m.user) + ':'; // etiqueta
-  
-    return `
-      <!-- Burbuja -->
-      <div class="msg ${m.kind}">
-        <div class="meta ${metaAlign}">${label}</div>
-        <div class="text">${formatMarkdown(m.text)}</div>
-      </div>
-  
-      <!-- Hora: fuera de la burbuja, mismo tamaño que el nombre -->
-      <div class="msg ${m.kind}" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
-        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
-      </div>
-    `;
-  }).join('');
-  
+let html = msgs.map(m => {
+  const rowJustify = (m.kind === 'user') ? 'flex-end' : 'flex-start';
+  const stackAlign = (m.kind === 'user') ? 'flex-end' : 'flex-start';
+  const metaAlign = (m.kind === 'user') ? 'text-right' : '';
+  const label = escapeHtml(m.user) + ':'; // etiqueta
+
+  return `
+    <!-- Burbuja -->
+    <div class="msg ${m.kind}">
+      <div class="meta ${metaAlign}">${label}</div>
+      <div class="text">${formatMarkdown(m.text)}</div>
+    </div>
+
+    <!-- Hora: fuera de la burbuja, mismo tamaño que el nombre -->
+    <div class="msg ${m.kind}" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
+      <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
+    </div>
+  `;
+}).join('');
+
 
 
 // 2) si hay confirmación, añadir bloque INLINE dentro del chat
