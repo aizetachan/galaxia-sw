@@ -479,6 +479,7 @@ body.is-guest #guest-card .auth-row input {
     flex-direction:column;
     padding-left:8px;
     padding-right:8px;
+    padding-top:4px; padding-bottom:4px;
   }
 
   /* El log de mensajes crece (sin height fijo) */
@@ -490,7 +491,7 @@ body.is-guest #guest-card .auth-row input {
 
   /* Un poco de aire seguro para iOS/Android */
   .composer{
-    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
   }
 }
 /* ===== Barra de identidad (usuario + personaje) ===== */
