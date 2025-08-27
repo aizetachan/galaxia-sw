@@ -429,3 +429,32 @@ body.is-guest #guest-card .auth-row input {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* =========================
+   Mobile tweaks (<= 768px)
+   ========================= */
+   @media (max-width: 768px){
+    /* 1) Más aire lateral en el chat */
+    .chat-wrap{
+      padding-left: 8px;
+      padding-right: 8px;
+  
+      /* 2) Que el área de chat aproveche la altura disponible */
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;         /* fallback genérico */
+    }
+  
+    /* Mejora para móviles modernos (evita el bug de la barra del navegador) */
+    @supports (height: 100svh){
+      .chat-wrap{ min-height: 100svh; }
+    }
+  
+    /* 3) El contenedor del log de mensajes crece para ocupar el espacio libre */
+    .chat{
+      flex: 1 1 auto;            /* crece verticalmente */
+      height: auto;              /* ignora el height fijo */
+      min-height: 0;             /* evita forzar altura mínima en pantallas pequeñas */
+    }
+  }
+  
