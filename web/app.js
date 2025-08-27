@@ -360,35 +360,38 @@ function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   // 1) pintar mensajes
-let html = msgs.map(m => {
-  const isUser    = (m.kind === 'user');
-  const metaAlign = isUser ? 'text-right' : '';
-  const label     = escapeHtml(m.user) + ':';
-// USER: burbuja a la derecha y ancho según contenido (con límite)
-  const msgBoxStyle  = isUser
-    ? 'width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
-    : '';
-// USER: texto dentro de la burbuja alineado a la derecha
-  const textStyle    = isUser ? 'text-align:right;' : '';
-// Hora fuera de la burbuja, mismo tamaño que el nombre y alineación por lado
-  const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
-  const timeBoxStyle = isUser
-    ? timeBoxBase + 'width:fit-content; margin-left:auto;'
-    : timeBoxBase;
-
-  return `
-    <!-- Burbuja -->
-    <div class="msg ${m.kind}">
-      <div class="meta ${metaAlign}">${label}</div>
-      <div class="text">${formatMarkdown(m.text)}</div>
-    </div>
-
-    <!-- Hora: fuera de la burbuja, mismo tamaño que el nombre -->
-    <div class="msg ${m.kind}" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
-      <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
-    </div>
-  `;
-}).join('');
+  let html = msgs.map(m => {
+    const isUser    = (m.kind === 'user');
+    const metaAlign = isUser ? 'text-right' : '';
+    const label     = escapeHtml(m.user) + ':';
+  
+    // USER: burbuja a la derecha y ancho según contenido (con límite)
+    const msgBoxStyle  = isUser
+      ? 'width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
+      : '';
+  
+    // USER: texto dentro de la burbuja alineado a la derecha
+    const textStyle    = isUser ? 'text-align:right;' : '';
+  
+    // Hora fuera de la burbuja, mismo tamaño que el nombre y alineación por lado
+    const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
+    const timeBoxStyle = isUser
+      ? timeBoxBase + 'width:fit-content; margin-left:auto;'
+      : timeBoxBase;
+  
+    return `
+      <!-- Burbuja -->
+      <div class="msg ${m.kind}" style="${msgBoxStyle}">
+        <div class="meta ${metaAlign}">${label}</div>
+        <div class="text" style="${textStyle}">${formatMarkdown(m.text)}</div>
+      </div>
+  
+      <!-- Hora: fuera, mismo tamaño que el nombre y misma alineación -->
+      <div class="msg ${m.kind}" style="${timeBoxStyle}">
+        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
+      </div>
+    `;
+  }).join('');
 
 
 
