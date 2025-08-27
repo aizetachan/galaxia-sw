@@ -367,7 +367,7 @@ function render() {
   
     // USER: burbuja a la derecha y ancho según contenido (con límite)
     const msgBoxStyle  = isUser
-      ? 'width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
+      ? 'width:fit-content; max-width:min(72ch, 60%); margin-left:auto;'
       : '';
   
     // USER: texto dentro de la burbuja alineado a la derecha
@@ -402,8 +402,9 @@ if (pendingConfirm) {
     : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
 
   html += `
-    <div class="msg dm"> <!-- BURBUJA -->
-      <div class="meta">Máster:</div>
+    <!-- Burbuja DM -->
+    <div class="msg dm" style="width:fit-content; max-width:min(72ch, 90%);">
+      <div class="meta meta--label">Máster:</div>
       <div class="text">
         <div class="confirm-cta-card">
           <strong>Confirmación:</strong> <span>${summary}</span>
@@ -415,9 +416,9 @@ if (pendingConfirm) {
       </div>
     </div>
 
-    <!-- Hora DM: fuera, mismo tamaño -->
-    <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px;">
-      <div class="meta" style="line-height:1;">${hhmm(now())}</div>
+    <!-- Hora DM -->
+    <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px; width:fit-content;">
+      <div class="meta meta--time" style="line-height:1;">${hhmm(now())}</div>
     </div>
   `;
 }
