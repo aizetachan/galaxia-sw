@@ -147,11 +147,11 @@ function setIdentityBar(userName, characterName){
   }
   const c = String(characterName || '').trim();
   identityEl.innerHTML = `
-    <div class="id-row">
-      <div class="id-user">${escapeHtml(u)}</div>
-      <div class="id-char">${escapeHtml(c)}</div>
-    </div>
-  `;
+  <div class="id-row">
+    <div class="id-user">${escapeHtml(u)}</div>
+    ${ c ? `<div class="id-char muted">— ${escapeHtml(c)}</div>` : '' }
+  </div>
+`;
   identityEl.classList.remove('hidden');
 }
 
@@ -508,7 +508,6 @@ function render() {
   }
 
   updateIdentityFromState();
-chatEl.innerHTML = html;
 
   chatEl.innerHTML = html;
   /* hidrata barra de identidad antes de pintar el chat */

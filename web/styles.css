@@ -504,7 +504,10 @@ body.is-guest #guest-card .auth-row input {
   font-size:20px; font-weight:600; letter-spacing:.02em;
 }
 .identity-bar .id-char{
-  font-size:13px; opacity:.7;
+  color: var(--muted);       /* gris del sistema */
+  font-size: 13px;
+  margin-left: 8px;          /* separación respecto al usuario */
+  opacity: .9;               /* un pelín más marcado que .muted por si acaso */
 }
 
 /* mobile: respeta el padding lateral que pusimos al chat */
