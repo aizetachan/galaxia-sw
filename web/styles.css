@@ -582,7 +582,7 @@ body.is-guest #guest-card .auth-row input {
   width:100%; height:100%;
   object-fit:cover; object-position:50% 50%;
   z-index:0; pointer-events:none;
-  opacity:.6;                /* ← 60% */
+  opacity:.25;                /* ← 60% */
   background:#000;
 }
 #guest-card > *:not(.guest__bg){ position:relative; z-index:1; }
