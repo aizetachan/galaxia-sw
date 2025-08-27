@@ -141,7 +141,7 @@
   
   /* -------- 5) COMPOSER -------- */
   .composer{
-    display:flex; gap:8px; margin:10px 0 18px;
+    display:flex; gap:8px; margin:10px 0 8px;
   }
   .composer input{
     flex:1; padding:10px 12px; border-radius:12px;
