@@ -123,6 +123,31 @@ async function getRecentChatSummary(userId, limit = 200) {
   return { lines, lastTs };
 }
 
+/* ========= Memoria ligera (servidor) & resumen ========= */
+const LIGHT_NOTES_MAX = 20;
+const THREAD_SUMMARY_MAX_LEN = 1000;
+const SUMMARY_EVERY_TURNS = Number(process.env.SUMMARY_EVERY_TURNS ?? 6);
+const SUMMARY_HISTORY_TRIGGER = Number(process.env.SUMMARY_HISTORY_TRIGGER ?? 40);
+
+const userLightNotes = new Map();     // userId -> string[]
+const userThreadSummary = new Map();  // userId -> string
+const userTurnCount = new Map();      // userId -> number
+
+function getNotes(userId){ return userLightNotes.get(userId) || []; }
+function setNotes(userId, notes){
+  userLightNotes.set(userId, [...notes].slice(-LIGHT_NOTES_MAX));
+}
+function getSummary(userId){ return userThreadSummary.get(userId) || ''; }
+function setSummary(userId, text){
+  const t = String(text || '').slice(-THREAD_SUMMARY_MAX_LEN);
+  userThreadSummary.set(userId, t);
+}
+function bumpTurns(userId){
+  const n = (userTurnCount.get(userId) || 0) + 1;
+  userTurnCount.set(userId, n);
+  return n;
+}
+
 /* ========= Políticas y protocolo ========= */
 const languagePolicy = [
   'IDIOMA:',
@@ -159,10 +184,11 @@ const introPolicy = [
   '- Espera al menos una intervención del jugador antes de cualquier tirada.',
 ].join('\n');
 
-/* ========= Construcción del SYSTEM en función del stage ========= */
+/* ========= PIN & SYSTEM ========= */
 function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) {
   const core = readPrompt('prompt-master.md');
-  const game = readPrompt('game-rules.md');// --- PIN (memoria activa, 3 líneas) ---
+  const game = readPrompt('game-rules.md');
+  // --- PIN (memoria activa, 3 líneas) ---
   const pinCanon = 'CANON: Space-opera PG-13; la reputación tiene consecuencias; la violencia pública atrae a la ley.';
   
   // PJ: intenta sacarlo del brief (DB) o cae al clientState (guest)
@@ -185,11 +211,8 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
       pinEscena = 'ESCENA: ' + s;
     }
   }
-  
-  // Construye el bloque PIN (solo líneas no vacías)
+
   const pinBlock = [pinCanon, pinPj, pinEscena].filter(Boolean).join('\n');
-  
-  
 
   const historyBlock = (historyLines?.length
     ? ('\nHistorial reciente (resumen cronológico corto):\n' + historyLines.slice(-20).join('\n'))
@@ -210,35 +233,68 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
 
   const worldBlock = brief ? ('\nContexto del mundo:\n' + brief) : '';
 
+  // Nota clave para cabecera JSON y “observación pasiva”:
+  const metaContract = [
+    'CONTRATO DE META:',
+    '- La PRIMERA LÍNEA de cada respuesta DEBE ser JSON válido con forma: {"roll": "habilidad:DC" | null, "memo": ["..."], "options": ["..."]}',
+    '- No pidas tirada en observación pasiva salvo peligro/oposición claros.',
+  ].join('\n');
+
   return [
-    pinBlock,                                    // <- NUEVO: el PIN primero
+    pinBlock,
+    metaContract,
     (core || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
     game,
     languagePolicy,
     dicePolicy,
     tagProtocol,
     onboarding,
-    isIntroStart ? introPolicy : '',          // <<--- inyecta aquí la política de primera escena
+    isIntroStart ? introPolicy : '',
     worldBlock,
     historyBlock,
-    // Estilo:
     'ESTILO: conciso (2–6 frases), orientado a acción/consecuencia, sin listas salvo en STAGE=build.',
   ].filter(Boolean).join('\n\n');
+}
+
+/* ========= selector de MODO (fast/rich/auto) ========= */
+const PASSIVE_RE = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i;
+
+function pickMode({ body, query, lastUser }) {
+  const override = (body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
+  if (['fast', 'rich', 'auto'].includes(override)) return override || 'auto';
+  if (PASSIVE_RE.test(lastUser || '')) return 'fast';
+  if (/"[^"]+"/.test(lastUser || '') || /\b(corro|ataco|disparo|hackeo|negocio|amenazo|huyo|persuado)\b/i.test(lastUser || '')) return 'rich';
+  return 'fast';
+}
+function paramsFor(mode) {
+  return (mode === 'rich')
+    ? { temperature: 0.8, top_p: 0.95, max_tokens: 520 }
+    : { temperature: 0.6, top_p: 0.90, max_tokens: 280 };
+}
+
+/* ========= Asegurar cabecera JSON ========= */
+function ensureJsonHeader(text){
+  const s = String(text || '');
+  const nl = s.indexOf('\n');
+  const first = (nl >= 0 ? s.slice(0, nl) : s).trim();
+  let ok = false;
+  try { const j = JSON.parse(first); ok = (j && typeof j === 'object' && ('roll' in j || 'memo' in j || 'options' in j)); } catch {}
+  if (ok) return s;
+  return `{"roll": null, "memo": [], "options": []}\n` + s;
 }
 
 /* ========= OpenAI call ========= */
 function isGpt5(model) { return /^gpt-5/i.test(model || ''); }
 
-async function callOpenAI({ client, model, system, userText }) {
-  const messages = [
-    { role: 'system', content: system },
-    { role: 'user', content: userText },
-  ];
+async function callOpenAI({ client, model, messages, params }) {
+  // Chat Completions primero
   try {
     const payload = { model, messages };
     if (!isGpt5(model)) {
-      const t = Number(process.env.DM_TEMPERATURE ?? '0.9');
+      const t = Number.isFinite(params?.temperature) ? params.temperature : Number(process.env.DM_TEMPERATURE ?? '0.9');
       if (Number.isFinite(t)) payload.temperature = t;
+      if (Number.isFinite(params?.top_p)) payload.top_p = params.top_p;
+      if (Number.isFinite(params?.max_tokens)) payload.max_tokens = params.max_tokens;
     }
     const resp = await client.chat.completions.create(payload);
     const out = resp.choices?.[0]?.message?.content?.trim() || null;
@@ -248,16 +304,83 @@ async function callOpenAI({ client, model, system, userText }) {
     if (![400, 422].includes(status)) throw e;
   }
 
-  // fallback a Responses API
+  // Responses API fallback
   const r2 = await client.responses.create({
     model,
-    input: [
-      { role: 'system', content: system },
-      { role: 'user', content: userText },
-    ],
+    input: messages,
+    temperature: params?.temperature,
+    top_p: params?.top_p,
+    max_output_tokens: params?.max_tokens,
   });
   const out = r2.output_text || r2?.content?.[0]?.text || r2?.choices?.[0]?.message?.content || null;
   return (typeof out === 'string' && out.trim()) ? out.trim() : null;
+}
+
+/* ========= Resumen comprimido ========= */
+async function summarizeTurn({ client, model, prevSummary, recentLines }) {
+  const summarizerModel = process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-5-mini';
+  const sys = [
+    'Eres un asistente que resume partidas de rol en español.',
+    'Objetivo: producir un RESUMEN COMPRIMIDO (4–8 viñetas, máximo ~700 caracteres).',
+    'Incluye: situación actual, objetivo inmediato, pistas/objetos clave, amenazas activas, cambios de estado del PJ.',
+    'No inventes datos. No incluyas etiquetas <<...>>. Prioriza lo reciente.',
+  ].join('\n');
+
+  const user = [
+    prevSummary ? `Resumen previo:\n${prevSummary}\n` : '',
+    'Nuevas líneas recientes (en orden cronológico):',
+    recentLines.map(l => '- ' + l).join('\n'),
+    '',
+    'Devuelve solo viñetas (•) en texto plano, 4–8 líneas.'
+  ].join('\n');
+
+  const messages = [
+    { role: 'system', content: sys },
+    { role: 'user', content: user }
+  ];
+
+  const out = await callOpenAI({
+    client,
+    model: summarizerModel,
+    messages,
+    params: { temperature: 0.3, top_p: 0.9, max_tokens: 380 },
+  });
+
+  // poda defensiva
+  return String(out || '')
+    .replace(/<<[\s\S]*?>>/g, '')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .join('\n')
+    .slice(0, 900);
+}
+
+async function maybeUpdateSummary({ userId, historyLines }) {
+  // Heurísticas: cada N turnos o si hay mucho historial
+  const turns = bumpTurns(userId);
+  const needs = (turns % SUMMARY_EVERY_TURNS === 0) || (historyLines.length >= SUMMARY_HISTORY_TRIGGER);
+  if (!needs) return;
+
+  try {
+    const client = await getOpenAI();
+    const prev = getSummary(userId);
+    // Toma solo las 24 últimas líneas (suficiente contexto reciente)
+    const recent = historyLines.slice(-24);
+    const newSummary = await summarizeTurn({
+      client,
+      model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+      prevSummary: prev,
+      recentLines: recent,
+    });
+    if (newSummary && newSummary.length > 0) {
+      setSummary(userId, newSummary);
+      console.log('[DM] summary updated (chars=', newSummary.length, ')');
+    }
+  } catch (e) {
+    console.warn('[DM] summary update skipped:', e?.message || e);
+  }
 }
 
 /* ========= handler principal ========= */
@@ -292,19 +415,49 @@ async function handleDM(req, res) {
       getRecentChatSummary(userId, 80),
     ]);
 
+    // ======= Memoria ligera: fusiona notas servidor + sceneMemo del cliente
+    const sceneMemo = Array.isArray(req.body?.clientState?.sceneMemo) ? req.body.clientState.sceneMemo : [];
+    const lightNotes = getNotes(userId);
+    const mergedMemo = [...new Set([...lightNotes, ...sceneMemo])].slice(-10);
+
+    const summaryText = getSummary(userId);
+
+    const memoBlock = mergedMemo.length
+      ? `\n[RECORDATORIOS — NO narrar; solo tener en cuenta]\n- ${mergedMemo.join('\n- ')}\n`
+      : '';
+    const summaryBlock = summaryText ? `\n[RESUMEN BREVE DE SESIÓN]\n${summaryText}\n` : '';
+
     const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
     const system = buildSystem({
       stage,
       brief,
       historyLines: history.lines,
-      isIntroStart,               // <<--- pasa el flag
-      clientState: req.body?.clientState || null,   // <- NUEVO
+      isIntroStart,
+      clientState: req.body?.clientState || null,
     });
+
+    // historia reciente del FRONT
+    const clientHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+    const lastUserFromClient = clientHistory.slice().reverse().find(m => m.kind === 'user')?.text || text || '';
+
+    const mode = pickMode({ body: req.body, query: req.query, lastUser: lastUserFromClient });
+    const llmParams = paramsFor(mode);
+
+    const messages = [
+      { role: 'system', content: system },
+      ...(summaryBlock ? [{ role: 'assistant', content: summaryBlock }] : []),
+      ...(memoBlock ? [{ role: 'assistant', content: memoBlock }] : []),
+      ...clientHistory.slice(-8).map(m => ({
+        role: m.kind === 'user' ? 'user' : 'assistant',
+        content: `${m.user}: ${m.text}`
+      })),
+      { role: 'user', content: text || '<<CLIENT_HELLO>>' },
+    ];
 
     let outText = null;
     try {
       const client = await getOpenAI();
-      outText = await callOpenAI({ client, model, system, userText: text || '<<CLIENT_HELLO>>' });
+      outText = await callOpenAI({ client, model, messages, params: llmParams });
     } catch (e) {
       console.error('[DM] OpenAI fatal:', e?.status, e?.code, e?.message);
     }
@@ -312,11 +465,36 @@ async function handleDM(req, res) {
     if (!outText) {
       const t = 'Interferencia en la HoloNet. El Máster no responde ahora mismo; repite la acción más tarde.';
       await saveMsg(userId, 'dm', t);
-      return res.status(200).json({ ok: true, text: t, meta: { ai_ok: false, model } });
+      return res.status(200).json({ ok: true, text: t, meta: { ai_ok: false, model, mode } });
     }
 
-    await saveMsg(userId, 'dm', outText);
-    return res.status(200).json({ ok: true, text: outText, meta: { ai_ok: true, model } });
+    // Asegurar JSON en primera línea
+    let safeText = ensureJsonHeader(outText);
+
+    // Extraer y guardar memo del encabezado JSON como “light notes”
+    try {
+      const nl = safeText.indexOf('\n');
+      const first = (nl >= 0 ? safeText.slice(0, nl) : safeText).trim();
+      const head = JSON.parse(first);
+      if (Array.isArray(head.memo) && head.memo.length) {
+        const current = getNotes(userId);
+        setNotes(userId, [...current, ...head.memo]);
+      }
+    } catch {}
+
+    await saveMsg(userId, 'dm', safeText);
+
+    // === Actualizar resumen comprimido (no bloqueante del flujo principal)
+    try {
+      await maybeUpdateSummary({
+        userId,
+        historyLines: history.lines,
+      });
+    } catch (e) {
+      console.warn('[DM] maybeUpdateSummary error:', e?.message || e);
+    }
+
+    return res.status(200).json({ ok: true, text: safeText, meta: { ai_ok: true, model, mode } });
 
   } catch (e) {
     console.error('[DM] fatal:', e?.message || e);
