@@ -667,49 +667,46 @@ async function showResumeOnDemand() {
 }
 
 // --- Prioridad META JSON > etiquetas
-// --- Prioridad META JSON > etiquetas
 function handleIncomingDMText(rawText) {
   let txt = String(rawText || '');
 
-  // (1) Siempre limpiamos la CTA de tirada; si el Máster pide tirada, la volveremos a fijar.
+  // (1) limpia siempre la CTA de tirada al empezar
   pendingRoll = null;
 
-  // 1) Debug: ver la primera línea cruda
+  // 1) Primera línea cruda
   const nl = txt.indexOf('\n');
   const firstLine = (nl >= 0 ? txt.slice(0, nl) : txt).trim();
   dlog('RAW first line →', firstLine);
 
-  // 2) Intentar leer META JSON de la 1ª línea
+  // 2) Intentar leer META JSON de la 1ª línea (saneando bloque ```json)
   let meta = null;
+  const first = firstLine.replace(/^```json\s*|\s*```$/g, '').trim();
   try {
-    meta = JSON.parse(firstLine);
-    if (typeof meta !== 'object' || meta === null) meta = null;
+    const m = JSON.parse(first);
+    if (m && typeof m === 'object' && ('roll' in m || 'memo' in m || 'options' in m)) meta = m;
   } catch {}
 
   let usedMeta = false;
-  if (meta && ('roll' in meta || 'memo' in meta || 'options' in meta)) {
+  if (meta) {
     usedMeta = true;
     // quitar la 1ª línea (meta) del texto que se mostrará
     txt = (nl >= 0 ? txt.slice(nl + 1) : '').trim();
 
-    // --- ROLL desde JSON (PRIORITARIO) ---
-    // Acepta forma cadena "habilidad:DC"; ignora "null" (string) y null real
+    // --- ROLL desde JSON (PRIORITARIO)
     if (typeof meta.roll === 'string' && meta.roll && meta.roll.toLowerCase() !== 'null') {
       const [skill, dc] = String(meta.roll).split(':');
       pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
     }
 
-    // --- MEMO: guardar notas de escena para alimentar el PIN ---
+    // --- MEMO
     if (Array.isArray(meta.memo) && meta.memo.length) {
       const prev = load('sw:scene_memo', []);
       save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
     }
 
-    // --- OPTIONS: sugerencias (puedes renderizarlas como botones) ---
+    // --- OPTIONS
     if (Array.isArray(meta.options) && meta.options.length) {
-      // versión rápida: añadir como texto
       txt += '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
-      // (si quieres botones, guarda meta.options en un estado y píntalos en render)
     }
 
     dlog('META JSON', meta);
@@ -722,23 +719,34 @@ function handleIncomingDMText(rawText) {
     txt = c.cleaned;
   }
 
-  // 4) Tiradas por ETIQUETA SOLO si NO vino meta JSON.
+  // 4) Fallback a etiquetas SOLO si NO hubo meta JSON,
+  //    y nunca para "observación pasiva" del jugador.
   if (!usedMeta) {
-    const r = parseRollTag(txt);
-    if (r) {
-      pendingRoll = { skill: r.skill };
-      txt = r.cleaned;
+    const lastUser = [...msgs].reverse().find(m => m.kind === 'user')?.text || '';
+    const passiveObs = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo)\b/i.test(lastUser);
+
+    if (passiveObs) {
+      if (/<<\s*ROLL/i.test(txt)) dlog('ROLL tag ignorada (observación pasiva)');
+      txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
+    } else {
+      const r = parseRollTag(txt);
+      if (r) {
+        pendingRoll = { skill: r.skill };
+        txt = r.cleaned;
+        dlog('ROLL by tag →', r.skill);
+      }
     }
   } else {
-    // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales:
+    // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales
     if (!meta.roll || String(meta.roll).toLowerCase() === 'null') {
       txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
     }
   }
 
   // 5) Mostrar siempre la prosa
-  pushDM(txt);                 // <- ANTES llamabas a renderMasterMessage(txt) (no existe)
+  pushDM(txt);
 }
+
 
 
 
