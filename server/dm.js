@@ -11,8 +11,8 @@ const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 /* ========= Lectura de prompts .md (ruta correcta + fallback legacy) ========= */
 function readPrompt(filename) {
   const candidates = [
-    path.join(process.cwd(), 'server', 'prompts', filename),          // ruta actual
-    path.join(process.cwd(), 'server', 'data', 'prompts', filename),  // fallback legacy
+    path.join(process.cwd(), 'server', 'prompts', filename),
+    path.join(process.cwd(), 'server', 'data', 'prompts', filename),
   ];
   for (const p of candidates) {
     try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8'); } catch {}
@@ -260,7 +260,10 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
 const PASSIVE_RE = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i;
 
 function pickMode({ body, query, lastUser }) {
-  const override = (body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
+  // 👇 ahora soporta body.config.mode (desde el frontend)
+  const override =
+    (body?.config?.mode || body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
+
   if (['fast', 'rich', 'auto'].includes(override)) return override || 'auto';
   if (PASSIVE_RE.test(lastUser || '')) return 'fast';
   if (/"[^"]+"/.test(lastUser || '') || /\b(corro|ataco|disparo|hackeo|negocio|amenazo|huyo|persuado)\b/i.test(lastUser || '')) return 'rich';
@@ -346,7 +349,6 @@ async function summarizeTurn({ client, model, prevSummary, recentLines }) {
     params: { temperature: 0.3, top_p: 0.9, max_tokens: 380 },
   });
 
-  // poda defensiva
   return String(out || '')
     .replace(/<<[\s\S]*?>>/g, '')
     .split('\n')
@@ -358,7 +360,6 @@ async function summarizeTurn({ client, model, prevSummary, recentLines }) {
 }
 
 async function maybeUpdateSummary({ userId, historyLines }) {
-  // Heurísticas: cada N turnos o si hay mucho historial
   const turns = bumpTurns(userId);
   const needs = (turns % SUMMARY_EVERY_TURNS === 0) || (historyLines.length >= SUMMARY_HISTORY_TRIGGER);
   if (!needs) return;
@@ -366,7 +367,6 @@ async function maybeUpdateSummary({ userId, historyLines }) {
   try {
     const client = await getOpenAI();
     const prev = getSummary(userId);
-    // Toma solo las 24 últimas líneas (suficiente contexto reciente)
     const recent = historyLines.slice(-24);
     const newSummary = await summarizeTurn({
       client,
@@ -387,7 +387,6 @@ async function maybeUpdateSummary({ userId, historyLines }) {
 async function handleDM(req, res) {
   const url = req.originalUrl || req.url;
   const userId = req.auth?.userId || null;
-  const hasAuth = !!userId;
   const text = extractUserText(req.body);
   const isIntroStart = /<<\s*CONFIRM_ACK[^>]*\bTYPE\s*=\s*"build"/i.test(text || '');
   const stage = String(req.body?.stage || 'name');
@@ -415,7 +414,6 @@ async function handleDM(req, res) {
       getRecentChatSummary(userId, 80),
     ]);
 
-    // ======= Memoria ligera: fusiona notas servidor + sceneMemo del cliente
     const sceneMemo = Array.isArray(req.body?.clientState?.sceneMemo) ? req.body.clientState.sceneMemo : [];
     const lightNotes = getNotes(userId);
     const mergedMemo = [...new Set([...lightNotes, ...sceneMemo])].slice(-10);
@@ -484,7 +482,6 @@ async function handleDM(req, res) {
 
     await saveMsg(userId, 'dm', safeText);
 
-    // === Actualizar resumen comprimido (no bloqueante del flujo principal)
     try {
       await maybeUpdateSummary({
         userId,

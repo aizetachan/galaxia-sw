@@ -19,40 +19,41 @@ function getMeta(name) {
 function getQuery(name) {
   try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
 }
-
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
-// === Modo del Máster (fast|rich) =============================================
-function normMode(m){ m=String(m||'').toLowerCase(); return (m==='fast'||m==='rich')?m:'rich'; }
 
-// Prioridad: localStorage > ?mode= > 'rich'
-let DM_MODE = normMode(localStorage.getItem('sw:dm_mode') || getQuery('mode') || 'rich');
+/* =========================
+   MODO DEL MÁSTER (ÚNICO)
+   ========================= */
+const DM_MODE_KEY = 'sw:dm_mode';
+const VALID_MODES = new Set(['fast','rich']);
 
-// Exponer helpers
-window.getDmMode = () => DM_MODE;
-window.setDmMode = (mode) => {
-  const m = normMode(mode);
-  if (m === DM_MODE) return;
-  DM_MODE = m;
-  localStorage.setItem('sw:dm_mode', m);
-  // actualiza indicador sin recargar
-  try { setServerStatus(true, `Server: OK — M: ${DM_MODE}`); } catch {}
-  // Mensaje interno de confirmación
-  pushDM(`Modo del Máster fijado a ${DM_MODE}.`);
-};
+function getDmMode(){
+  const saved = (localStorage.getItem(DM_MODE_KEY) || '').toLowerCase();
+  return VALID_MODES.has(saved) ? saved : 'rich';
+}
+function setDmMode(mode){
+  const m = (String(mode||'').toLowerCase());
+  const next = VALID_MODES.has(m) ? m : 'rich';
+  localStorage.setItem(DM_MODE_KEY, next);
+  setServerStatus(true, `Server: OK — M: ${next}`);
+  pushDM(`Modo del Máster fijado a ${next}.`);
+  dlog('DM mode ->', next);
+}
+window.getDmMode = getDmMode;
+window.setDmMode = setDmMode;
 
-// === Conmutador de fallback de etiquetas ROLL (sin recargar) ==================
+/* =========== Roll tags fallback =========== */
 function asBool(v, def = true) {
   if (v == null || v === '') return def;
   const s = String(v).toLowerCase();
   return !['0','false','no','off','nope'].includes(s);
 }
-const adminPref = localStorage.getItem('sw:cfg:rolltags'); // '0' | '1' | null
+const adminPref = localStorage.getItem('sw:cfg:rolltags');
 let allowRollTagFallback = asBool(adminPref ?? getQuery('rolltags'), true);
-
 window.allowRollTagFallback = allowRollTagFallback;
 window.setRollTagFallback = (on) => {
   allowRollTagFallback = asBool(on, true);
@@ -60,49 +61,20 @@ window.setRollTagFallback = (on) => {
   pushDM(`Fallback de etiquetas de tirada ${allowRollTagFallback ? 'activado' : 'desactivado'}.`);
 };
 
-// === Conmutador de MODO del Máster (fast | rich) ============================
-const DM_MODE_KEY = 'sw:dm_mode';
-
-function reflectModeInUrl(mode){
-  try {
-    const u = new URL(location.href);
-    u.searchParams.set('mode', mode);
-    history.replaceState(null, '', u.toString());
-  } catch {}
-}
-
-function getDmMode(){
-  const q = (getQuery('mode') || '').toLowerCase();
-  const saved = (localStorage.getItem(DM_MODE_KEY) || '').toLowerCase();
-  const m = (q || saved || 'fast');
-  return (m === 'rich') ? 'rich' : 'fast';
-}
-
-function setDmMode(mode){
-  const m = (String(mode).toLowerCase() === 'rich') ? 'rich' : 'fast';
-  localStorage.setItem(DM_MODE_KEY, m);
-  reflectModeInUrl(m);
-  setServerStatus(true, `Server: OK — Modo: ${m}`);
-  pushDM(`Modo del Máster fijado a ${m}.`);
-  dlog('DM mode ->', m);
-}
-
-
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
   getMeta('api-base') ||
   (typeof location !== 'undefined' ? (location.origin + '/api') : '') ||
   DEFAULT_API_BASE;
 
-  function setServerStatus(ok, msg) {
-    const el = document.getElementById('server-status');
-    if (!el) return;
-    const label = ok ? (msg || `Server: OK — M: ${DM_MODE}`) : (msg || 'Server: FAIL');
-    el.textContent = label;
-    el.classList.toggle('ok', !!ok);
-    el.classList.toggle('bad', !ok);
-  }
-  
+function setServerStatus(ok, msg) {
+  const el = document.getElementById('server-status');
+  if (!el) return;
+  const label = ok ? (msg || `Server: OK — M: ${getDmMode()}`) : (msg || 'Server: FAIL');
+  el.textContent = label;
+  el.classList.toggle('ok', !!ok);
+  el.classList.toggle('bad', !ok);
+}
 
 async function probeHealth(base) {
   const url = joinUrl(base, '/health');
@@ -125,9 +97,6 @@ async function probeHealth(base) {
   } finally { clearTimeout(timer); }
 }
 
-/**
- * Preferimos ventana/origen sobre caché para evitar API antiguas.
- */
 async function ensureApiBase() {
   const override = getQuery('api');
   const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
@@ -152,7 +121,7 @@ async function ensureApiBase() {
       try { localStorage.setItem(API_STORE_KEY, API_BASE); } catch {}
       if (typeof window !== 'undefined') window.API_BASE = API_BASE;
       dlog('Using API_BASE =', API_BASE);
-      setServerStatus(true, 'Server: OK');
+      setServerStatus(true, `Server: OK — M: ${getDmMode()}`);
       return;
     }
   }
@@ -173,33 +142,30 @@ let KEY_CONFIRM = baseKey('confirm');
 let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
-let pendingRoll = null; // { skill?: string }
-let pendingConfirm = load(KEY_CONFIRM, null); // { type:'name'|'build', name?, species?, role? }
+let pendingRoll = null;
+let pendingConfirm = load(KEY_CONFIRM, null);
 let lastRoll = null;
 
 // Estados de carga UI
 const UI = {
   sending: false,
   authLoading: false,
-  authKind: null, // 'login' | 'register'
+  authKind: null,
   confirmLoading: false,
 };
 
 // ============================================================
 //                        DOM
 // ============================================================
-const chatEl = document.getElementById('chat');   // <— ANCLAJE
+const chatEl = document.getElementById('chat');
 
-
-
-/* === BEGIN identity-bar (global + seguro) === */
 const chatWrap = document.querySelector('.chat-wrap');
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
   identityEl = document.createElement('section');
   identityEl.id = 'identity-bar';
   identityEl.className = 'identity-bar hidden';
-  chatWrap.insertBefore(identityEl, chatEl); // mismo ancho y flujo que el chat
+  chatWrap.insertBefore(identityEl, chatEl);
 }
 
 function setIdentityBar(userName, characterName){
@@ -220,34 +186,18 @@ function setIdentityBar(userName, characterName){
     <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
   </div>
 `;
-const _logoutBtn = identityEl.querySelector('#logout-btn');
-if (_logoutBtn) _logoutBtn.onclick = handleLogout;
-
+  const _logoutBtn = identityEl.querySelector('#logout-btn');
+  if (_logoutBtn) _logoutBtn.onclick = handleLogout;
   identityEl.classList.remove('hidden');
 }
-
-/* Exponer para consola y otros módulos */
 window.setIdentityBar = setIdentityBar;
 
-
-/* Helper para hidratar SIEMPRE desde el estado real */
-/* Helper para hidratar SIEMPRE desde el estado real de la app */
 function updateIdentityFromState(){
-  // Usuario: de AUTH (fuente de verdad). Si no hay sesión, del input.
   const user = (AUTH?.user?.username) || '';
-  // Personaje: del objeto 'character' que ya persistes con KEY_CHAR
   const char = character?.name || '';
-
-  setIdentityBar(user, char);// setIdentityBar ya oculta si user === ''
+  setIdentityBar(user, char);
 }
 window.updateIdentityFromState = updateIdentityFromState;
-
-/* === END identity-bar === */
-
-
-/* auto-hydratación básica (por si ya tienes sesión cargada) */
-
-/* === END identity-bar harden === */
 
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
@@ -262,10 +212,9 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-// (Confirmación inline dentro del chat)
 
 // ============================================================
-//        UI auth state (guest vs. logged) — SOLO PRESENTACIÓN
+//        UI auth state (guest vs. logged)
 // ============================================================
 function isLogged() {
   return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
@@ -275,11 +224,9 @@ function updateAuthUI() {
   document.body.classList.toggle('is-guest', !logged);
   document.body.classList.toggle('is-logged', logged);
   const card = document.getElementById('guest-card');
-  if (card) card.hidden = !!logged; // si no existe, no pasa nada
+  if (card) card.hidden = !!logged;
 }
-// disponible por si quieres llamarlo externamente
 window.updateAuthUI = updateAuthUI;
-// refleja cambios desde otras pestañas/ventanas
 window.addEventListener('storage', (e) => {
   if (e.key === 'sw:auth') {
     try { AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null; } catch { AUTH = null; }
@@ -289,10 +236,8 @@ window.addEventListener('storage', (e) => {
 function handleLogout(){
   try { localStorage.removeItem('sw:auth'); } catch {}
   AUTH = null;
-  // Simula “cerrar pestaña y abrir de nuevo”
   location.reload();
 }
-
 
 // ============================================================
 //                       Utils / helpers
@@ -313,14 +258,13 @@ function formatMarkdown(t = '') {
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
-// --- Acciones que consideramos "observación pasiva" (para no pedir tiradas por etiqueta)
+
 const PASSIVE_VERBS = [
   'miro','observo','echo un vistazo','escucho',
   'me quedo quieto','me quedo quieta','esperar','esperando',
   'contemplo','analizo','reviso','vigilo'
 ];
 
-// Payload plano + anidado para /world/characters
 function charPayload(c) {
   return {
     name: c?.name || '',
@@ -345,7 +289,6 @@ async function readMaybeJson(res) {
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-
   const url = joinUrl(API_BASE, path);
   dgroup('api POST ' + url, () => console.log({ body }));
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
@@ -362,7 +305,6 @@ async function api(path, body) {
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-// 
   const url = joinUrl(API_BASE, path);
   dgroup('api GET ' + url, () => console.log({}));
   const res = await fetch(url, { method: 'GET', headers });
@@ -378,89 +320,6 @@ async function apiGet(path) {
 }
 
 // ============================================================
-//                Helpers de estados de CARGA (UI)
-// ============================================================
-
-// Bloquea/desbloquea el ancho actual del botón para que no “salte”
-function lockWidth(el, on) {
-  if (!el) return;
-  if (on) {
-    if (!el.dataset.w) el.dataset.w = el.offsetWidth + 'px';
-    el.style.width = el.dataset.w;
-  } else {
-    el.style.width = '';
-    delete el.dataset.w;
-  }
-}
-
-function setSending(on) {
-  UI.sending = !!on;
-  try {
-    sendBtn.disabled = !!on;
-    inputEl.disabled = !!on;
-
-    if (on) {
-      lockWidth(sendBtn, true);
-      sendBtn.classList.add('loading');
-      if (!sendBtn.dataset.prev) sendBtn.dataset.prev = sendBtn.textContent || 'Enviar';
-      sendBtn.textContent = sendBtn.dataset.prev;
-    } else {
-      sendBtn.classList.remove('loading');
-      lockWidth(sendBtn, false);
-      sendBtn.textContent = sendBtn.dataset.prev || 'Enviar';
-      inputEl.disabled = false;
-    }
-  } catch {}
-}
-
-function setAuthLoading(on, kind = null) {
-  UI.authLoading = !!on;
-  UI.authKind = on ? kind : null;
-
-  const targetBtn = (kind === 'login') ? authLoginBtn
-                   : (kind === 'register') ? authRegisterBtn
-                   : null;
-
-  try {
-    authUserEl.disabled = !!on;
-    authPinEl.disabled = !!on;
-    authLoginBtn.disabled = !!on;
-    authRegisterBtn.disabled = !!on;
-
-    if (on && targetBtn) {
-      lockWidth(targetBtn, true);
-      targetBtn.classList.add('loading');
-      if (!targetBtn.dataset.prev) targetBtn.dataset.prev = targetBtn.textContent || (kind === 'login' ? 'Entrar' : 'Crear');
-      targetBtn.textContent = targetBtn.dataset.prev;
-    } else {
-      for (const b of [authLoginBtn, authRegisterBtn]) {
-        b.classList.remove('loading');
-        lockWidth(b, false);
-        if (b.dataset.prev) b.textContent = b.dataset.prev;
-      }
-    }
-  } catch {}
-}
-
-function setConfirmLoading(on) {
-  UI.confirmLoading = !!on;
-  try {
-    const yes = document.getElementById('confirm-yes-inline');
-    const no  = document.getElementById('confirm-no-inline');
-    if (yes) yes.disabled = !!on;
-    if (no)  no.disabled  = !!on;
-
-    if (on) {
-      if (yes) { lockWidth(yes, true); yes.classList.add('loading'); yes.textContent = 'Sí'; }
-      if (no)  { lockWidth(no,  true); no.classList.add('loading');  no.textContent  = 'No'; }
-    } else {
-      if (yes) { yes.classList.remove('loading'); lockWidth(yes, false); yes.textContent = 'Sí'; }
-      if (no)  { no.classList.remove('loading');  lockWidth(no,  false); no.textContent  = 'No'; }
-    }
-  } catch {}
-}
-
-// ============================================================
 //                          BOOT
 // ============================================================
 (async function boot() {
@@ -468,7 +327,6 @@ function setConfirmLoading(on) {
   await ensureApiBase();
   dlog('API_BASE ready =', API_BASE);
   setServerStatus(true, `Server: OK — M: ${getDmMode()}`);
-
 
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
@@ -494,7 +352,6 @@ function setConfirmLoading(on) {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  // pinta estado visual de auth (guest/logged)
   updateAuthUI();
 
   if ((AUTH?.user?.id) && msgs.length === 0) {
@@ -527,48 +384,35 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
 function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
-  // 1) pintar mensajes
   let html = msgs.map(m => {
     const isUser    = (m.kind === 'user');
     const metaAlign = isUser ? 'text-right' : '';
     const label     = escapeHtml(m.user) + ':';
-  
-    // Burbujas: USER se ancla a la derecha y ajusta al contenido
     const msgBoxStyle = isUser
       ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
       : 'width:fit-content; max-width:min(72ch, 92%);';
-  
-    // Texto dentro de la burbuja
     const textStyle = isUser ? 'text-align:left; width:100%;' : '';
-  
-    // Hora (fuera de la burbuja)
     const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
     const timeBoxStyle = isUser
       ? timeBoxBase + 'width:fit-content; margin-left:auto;'
       : timeBoxBase + 'width:fit-content;';
-  
     return `
-      <!-- Burbuja -->
       <div class="msg ${m.kind}" style="${msgBoxStyle}">
         <div class="meta ${metaAlign}">${label}</div>
         <div class="text" style="${textStyle}">${formatMarkdown(m.text)}</div>
       </div>
-  
-      <!-- Hora -->
       <div class="msg ${m.kind}" style="${timeBoxStyle}">
         <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
       </div>
     `;
   }).join('');
-  
-  // 2) si hay confirmación, añadir bloque INLINE dentro del chat
+
   if (pendingConfirm) {
     const summary = (pendingConfirm.type === 'name')
       ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
       : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
 
     html += `
-      <!-- Burbuja DM -->
       <div class="msg dm" style="width:fit-content; max-width:min(72ch, 85%);">
         <div class="meta meta--label">Máster:</div>
         <div class="text">
@@ -581,8 +425,6 @@ function render() {
           </div>
         </div>
       </div>
-
-      <!-- Hora DM -->
       <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px; width:fit-content;">
         <div class="meta meta--time" style="line-height:1;">${hhmm(now())}</div>
       </div>
@@ -590,22 +432,17 @@ function render() {
   }
 
   updateIdentityFromState();
-
   chatEl.innerHTML = html;
-
   chatEl.scrollTop = chatEl.scrollHeight;
 
-  // 3) actualizaciones varias
   updatePlaceholder();
   updateRollCta();
 
-  // 4) bind de los botones inline (si existen)
   const yes = document.getElementById('confirm-yes-inline');
   const no  = document.getElementById('confirm-no-inline');
   if (yes) yes.onclick = () => handleConfirmDecision('yes');
   if (no)  no.onclick  = () => handleConfirmDecision('no');
 
-  // 5) si había cargas en curso al re-renderizar, refléjalas
   setConfirmLoading(UI.confirmLoading);
   setSending(UI.sending);
   setAuthLoading(UI.authLoading, UI.authKind);
@@ -630,19 +467,15 @@ function updateRollCta() {
   }
 }
 
-// ===== Resume helpers: limpiar comandos y re-inflar conversación =====
+// ===== Resume helpers =====
 function stripProtoTags(s = '') {
-  // quita <<...>> y espacios redundantes
   return String(s).replace(/<<[\s\S]*?>>/g, '').replace(/\s{2,}/g, ' ').trim();
 }
-
 function inflateTranscriptFromResume(text) {
-  // convierte "Jugador: ..., · Máster: ..." en burbujas reales
   const cleaned = stripProtoTags(text).replace(/\(kickoff\)/ig, '').trim();
   const parts = cleaned.split(/\s*·\s*/g).map(p => p.trim()).filter(Boolean);
   const out = [];
   const ts = now();
-
   for (const p of parts) {
     const mDM   = p.match(/^(Máster|Master):\s*(.*)$/i);
     const mUser = p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.*)$/i);
@@ -653,7 +486,6 @@ function inflateTranscriptFromResume(text) {
   return out;
 }
 
-// === Estado de cliente para el Máster (onboarding) ===
 function getClientState() {
   return {
     step,
@@ -662,64 +494,7 @@ function getClientState() {
     role: (character?.role || pendingConfirm?.role || null),
     pendingConfirm: (pendingConfirm || null),
     sceneMemo: load('sw:scene_memo', []),
-
   };
-}
-
-function summarizeResumeEvents(rawText, maxItems = 6) {
-  const bullets = [];
-  const seen = new Set();
-  const short = (s) => String(s).replace(/\s{2,}/g, ' ').trim().slice(0, 180);
-
-  // 0) quitar tags/protocolos y trocear en partes "Máster:/Jugador:"
-  const cleaned = stripProtoTags(rawText).replace(/\(kickoff\)/ig, '').trim();
-  const parts = cleaned.split(/\s*·\s*/g).map(s => s.trim()).filter(Boolean);
-  const dmParts   = parts.map(p => p.match(/^(?:Máster|Master):\s*(.+)$/i)?.[1]).filter(Boolean);
-  const userParts = parts.map(p => p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i)?.[1]).filter(Boolean);
-
-  // 1) Ubicación de reenganche (si venía al principio)
-  const loc = rawText.match(/Salud de nuevo.*?\s+en\s+([^.—]+)[.—]/i);
-  if (loc && loc[1]) bullets.push(`Ubicación actual: ${short(loc[1])}`);
-
-  // Helper para elegir la PRIMERA frase DM que cumpla un patrón
-  const pick = (regexp, label) => {
-    for (const t of dmParts) {
-      const m = t.match(regexp);
-      if (m) {
-        const key = (label + '|' + m[0]).toLowerCase();
-        if (!seen.has(key)) {
-          seen.add(key);
-          bullets.push(`${label}: ${short(t)}`);
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  // 2) Pistas/objetos importantes (NO tiradas)
-  pick(/\b(minidat|chip|coordenad|esquema|holoc|llave|contraseñ|mensaje cifrado|paquete|datacard)\b/i, 'Pista/objeto');
-
-  // 3) Objetivo/Destino inmediato
-  pick(/\b(dirígete|ve a|reúnete|entrega|llega a|punto de encuentro|Faro|muelle|cantina|puerto|mercado)\b/i, 'Objetivo');
-
-  // 4) Tiempo límite / ventana temporal
-  pick(/\b(media hora|\d+\s*(?:minutos?|horas?)|plazo|en\s+\d+\s*(?:minutos?|horas?))\b/i, 'Tiempo límite');
-
-  // 5) Amenazas activas
-  pick(/\b(dron(?:es)?|patrullas?|guardias?|imperiales?|alarma|persecución|enemig|cazarrecompensas)\b/i, 'Amenaza');
-
-  // 6) Estado del personaje (lo que porta/consiguió)
-  pick(/\b(tienes|llevas|guardas|consigues|obtienes|te entregan|recibes)\b/i, 'Estado');
-
-  // 7) Última acción del jugador (para retomar)
-  const lastUser = userParts.reverse().find(t =>
-    t && !/^\/\w+/.test(t) && !/confirmo/i.test(t) && t.length > 6
-  );
-  if (lastUser) bullets.push(`Última acción: ${short(lastUser)}`);
-
-  // Limita y devuelve
-  return bullets.slice(0, maxItems);
 }
 
 async function showResumeOnDemand() {
@@ -740,23 +515,47 @@ async function showResumeOnDemand() {
     pushDM('No se pudo obtener el resumen ahora.');
   }
 }
+function summarizeResumeEvents(rawText, maxItems = 6) {
+  const bullets = [];
+  const seen = new Set();
+  const short = (s) => String(s).replace(/\s{2,}/g, ' ').trim().slice(0, 180);
+  const cleaned = stripProtoTags(rawText).replace(/\(kickoff\)/ig, '').trim();
+  const parts = cleaned.split(/\s*·\s*/g).map(s => s.trim()).filter(Boolean);
+  const dmParts   = parts.map(p => p.match(/^(?:Máster|Master):\s*(.+)$/i)?.[1]).filter(Boolean);
+  const userParts = parts.map(p => p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i)?.[1]).filter(Boolean);
+  const loc = rawText.match(/Salud de nuevo.*?\s+en\s+([^.—]+)[.—]/i);
+  if (loc && loc[1]) bullets.push(`Ubicación actual: ${short(loc[1])}`);
+  const pick = (regexp, label) => {
+    for (const t of dmParts) {
+      const m = t.match(regexp);
+      if (m) {
+        const key = (label + '|' + m[0]).toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key); bullets.push(`${label}: ${short(t)}`); return true;
+        }
+      }
+    }
+    return false;
+  };
+  pick(/\b(minidat|chip|coordenad|esquema|holoc|llave|contraseñ|mensaje cifrado|paquete|datacard)\b/i, 'Pista/objeto');
+  pick(/\b(dirígete|ve a|reúnete|entrega|llega a|punto de encuentro|Faro|muelle|cantina|puerto|mercado)\b/i, 'Objetivo');
+  pick(/\b(media hora|\d+\s*(?:minutos?|horas?)|plazo|en\s+\d+\s*(?:minutos?|horas?))\b/i, 'Tiempo límite');
+  pick(/\b(dron(?:es)?|patrullas?|guardias?|imperiales?|alarma|persecución|enemig|cazarrecompensas)\b/i, 'Amenaza');
+  pick(/\b(tienes|llevas|guardas|consigues|obtienes|te entregan|recibes)\b/i, 'Estado');
+  const lastUser = userParts.reverse().find(t => t && !/^\/\w+/.test(t) && !/confirmo/i.test(t) && t.length > 6);
+  if (lastUser) bullets.push(`Última acción: ${short(lastUser)}`);
+  return bullets.slice(0, maxItems);
+}
 
-// === Helpers para meta JSON al principio del mensaje ===
+// === META JSON / etiquetas ===
 function tryParseJson(s){ try { return JSON.parse(s); } catch { return null; } }
-
-/**
- * Si el texto empieza con un bloque ```json ... ``` o con un objeto JSON en la primera línea,
- * lo extrae y devuelve { meta, rest } donde rest es el texto sin el bloque meta.
- */
 function extractTopMeta(txt = '') {
   let rest = String(txt || '');
-  // 1) Bloque con fences ```json ... ```
   const fenced = rest.match(/^```json\s*\n([\s\S]*?)\n```/i);
   if (fenced) {
     const meta = tryParseJson(fenced[1]);
     if (meta) return { meta, rest: rest.slice(fenced[0].length).trim() };
   }
-  // 2) Objeto JSON en la primera línea
   const firstLineObj = rest.match(/^\s*\{[\s\S]*?\}\s*(?:\n|$)/);
   if (firstLineObj) {
     const meta = tryParseJson(firstLineObj[0]);
@@ -765,81 +564,58 @@ function extractTopMeta(txt = '') {
   return { meta: null, rest };
 }
 
-// --- Prioridad META JSON > etiquetas
-// --- Prioridad META JSON > etiquetas
 function handleIncomingDMText(rawText) {
   let txt = String(rawText || '');
-
-  // (1) limpia siempre la CTA de tirada al empezar
   pendingRoll = null;
 
-  // (2) Intentar capturar META JSON al inicio (fenced o en 1ª línea)
   let meta = null;
   const { meta: m, rest } = extractTopMeta(txt);
   if (m) { meta = m; txt = rest; }
 
-  // (3) Aplicar META si existe
   if (meta) {
-    // --- ROLL desde JSON
     if (typeof meta.roll === 'string' && meta.roll && meta.roll.toLowerCase() !== 'null') {
       const [skill, dc] = String(meta.roll).split(':');
       pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
     }
-    // --- MEMO
     if (Array.isArray(meta.memo) && meta.memo.length) {
       const prev = load('sw:scene_memo', []);
       save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
     }
-    // --- OPTIONS (añadimos como “Sugerencias” al final)
     if (Array.isArray(meta.options) && meta.options.length) {
       txt += (txt ? '\n\n' : '') + 'Sugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
     }
     dlog('META JSON', meta);
   }
 
-  // (4) Confirmaciones → consumimos etiqueta y guardamos estado
   const c = parseConfirmTag(txt);
   if (c) {
     if (c.pending) pendingConfirm = c.pending;
     txt = c.cleaned;
   }
 
-  // (5) Tirada por etiqueta (fallback) SI no vino meta.roll
-  //     Siempre limpiamos la etiqueta del texto mostrado.
   const rollTag = /<<\s*ROLL\b[\s\S]*?>>/gi;
   if (!meta || !meta.roll || String(meta.roll).toLowerCase() === 'null') {
     const r = parseRollTag(txt);
     if (r) pendingRoll = { skill: r.skill };
     txt = (r ? r.cleaned : txt.replace(rollTag, '')).trim();
   } else {
-    // Si ya vino meta, eliminamos cualquier etiqueta residual
     txt = txt.replace(rollTag, '').trim();
   }
 
-  // (6) Seguridad extra: si quedara cualquier otra etiqueta <<...>>, la quitamos
   txt = txt.replace(/<<[\s\S]*?>>/g, '').trim();
 
-  // (7) Mostrar prosa si queda algo
   if (txt) pushDM(txt);
 }
 
-
-
-
-
-// --- Detectar etiqueta de tirada ---
 function parseRollTag(txt = '') {
   const tag = /<<\s*ROLL\b([\s\S]*?)>>/i.exec(txt);
   if (!tag) return null;
   const attrs = tag[1] || '';
   const mSkill = /SKILL\s*=\s*"([^"]*)"/i.exec(attrs);
   const skill = (mSkill?.[1] || 'Acción').trim();
-  const cleaned = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim(); // limpia todo
+  const cleaned = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
   return { skill, cleaned };
 }
-
-
-// --- Detectar etiqueta de confirmación (robusto y global) ---
 function parseConfirmTag(txt = '') {
   const tagRe = /<<\s*CONFIRM\b([\s\S]*?)>>/gi;
   let match, lastAttrs = null;
@@ -855,10 +631,7 @@ function parseConfirmTag(txt = '') {
   else if (attrs.SPECIES && attrs.ROLE) pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
   return { pending, cleaned };
 }
-
-// ====== CTA de Confirmación ======
 function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build'; return s || 'name'; }
-
 
 // ============================================================
 //                     Hablar con el Máster
@@ -866,15 +639,15 @@ function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build';
 async function talkToDM(message) {
   dlog('talkToDM start', { message, step, character, pendingConfirm });
   try {
+    const hist = msgs.slice(-8);
     const res = await api('/dm/respond', {
       message,
-      history,
+      history: hist,
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
       clientState: getClientState(),
-      config: { mode: getDmMode() }   // <<< MODO activo
+      config: { mode: getDmMode() }   // <<< modo activo
     });
-    
     handleIncomingDMText(res.text);
   } catch (e) {
     dlog('talkToDM error:', e?.data || e);
@@ -888,29 +661,26 @@ async function talkToDM(message) {
 async function send() {
   const value = inputEl.value.trim(); if (!value) return;
 
-  // Si hay una confirmación pendiente y el usuario escribe,
-// lo tomamos como una nueva propuesta y cancelamos la confirmación actual.
-if (pendingConfirm && step !== 'done') {
-  pendingConfirm = null;
-  save(KEY_CONFIRM, null);
-  render(); // quita el bloque de confirmación inline
-}
-
+  // Cancelar confirmación pendiente si el usuario escribe otra cosa
+  if (pendingConfirm && step !== 'done') {
+    pendingConfirm = null;
+    save(KEY_CONFIRM, null);
+    render();
+  }
 
   dlog('send', { value, step });
   setSending(true);
   inputEl.value = '';
 
-  // Comandos rápidos
-  // /modo fast  |  /modo rich
-if (/^\/modo\s+(fast|rich)\b/i.test(value)) {
-  const m = RegExp.$1.toLowerCase();
-  localStorage.setItem('sw:dm_mode', m);
-  pushDM(`Modo del Máster fijado a **${m}**.`);
-  location.reload();
-  setSending(false);
-  return;
-}
+  // Cambiar modo SIN recargar
+  {
+    const m = value.match(/^\/modo\s+(fast|rich)\b/i);
+    if (m) {
+      setDmMode(m[1].toLowerCase());
+      setSending(false);
+      return;
+    }
+  }
 
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
@@ -935,15 +705,6 @@ if (/^\/modo\s+(fast|rich)\b/i.test(value)) {
     setSending(false);
     return;
   }
-// Cambiar modo sin recargar
-{
-  const m = value.match(/^\/modo\s+(fast|rich)\b/i);
-  if (m) {
-    setDmMode(m[1].toLowerCase());
-    setSending(false);
-    return;
-  }
-}
 
   pushUser(value);
 
@@ -999,12 +760,12 @@ if (/^\/modo\s+(fast|rich)\b/i.test(value)) {
   finally { setSending(false); }
 }
 
+// Tiradas
 let busy = false;
 async function resolveRoll() {
   if (!pendingRoll || busy) return;
   busy = true;
 
-  // Spinner en el botón "Resolver tirada"
   try {
     resolveBtn.disabled = true;
     resolveBtn.classList.add('loading');
@@ -1014,7 +775,6 @@ async function resolveRoll() {
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
 
-  // Marca visual de “resolviendo…” en el CTA (sin revelar resultado)
   try {
     rollSkillEl.textContent = pendingRoll.skill
       ? ` · ${pendingRoll.skill} — resolviendo…`
@@ -1023,33 +783,28 @@ async function resolveRoll() {
 
   let res = null;
   try {
-    // 1) Tirada en servidor (NO mostramos nada todavía)
     res = await api('/roll', { skill });
 
-    // 2) Enviamos el OUTCOME al DM y esperamos su respuesta
-    const history = msgs.slice(-8);
+    const hist = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`,
-      history,
+      history: hist,
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
       clientState: getClientState(),
-      config: { mode: getDmMode() }   // <<< MODO activo
+      config: { mode: getDmMode() }
     });
-    
 
-    // 3) AHORA sí: publicamos el resultado de la tirada y, a continuación, la respuesta del Máster
     pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
     handleIncomingDMText(follow?.text || res.text || 'La situación evoluciona…');
 
   } catch (e) {
     dlog('resolveRoll error', e?.data || e);
-    // Si hay tirada válida pero falló el follow-up, al menos mostramos el resultado
     if (res) pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
-    pendingRoll = null;      // oculta el bloque inferior “Tirada: …”
+    pendingRoll = null;
     updateRollCta();
     render();
     try {
@@ -1060,8 +815,7 @@ async function resolveRoll() {
   }
 }
 
-
-// ====== Handler de confirmación Sí/No ======
+// Confirmación
 let busyConfirm = false;
 async function handleConfirmDecision(decision) {
   if (!pendingConfirm || busyConfirm) return;
@@ -1101,19 +855,18 @@ async function handleConfirmDecision(decision) {
       }
     }
 
-    // limpiar CTA y notificar al Máster
     pendingConfirm = null;
     save(KEY_CONFIRM, null);
 
-    const history = msgs.slice(-8);
+    const hist = msgs.slice(-8);
     const follow = await api('/dm/respond', {
       message: `<<CONFIRM_ACK TYPE="${type}" DECISION="${decision}">>`,
-      history,
+      history: hist,
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
-      clientState: getClientState()
+      clientState: getClientState(),
+      config: { mode: getDmMode() }
     });
-    
 
     handleIncomingDMText((follow && follow.text) ? follow.text : '');
 
@@ -1127,7 +880,7 @@ async function handleConfirmDecision(decision) {
   }
 }
 
-// Migración guest → user (opcional)
+// Migración guest → user
 function migrateGuestToUser(userId) {
   const load = (k) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch { return null; } };
   const gMsgs = load('sw:guest:msgs');
@@ -1148,9 +901,6 @@ function migrateGuestToUser(userId) {
   localStorage.removeItem('sw:guest:confirm');
 }
 
-// ============================================================
-//                 /dm/resume helper (re-inflado)
-// ============================================================
 async function showResumeIfAny() {
   try {
     const r = await apiGet('/dm/resume');
@@ -1169,7 +919,6 @@ async function showResumeIfAny() {
     }
   } catch (e) { dlog('resume fail', e?.data || e); }
 }
-
 
 // ============================================================
 //                     Auth (robusto con 404)
@@ -1194,47 +943,29 @@ async function doAuth(kind) {
     KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
     msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
-// ---- FIX: limpiar bienvenida 'guest' también en LOGIN ----
-{
-  const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
-  const esSoloBienvenida =
-    Array.isArray(msgs) &&
-    msgs.length <= 1 &&
-    t0.includes('HoloCanal') &&
-    t0.includes('inicia sesión');
-
-  // Si solo tenemos la bienvenida copiada desde guest, la limpiamos
-  if (esSoloBienvenida) {
-    msgs = [];
-    save(KEY_MSGS, msgs);
-  }
-
-  // En REGISTRO forzamos onboarding por nombre; en LOGIN no
-  if (kind === 'register') {
-    step = 'name';                    // empieza onboarding
-    save(KEY_STEP, step);
-    pendingConfirm = null;
-    save(KEY_CONFIRM, null);
-  }
-}
-
+    // Limpieza bienvenida de guest y preparación de onboarding/retomar
+    {
+      const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
+      const esSoloBienvenida =
+        Array.isArray(msgs) && msgs.length <= 1 && t0.includes('HoloCanal') && t0.includes('inicia sesión');
+      if (esSoloBienvenida) { msgs = []; save(KEY_MSGS, msgs); }
+      if (kind === 'register') {
+        step = 'name'; save(KEY_STEP, step);
+        pendingConfirm = null; save(KEY_CONFIRM, null);
+      }
+    }
 
     let me = null;
     try { me = await apiGet('/world/characters/me'); }
     catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
     if (me?.character) {
-      character = me.character;
-      save(KEY_CHAR, character);
-      // usuario existente → saltamos onboarding
-      step = 'done';
-      save(KEY_STEP, step);
+      character = me.character; save(KEY_CHAR, character);
+      step = 'done'; save(KEY_STEP, step);
     }
 
     authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, character?.name || '');
-    // pinta estado visual de auth (guest/logged)
     updateAuthUI();
-
 
     if (msgs.length === 0) {
       await showResumeIfAny();
@@ -1246,7 +977,6 @@ async function doAuth(kind) {
 
     render();
 
-    // Kickoff onboarding si no está completado
     if (msgs.length === 0 && step !== 'done') {
       try {
         const kick = await api('/dm/respond', {
@@ -1254,9 +984,9 @@ async function doAuth(kind) {
           history: [],
           character_id: Number(character?.id) || null,
           stage: mapStageForDM(step),
-          clientState: getClientState()
+          clientState: getClientState(),
+          config: { mode: getDmMode() }   // <<< modo también aquí
         });
-        
         handleIncomingDMText(kick.text);
       } catch (e) { dlog('kickoff fail', e?.data || e); }
     }
@@ -1279,35 +1009,18 @@ async function doAuth(kind) {
   }
 }
 
-function extractTargetName(text) {
-  const t = (text || '').trim();
-  let m = t.match(/^(?:pregunto|preguntar|preguntas|averiguar|buscar)\s+por\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})/i);
-  if (m) return m[1].trim();
-  m = t.match(/^\/whois\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})/i);
-  if (m) return m[1].trim();
-  m = t.match(/(?:sobre|de)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ' -]{2,})\s*(?:dónde|quién|qué)?\??$/i);
-  if (m) return m[1].trim();
-  return null;
-}
 // ===== Vídeo de fondo en la tarjeta de invitado (#guest-card) =====
 (function setupGuestCardVideo(){
-  // RUTAS RELATIVAS a web/index.html
   const VIDEO_SOURCES = [
-    { src: 'assets/video/hero-home-720p.webm', type: 'video/webm' }, // ← sin barra inicial
-    // Si más adelante añades MP4, descomenta la siguiente línea y sube el archivo:
-    // { src: 'assets/video/hero-home-720p.mp4',  type: 'video/mp4'  },
+    { src: 'assets/video/hero-home-720p.webm', type: 'video/webm' },
   ];
-  const POSTER = null; // p.ej. 'assets/posters/hero-home.jpg' si quieres poster
+  const POSTER = null;
 
   function createVideo(){
     const v = document.createElement('video');
     v.id = 'guest-card-video';
     v.className = 'guest__bg';
-    v.autoplay = true;
-    v.muted = true;
-    v.loop = true;
-    v.playsInline = true;
-    v.preload = 'metadata';
+    v.autoplay = true; v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'metadata';
     v.setAttribute('aria-hidden','true');
     if (POSTER) v.setAttribute('poster', POSTER);
     VIDEO_SOURCES.forEach(s => {
@@ -1324,14 +1037,14 @@ function extractTargetName(text) {
   }
 
   function mount(){
-    if (navigator.connection?.saveData) return unmount(); // ahorro de datos
+    if (navigator.connection?.saveData) return unmount();
     const wrap = document.getElementById('guest-card');
     if (!wrap) return;
-    if (!guestCardVisible() || isLogged()) return unmount(); // usa el isLogged() GLOBAL (AUTH)
+    if (!guestCardVisible() || isLogged()) return unmount();
     let v = document.getElementById('guest-card-video');
     if (!v) {
       v = createVideo();
-      wrap.prepend(v);           // primer hijo => al fondo del contenedor
+      wrap.prepend(v);
     }
     v.play?.().catch(()=>{});
   }
@@ -1362,7 +1075,6 @@ function extractTargetName(text) {
     if (document.hidden) v.pause(); else v.play?.().catch(()=>{});
   });
 
-  // Re-aplicar cuando cambie el estado de sesión/visibilidad
   const orig = window.updateIdentityFromState;
   window.updateIdentityFromState = function(...args){
     try { return orig?.apply(this, args); }
@@ -1373,5 +1085,3 @@ function extractTargetName(text) {
     new MutationObserver(apply).observe(card, { attributes:true, attributeFilter:['hidden','class','style'] });
   }
 })();
-
-
