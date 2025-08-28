@@ -458,6 +458,8 @@ function setConfirmLoading(on) {
   dlog('Boot start');
   await ensureApiBase();
   dlog('API_BASE ready =', API_BASE);
+  setServerStatus(true, `Server: OK — M: ${getDmMode()}`);
+
 
   try {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
