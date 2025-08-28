@@ -261,8 +261,8 @@ const PASSIVE_RE = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|e
 
 function pickMode({ body, query, lastUser }) {
   // 👇 ahora soporta body.config.mode (desde el frontend)
-  const override =
-    (body?.config?.mode || body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
+  const override = (body?.config?.mode || body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
+
 
   if (['fast', 'rich', 'auto'].includes(override)) return override || 'auto';
   if (PASSIVE_RE.test(lastUser || '')) return 'fast';

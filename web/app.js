@@ -214,29 +214,91 @@ const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
 
 // ============================================================
-//        UI auth state (guest vs. logged)
+//        UI helpers (FALTABAN)  ← ← ←
 // ============================================================
-function isLogged() {
-  return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
-}
-function updateAuthUI() {
-  const logged = isLogged();
-  document.body.classList.toggle('is-guest', !logged);
-  document.body.classList.toggle('is-logged', logged);
-  const card = document.getElementById('guest-card');
-  if (card) card.hidden = !!logged;
-}
-window.updateAuthUI = updateAuthUI;
-window.addEventListener('storage', (e) => {
-  if (e.key === 'sw:auth') {
-    try { AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null; } catch { AUTH = null; }
+
+// Bloquea/desbloquea el ancho actual del botón para que no “salte”
+function lockWidth(el, on) {
+  if (!el) return;
+  if (on) {
+    if (!el.dataset.w) el.dataset.w = el.offsetWidth + 'px';
+    el.style.width = el.dataset.w;
+  } else {
+    el.style.width = '';
+    delete el.dataset.w;
   }
-  updateAuthUI();
-});
-function handleLogout(){
-  try { localStorage.removeItem('sw:auth'); } catch {}
-  AUTH = null;
-  location.reload();
+}
+
+function setSending(on) {
+  UI.sending = !!on;
+  try {
+    if (sendBtn) sendBtn.disabled = !!on;
+    if (inputEl) inputEl.disabled = !!on;
+
+    if (on) {
+      if (sendBtn) {
+        lockWidth(sendBtn, true);
+        sendBtn.classList.add('loading');
+        if (!sendBtn.dataset.prev) sendBtn.dataset.prev = sendBtn.textContent || 'Enviar';
+        sendBtn.textContent = sendBtn.dataset.prev;
+      }
+    } else {
+      if (sendBtn) {
+        sendBtn.classList.remove('loading');
+        lockWidth(sendBtn, false);
+        sendBtn.textContent = sendBtn.dataset.prev || 'Enviar';
+      }
+      if (inputEl) inputEl.disabled = false;
+    }
+  } catch {}
+}
+
+function setAuthLoading(on, kind = null) {
+  UI.authLoading = !!on;
+  UI.authKind = on ? kind : null;
+
+  const targetBtn = (kind === 'login') ? authLoginBtn
+                   : (kind === 'register') ? authRegisterBtn
+                   : null;
+
+  try {
+    if (authUserEl) authUserEl.disabled = !!on;
+    if (authPinEl) authPinEl.disabled = !!on;
+    if (authLoginBtn) authLoginBtn.disabled = !!on;
+    if (authRegisterBtn) authRegisterBtn.disabled = !!on;
+
+    if (on && targetBtn) {
+      lockWidth(targetBtn, true);
+      targetBtn.classList.add('loading');
+      if (!targetBtn.dataset.prev) targetBtn.dataset.prev = targetBtn.textContent || (kind === 'login' ? 'Entrar' : 'Crear');
+      targetBtn.textContent = targetBtn.dataset.prev;
+    } else {
+      for (const b of [authLoginBtn, authRegisterBtn]) {
+        if (!b) continue;
+        b.classList.remove('loading');
+        lockWidth(b, false);
+        if (b.dataset.prev) b.textContent = b.dataset.prev;
+      }
+    }
+  } catch {}
+}
+
+function setConfirmLoading(on) {
+  UI.confirmLoading = !!on;
+  try {
+    const yes = document.getElementById('confirm-yes-inline');
+    const no  = document.getElementById('confirm-no-inline');
+    if (yes) yes.disabled = !!on;
+    if (no)  no.disabled  = !!on;
+
+    if (on) {
+      if (yes) { lockWidth(yes, true); yes.classList.add('loading'); yes.textContent = 'Sí'; }
+      if (no)  { lockWidth(no,  true); no.classList.add('loading');  no.textContent  = 'No'; }
+    } else {
+      if (yes) { yes.classList.remove('loading'); lockWidth(yes, false); yes.textContent = 'Sí'; }
+      if (no)  { no.classList.remove('loading');  lockWidth(no,  false); no.textContent  = 'No'; }
+    }
+  } catch {}
 }
 
 // ============================================================
@@ -362,13 +424,13 @@ async function apiGet(path) {
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
 
-  // Listeners
-  sendBtn.addEventListener('click', send);
-  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-  resolveBtn.addEventListener('click', resolveRoll);
-  authLoginBtn.addEventListener('click', () => doAuth('login'));
-  authRegisterBtn.addEventListener('click', () => doAuth('register'));
-  cancelBtn.addEventListener('click', () => {
+  // Listeners (defensivos)
+  if (sendBtn) sendBtn.addEventListener('click', send);
+  if (inputEl) inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  if (resolveBtn) resolveBtn.addEventListener('click', resolveRoll);
+  if (authLoginBtn) authLoginBtn.addEventListener('click', () => doAuth('login'));
+  if (authRegisterBtn) authRegisterBtn.addEventListener('click', () => doAuth('register'));
+  if (cancelBtn) cancelBtn.addEventListener('click', () => {
     pushDM('🎲 Tirada cancelada (… )');
     pendingRoll = null;
     updateRollCta();
@@ -432,8 +494,8 @@ function render() {
   }
 
   updateIdentityFromState();
-  chatEl.innerHTML = html;
-  chatEl.scrollTop = chatEl.scrollHeight;
+  if (chatEl) chatEl.innerHTML = html;
+  if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
 
   updatePlaceholder();
   updateRollCta();
@@ -455,9 +517,10 @@ function updatePlaceholder() {
     role: 'Elige rol (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…',
     done: 'Habla con el Master'
   };
-  inputEl.placeholder = placeholders[step] || placeholders.done;
+  if (inputEl) inputEl.placeholder = placeholders[step] || placeholders.done;
 }
 function updateRollCta() {
+  if (!rollCta || !rollSkillEl) return;
   if (pendingRoll) {
     rollCta.classList.remove('hidden');
     rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill}` : '';
@@ -659,7 +722,8 @@ async function talkToDM(message) {
 //                       Send flow
 // ============================================================
 async function send() {
-  const value = inputEl.value.trim(); if (!value) return;
+  const value = inputEl?.value?.trim?.() || ''; 
+  if (!value) return;
 
   // Cancelar confirmación pendiente si el usuario escribe otra cosa
   if (pendingConfirm && step !== 'done') {
@@ -670,7 +734,7 @@ async function send() {
 
   dlog('send', { value, step });
   setSending(true);
-  inputEl.value = '';
+  if (inputEl) inputEl.value = '';
 
   // Cambiar modo SIN recargar
   {
@@ -767,18 +831,22 @@ async function resolveRoll() {
   busy = true;
 
   try {
-    resolveBtn.disabled = true;
-    resolveBtn.classList.add('loading');
-    resolveBtn.setAttribute('aria-busy', 'true');
+    if (resolveBtn) {
+      resolveBtn.disabled = true;
+      resolveBtn.classList.add('loading');
+      resolveBtn.setAttribute('aria-busy', 'true');
+    }
   } catch {}
 
   const skill = pendingRoll.skill || 'Acción';
   dlog('resolveRoll', { skill });
 
   try {
-    rollSkillEl.textContent = pendingRoll.skill
-      ? ` · ${pendingRoll.skill} — resolviendo…`
-      : ' — resolviendo…';
+    if (rollSkillEl) {
+      rollSkillEl.textContent = pendingRoll.skill
+        ? ` · ${pendingRoll.skill} — resolviendo…`
+        : ' — resolviendo…';
+    }
   } catch {}
 
   let res = null;
@@ -808,9 +876,11 @@ async function resolveRoll() {
     updateRollCta();
     render();
     try {
-      resolveBtn.disabled = false;
-      resolveBtn.classList.remove('loading');
-      resolveBtn.removeAttribute('aria-busy');
+      if (resolveBtn) {
+        resolveBtn.disabled = false;
+        resolveBtn.classList.remove('loading');
+        resolveBtn.removeAttribute('aria-busy');
+      }
     } catch {}
   }
 }
@@ -925,9 +995,9 @@ async function showResumeIfAny() {
 // ============================================================
 async function doAuth(kind) {
   if (UI.authLoading) return;
-  const username = (authUserEl.value || '').trim();
-  const pin = (authPinEl.value || '').trim();
-  if (!username || !/^\d{4}$/.test(pin)) { authStatusEl.textContent = 'Usuario y PIN (4 dígitos)'; return; }
+  const username = (authUserEl?.value || '').trim();
+  const pin = (authPinEl?.value || '').trim();
+  if (!username || !/^\d{4}$/.test(pin)) { if (authStatusEl) authStatusEl.textContent = 'Usuario y PIN (4 dígitos)'; return; }
 
   dlog('doAuth', { kind, username });
   setAuthLoading(true, kind);
@@ -963,7 +1033,7 @@ async function doAuth(kind) {
       step = 'done'; save(KEY_STEP, step);
     }
 
-    authStatusEl.textContent = `Hola, ${user.username}`;
+    if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, character?.name || '');
     updateAuthUI();
 
@@ -1003,7 +1073,7 @@ async function doAuth(kind) {
       unauthorized: 'No autorizado.',
       not_found: 'Recurso no encontrado.',
     };
-    authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
+    if (authStatusEl) authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
   } finally {
     setAuthLoading(false);
   }
