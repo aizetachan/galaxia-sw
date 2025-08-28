@@ -136,3 +136,7 @@ Máster: Describe la intención, el entorno reacciona, y al final:
 
 Tras `<<DICE_OUTCOME SKILL="Combate" OUTCOME="mixed">>`:
 Narra el golpe (parcial), la complicación (alarma, herida menor, agarrón), y ofrece opciones (huir, rematar, rendirse, improvisar…).
+
+PROTOCOLO JSON (tiradas):
+- Cuando pidas tirada, incluye en la PRIMERA línea JSON: "roll":"<habilidad>:<DC>" (p.ej., "sigilo:12").
+- Tras resolver una tirada, vuelve a "roll": null y añade consecuencias en "memo" si aplica.

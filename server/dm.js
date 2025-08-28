@@ -160,9 +160,36 @@ const introPolicy = [
 ].join('\n');
 
 /* ========= Construcción del SYSTEM en función del stage ========= */
-function buildSystem({ stage, brief, historyLines, isIntroStart }) {
+function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) {
   const core = readPrompt('prompt-master.md');
-  const game = readPrompt('game-rules.md');
+  const game = readPrompt('game-rules.md');// --- PIN (memoria activa, 3 líneas) ---
+  const pinCanon = 'CANON: Space-opera PG-13; la reputación tiene consecuencias; la violencia pública atrae a la ley.';
+  
+  // PJ: intenta sacarlo del brief (DB) o cae al clientState (guest)
+  let pinPj = '';
+  const mPj = /PJ:\s*([^\n]+)/i.exec(brief || '');
+  if (mPj) {
+    pinPj = 'PJ: ' + mPj[1].trim();
+  } else if (clientState?.name) {
+    const spec = clientState?.species || '—';
+    const role = clientState?.role || '—';
+    pinPj = `PJ: ${clientState.name} (${spec}/${role})`;
+  }
+  
+  // ESCENA: toma la última línea del Máster del historial
+  let pinEscena = '';
+  if (Array.isArray(historyLines) && historyLines.length) {
+    const lastMaster = historyLines.slice().reverse().find(l => /^Máster:/i.test(l));
+    if (lastMaster) {
+      const s = lastMaster.replace(/^Máster:\s*/i, '').replace(/<<[\s\S]*?>>/g, '').trim().slice(0, 160);
+      pinEscena = 'ESCENA: ' + s;
+    }
+  }
+  
+  // Construye el bloque PIN (solo líneas no vacías)
+  const pinBlock = [pinCanon, pinPj, pinEscena].filter(Boolean).join('\n');
+  
+  
 
   const historyBlock = (historyLines?.length
     ? ('\nHistorial reciente (resumen cronológico corto):\n' + historyLines.slice(-20).join('\n'))
@@ -184,6 +211,7 @@ function buildSystem({ stage, brief, historyLines, isIntroStart }) {
   const worldBlock = brief ? ('\nContexto del mundo:\n' + brief) : '';
 
   return [
+    pinBlock,                                    // <- NUEVO: el PIN primero
     (core || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
     game,
     languagePolicy,
@@ -270,6 +298,7 @@ async function handleDM(req, res) {
       brief,
       historyLines: history.lines,
       isIntroStart,               // <<--- pasa el flag
+      clientState: req.body?.clientState || null,   // <- NUEVO
     });
 
     let outText = null;

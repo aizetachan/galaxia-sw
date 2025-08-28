@@ -585,7 +585,9 @@ function getClientState() {
     name: (character?.name || pendingConfirm?.name || null),
     species: (character?.species || pendingConfirm?.species || null),
     role: (character?.role || pendingConfirm?.role || null),
-    pendingConfirm: (pendingConfirm || null)
+    pendingConfirm: (pendingConfirm || null),
+    sceneMemo: load('sw:scene_memo', []),
+
   };
 }
 
@@ -675,6 +677,21 @@ function parseRollTag(txt = '') {
   const cleaned = txt.replace(re, '').trim();
   return { skill, cleaned };
 }
+// --- Parse 1ª linea para leer JSON -----
+function parseMetaJsonLine(txt = '') {
+  const i = txt.indexOf('\n');
+  const first = (i >= 0 ? txt.slice(0, i) : txt).trim();
+  try {
+    const meta = JSON.parse(first);
+    if (meta && typeof meta === 'object' && (
+        'roll' in meta || 'memo' in meta || 'options' in meta
+    )) {
+      const cleaned = (i >= 0 ? txt.slice(i + 1).trim() : '');
+      return { meta, cleaned };
+    }
+  } catch {}
+  return null;
+}
 
 // --- Detectar etiqueta de confirmación (robusto y global) ---
 function parseConfirmTag(txt = '') {
@@ -699,6 +716,33 @@ function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build';
 // ====== Helper central para pintar respuestas del Máster ======
 function handleIncomingDMText(rawText) {
   let txt = rawText || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
+
+  // --- META JSON (primera línea) ---
+const metaJ = parseMetaJsonLine(txt);
+if (metaJ) {
+  const { meta } = metaJ;
+  txt = metaJ.cleaned || txt;
+
+  // roll: prepara la UI de tirada (igual que etiquetas)
+  if (meta && typeof meta.roll === 'string' && meta.roll) {
+    const skill = String(meta.roll).split(':')[0] || 'Acción';
+    pendingRoll = { skill };
+  }
+
+  // memo: guarda notas breves de escena para alimentar el PIN
+  if (Array.isArray(meta.memo) && meta.memo.length) {
+    const prev = load('sw:scene_memo', []);
+    save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
+  }
+
+  // options: muestra sugerencias (versión simple, texto)
+  if (Array.isArray(meta.options) && meta.options.length) {
+    const hint = '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
+    txt += hint;
+  }
+
+  dlog('META JSON', meta);
+}
 
   // Confirmación que venga del Máster
   const conf = parseConfirmTag(txt);
