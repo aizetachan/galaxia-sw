@@ -3,7 +3,9 @@ GALACTIC (galaxia-sw)
 Mundo compartido estilo Star Wars — Vanilla Web (HTML/CSS/JS) + API Node/Express.
 Front simple y estático en /web, backend en /server. Soporta modo “solo IA” (sin BD) y modo mundo vivo con PostgreSQL.
 
-Estructura del proyecto
+
+Estructura del proyecto:
+```
 /web
   ├─ index.html         # UI base (landing + login + chat + CTAs)
   ├─ app.js             # Lógica de cliente (onboarding, chat, tiradas, confirmaciones)
@@ -25,6 +27,7 @@ Estructura del proyecto
   ├─ data/              # (solo dev) JSONs locales
   ├─ .env.example
   └─ package.json
+```
 
 Requisitos
 
