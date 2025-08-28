@@ -1,10 +1,35 @@
-GALACTIC (galaxia-sw)
+# GALACTIC (galaxia-sw)
 
-Mundo compartido estilo Star Wars — Vanilla Web (HTML/CSS/JS) + API Node/Express.
-Front simple y estático en /web, backend en /server. Soporta modo “solo IA” (sin BD) y modo mundo vivo con PostgreSQL.
+Mundo compartido estilo Star Wars — **Vanilla Web (HTML/CSS/JS)** + **API Node/Express**.  
+Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo IA” (sin BD) y modo **mundo vivo** con **PostgreSQL**.
 
+---
 
-Estructura del proyecto:
+## Índice
+
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Requisitos](#requisitos)
+- [Puesta en marcha (local)](#puesta-en-marcha-local)
+  - [1) Backend](#1-backend)
+  - [2) Frontend](#2-frontend)
+- [Variables de entorno (`/server/.env`)](#variables-de-entorno-serverenv)
+- [Cómo detecta el cliente la API](#cómo-detecta-el-cliente-la-api)
+- [Flujo de usuario](#flujo-de-usuario)
+  - [Comandos rápidos](#comandos-rápidos)
+- [Protocolo del Máster (etiquetas)](#protocolo-del-máster-etiquetas)
+  - [Confirmaciones (onboarding)](#confirmaciones-onboarding)
+  - [Tiradas de dados](#tiradas-de-dados)
+- [Endpoints principales](#endpoints-principales)
+- [Estilo y personalización del front](#estilo-y-personalización-del-front)
+- [Despliegue](#despliegue)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap corto](#roadmap-corto)
+- [Créditos](#créditos)
+
+---
+
+## Estructura del proyecto
+
 ```
 /web
   ├─ index.html         # UI base (landing + login + chat + CTAs)
@@ -29,265 +54,268 @@ Estructura del proyecto:
   └─ package.json
 ```
 
-Requisitos
+---
 
-Node 18+
+## Requisitos
 
-(Opcional) PostgreSQL (ideal: Neon Serverless)
+- **Node 18+**
+- (Opcional) **PostgreSQL** (ideal: Neon Serverless)
+- **OPENAI_API_KEY** para el Máster (SDK oficial)
 
-OPENAI_API_KEY para el Máster (usa SDK oficial)
+> Sin BD puedes probar el onboarding y jugar: el Máster funciona; se desactiva lo que requiere persistencia de mundo. Con BD se habilitan personajes, timeline, eventos, etc.
 
-Sin BD puedes probar el onboarding y jugar: el Máster funciona; se desactiva lo que requiere persistencia de mundo. Con BD se habilitan personajes, timeline, eventos, etc.
+---
 
-Puesta en marcha (local)
-1) Backend
+## Puesta en marcha (local)
+
+### 1) Backend
+
+```bash
 cd server
 cp .env.example .env
-# Edita .env
+# Edita .env:
 # - PORT=3001
-# - ALLOWED_ORIGIN=http://localhost:3000 (o donde sirvas /web)
+# - ALLOWED_ORIGIN=http://localhost:3000
 # - OPENAI_API_KEY=tu_clave
-# - DATABASE_URL=postgres://... (si usas BD)
+# - DATABASE_URL=postgres://...   # si usas BD
 npm i
-npm run dev         # levanta Express con --watch
+npm run dev
+```
 
-2) Frontend
+### 2) Frontend
 
-Sirve la carpeta /web con un servidor estático (ejemplos):
+Sirve la carpeta `/web` con un servidor estático (ejemplos):
 
+```bash
 # Opción A: http-server
 npx http-server web -p 3000 -c-1
 
 # Opción B: serve
 npx serve web -l 3000
-
+```
 
 Abre:
 
+```
 http://localhost:3000/?api=http://localhost:3001/api
-(El cliente auto-detecta /api, pero con front/back en dominios distintos es más robusto pasar ?api=.)
+```
 
-CORS: en .env del backend, pon ALLOWED_ORIGIN=http://localhost:3000. Puedes incluir varios orígenes separados por coma.
+> **CORS**: en `.env` del backend, pon `ALLOWED_ORIGIN=http://localhost:3000`. Puedes incluir varios orígenes separados por coma.
 
-Variables de entorno (/server/.env)
+---
 
-PORT: puerto del backend (por defecto 3001)
+## Variables de entorno (`/server/.env`)
 
-ALLOWED_ORIGIN: lista de orígenes permitidos para CORS, separada por comas
+- `PORT` — puerto del backend (por defecto `3001`)
+- `ALLOWED_ORIGIN` — lista de orígenes permitidos para CORS, separados por comas
+- `OPENAI_API_KEY` — clave de OpenAI (requerido para el Máster)
+- `OPENAI_PROJECT` — *(opcional)* id de proyecto en OpenAI
+- `DATABASE_URL` — URL Postgres (Neon recomendado). Si no está:
+  - **auth** y **sesiones** usan memoria
+  - el Máster funciona, pero **/world** devolverá errores o se no-op donde corresponda
+- `LLM_MODEL` — *(opcional)* fuerza el modelo LLM del Máster. Si no se define, el servidor usa su valor por defecto (ver `server/dm.js`).
 
-OPENAI_API_KEY: clave de OpenAI (requerido para el Máster)
+> En `server/openai.js` hay un **ping** que ayuda a validar credenciales.
 
-OPENAI_PROJECT: (opcional) id de proyecto en OpenAI
+---
 
-DATABASE_URL: URL Postgres (Neon recomendado). Si no está presente:
+## Cómo detecta el cliente la API
 
-auth y sesiones usan memoria
+`/web/app.js` intenta en este orden:
 
-el Máster funciona, pero /world devolverá errores o se no-op donde corresponda
+1. Query `?api=...`  
+2. `window.API_BASE`  
+3. `location.origin + "/api"`  
+4. `<meta name="api-base" content="...">`  
+5. valor por defecto  
+6. caché en `localStorage` (`sw:api_base`)
 
-En /server/openai.js hay un ping que ayuda a validar credenciales.
+El cliente usa `GET /api/health` para probar cada candidato.
 
-Cómo detecta el cliente la API
+---
 
-/web/app.js intenta en este orden:
+## Flujo de usuario
 
-Query ?api=...
+- **Login/registro** con `username` (a-z, 0-9, `_`, 3–24) + **PIN (4 dígitos)**.
+- **Invitado**: si no hay sesión, el Máster da info y guía hasta crear usuario.  
+- **Onboarding** del personaje por **fases**:
+  1. `name` → pide nombre
+  2. `build` → sugiere **especie + rol** (2–3 propuestas)
+  3. `done` → empieza la aventura
 
-window.API_BASE
+### Comandos rápidos
 
-location.origin + "/api"
+- `/resumen` — muestra un resumen corto de la sesión anterior
+- `/publico` / `/privado` — alterna visibilidad del perfil
+- `/restart` — limpia estado local (msgs/char/step)
 
-<meta name="api-base" content="...">
+---
 
-valor por defecto
+## Protocolo del Máster (etiquetas)
 
-caché en localStorage (sw:api_base)
+El Máster (IA) **no** pide al jugador escribir etiquetas; solo las **emite él**. El cliente las procesa.
 
-Hay un /api/health que se usa para probar cada candidato.
+### Confirmaciones (onboarding)
 
-Flujo de usuario
+- Confirmar **nombre**:
 
-Login/registro con username (a-z, 0-9, _, 3–24) + PIN (4 dígitos).
+```
+<<CONFIRM NAME="TuNombre">>
+```
 
-Invitado: si no hay sesión, el Máster da info y guía hasta crear usuario.
+- Confirmar **especie + rol**:
 
-Onboarding del personaje por fases:
-
-name → pide nombre
-
-build → sugiere especie + rol (2–3 propuestas)
-
-done → empieza la aventura
-
-El cliente intercepta etiquetas del Máster y muestra CTAs (confirmación / tiradas).
-
-Comandos rápidos (desde el input del chat)
-
-/resumen → muestra un resumen corto de la sesión anterior
-
-/publico / /privado → alterna visibilidad del perfil
-
-/restart → limpia estado local (msgs/char/step)
-
-Protocolo del Máster (etiquetas)
-
-El Máster (IA) no pide al jugador escribir etiquetas; solo las emite él. El cliente las procesa.
-
-Confirmaciones (onboarding)
-
-Confirmar nombre:
-
- <<CONFIRM NAME="TuNombre">>
-
-
-Confirmar especie + rol:
-
+```
 <<CONFIRM SPECIES="Twi'lek" ROLE="Contrabandista">>
+```
 
+- El cliente responde internamente:
 
-El cliente responde internamente con:
-
+```
 <<CONFIRM_ACK TYPE="name|build" DECISION="yes|no">>
+```
 
+**Reglas**
 
-Reglas:
+- La etiqueta va **en una línea propia** y como **última línea** del mensaje del Máster.
+- Si el jugador dice **NO**, el Máster propone nuevas opciones y vuelve a emitir la etiqueta.
+- Al confirmar:
+  - `name` ⇒ pasa a `species/role` (fase `build`)
+  - `build` ⇒ pasa a `done` y arranca la aventura
 
-La etiqueta va en una línea propia y como última línea del mensaje.
+### Tiradas de dados
 
-Si el jugador dice NO, el Máster propone nuevas opciones y vuelve a emitir la etiqueta.
+El Máster **solo** sugiere tirada si hay **incertidumbre, riesgo, oposición o impacto**.
 
-Al confirmar:
-
-name ⇒ pasa a species/role (fase build)
-
-build ⇒ pasa a done y arranca la aventura
-
-Tiradas de dados
-
-El Máster solo sugiere tirada si hay incertidumbre, riesgo, oposición o impacto.
-
-Formato:
-
+```
 <<ROLL SKILL="Carisma" REASON="Tratas de convencer al guardia">>
+```
 
+El cliente muestra CTA “Resolver tirada” y llama a `/api/roll` (demo) o resuelve según el flujo acordado.  
+El Máster narra **éxito/fallo** y consecuencias de forma breve y clara.
 
-El cliente muestra CTA “Resolver tirada” y llama a /api/roll (demo) o resuelve según el flujo acordado.
+> Las reglas de estilo y cuándo pedir tirada están en `server/prompts/dice-rules.md` y `prompt-master.md`.
 
-El Máster narra éxito/fallo y consecuencias de forma breve y clara.
+---
 
-Las reglas de estilo y cuándo pedir tirada están en /server/prompts/dice-rules.md y prompt-master.md. Puedes editarlas libremente para ajustar el tono del Máster.
+## Endpoints principales
 
-Endpoints principales
-Salud
+### Salud
 
-GET /health y GET /api/health → ping JSON
+- `GET /health` y `GET /api/health` — ping JSON
 
-Auth (/api/auth/*)
+### Auth (`/api/auth/*`)
 
-POST /api/auth/register → { username, pin } → devuelve { token, user }
+- `POST /api/auth/register` → `{ username, pin }` → `{ token, user }`
+- `POST /api/auth/login` → `{ username, pin }` → `{ token, user }`
+- `POST /api/auth/logout` → header `Authorization: Bearer <token>`
 
-POST /api/auth/login → { username, pin } → devuelve { token, user }
+> Sin `DATABASE_URL`, usuarios y sesiones se guardan **en memoria** (útil para pruebas).
 
-POST /api/auth/logout → header Authorization: Bearer <token>
+### Máster / IA (`/api/dm/*`)
 
-Sin DATABASE_URL, usuarios y sesiones se guardan en memoria (útil para pruebas).
+- `POST /api/dm/respond`  
+  **Ejemplo de cuerpo**:
 
-Máster / IA (/api/dm/*)
-
-POST /api/dm/respond
-Cuerpo flexible:
-
+```json
 {
   "message": "texto del jugador",
-  "history": [ { "role": "user|assistant", "content": "..." } ],
+  "history": [{ "role": "user", "content": "..." }],
   "stage": "name|build|done",
-  "character_id": "id del personaje (opcional)",
-  "clientState": { ... }   // metadatos opcionales
+  "character_id": "opcional",
+  "clientState": {}
 }
+```
 
+  **Respuesta**
 
-Respuesta: { ok: true, text: "<salida del Máster>" }
-(Puede incluir <<CONFIRM ...>> o <<ROLL ...>> al final).
+```json
+{ "ok": true, "text": "salida del Máster" }
+```
 
-GET /api/dm/resume
-Resumen corto para reenganche (si hay BD y datos).
+  (Puede incluir `<<CONFIRM ...>>` o `<<ROLL ...>>` al final).
 
-Chat (histórico, opcional)
+- `GET /api/dm/resume` — resumen corto (si hay BD y datos).
 
-GET /api/chat/history?limit=200 (autenticado)
-Devuelve últimos mensajes si hay BD (chat_messages).
+### Chat (histórico, opcional)
 
-Mundo vivo (/api/world/* y /api/characters/*) — requiere BD
+- `GET /api/chat/history?limit=200` (autenticado) — últimos mensajes si hay BD.
 
-GET /api/world/characters/me → personaje del usuario
+### Mundo vivo (`/api/world/*` y `/api/characters/*`) — **requiere BD**
 
-POST /api/world/characters → upsert de personaje (por usuario o invitado)
+- `GET  /api/world/characters/me`
+- `POST /api/world/characters`
+- `GET  /api/world/context?character_id=...`
+- `GET  /api/world/inbox?character_id=...`
+- `POST /api/events/read`
+- `GET  /api/characters/:id/state`
+- `PATCH /api/characters/:id/state`
+- `POST /api/rolls`
+- `POST /api/events`
+- `GET  /api/characters/:id/timeline`
 
-GET /api/world/context?character_id=... → contexto cercano (eventos, facción, actor)
+> **Esquema BD**: crear tablas `users`, `sessions`, `characters`, `character_state (+ _history)`, `events (+ event_targets, event_reads)`, `faction_memberships`, `chat_messages`. Tomar como referencia las consultas en `world.js`, `auth.js` y `chat.js`.
 
-GET /api/world/inbox?character_id=... → bandeja de eventos no leídos
+---
 
-POST /api/events/read → marca eventos como leídos
+## Estilo y personalización del front
 
-GET /api/characters/:id/state
+- Vídeo de la tarjeta de invitado en `/web/assets/video/hero-home-720p.*`.  
+  Clase del vídeo: `.guest__bg`.
 
-PATCH/api/characters/:id/state → parches de estado (attrs, inventario, tags)
+**Ajustar opacidad del vídeo (ejemplo CSS):**
 
-POST /api/rolls → registrar tirada en BD
+```css
+/* Capa encima del vídeo sin tocar el asset */
+.guest__bg {
+  position: relative;
+}
+.guest__bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.35); /* sube/baja este valor */
+  pointer-events: none;
+}
+```
 
-POST /api/events → crear evento (actor, visibilidad, targets…)
+- El chat **no hace scroll global**: solo el área del chat scrollea; en móvil se evita el zoom del input.
+- El **estado de identidad** (usuario + personaje) se muestra en cabecera cuando hay sesión.
 
-GET /api/characters/:id/timeline → feed mergeado (actor, target, facción, cercanía)
+---
 
-Esquema BD: el repo no incluye migraciones. Las tablas utilizadas incluyen users, sessions, characters, character_state (+ _history), events (+ event_targets, event_reads), faction_memberships, chat_messages. Recomendado crear el esquema en Neon siguiendo los campos usados en las consultas de world.js, auth.js y chat.js.
+## Despliegue
 
-Estilo y personalización del front
+- **Vercel**: `server/api/index.js` exporta la app para `/api`.
+  - Sube `/web` como estático y sirve bajo el **mismo dominio** que el API o pasa `?api=` en la URL.
+  - Configura **Environment Variables**: `OPENAI_API_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, `LLM_MODEL`, etc.
+- **Estático**: `/web` puede ir a cualquier CDN. Si no comparte dominio con el backend, **usa `?api=`** y configura CORS.
 
-Vídeo de la tarjeta de invitado en /web/assets/video/hero-home-720p.*.
-La clase del vídeo es .guest__bg (ver styles.css), puedes ajustar opacidad con una capa ::after o un filtro CSS.
+---
 
-El chat no hace scroll global: solo el área del chat scrollea; en móvil se evita el zoom del input.
+## Troubleshooting
 
-El estado de identidad (usuario + personaje) se pinta arriba a la derecha cuando hay sesión.
+- **Server: FAIL** en la cabecera → el cliente no alcanza `/api/health`. Revisa `?api=` o CORS.
+- **401/403** → falta token (`Authorization: Bearer ...`). Vuelve a loguear.
+- **/world/** error sin BD → esperado. Añade `DATABASE_URL` o ignora esas funciones en modo demo.
+- **El Máster no responde** → comprueba `OPENAI_API_KEY` y logs en `server/dm.js`.
+- **CORS bloqueado** → ajusta `ALLOWED_ORIGIN` (varios orígenes separados por coma).
 
-Despliegue
+---
 
-Vercel: el adaptador server/api/index.js exporta la app para /api.
+## Roadmap corto
 
-Sube /web como estático y asegúrate de servirlo bajo el mismo dominio que el API o pasa ?api= en la URL.
+- [ ] Migraciones SQL oficiales (Neon)
+- [ ] Tiradas “server-autorizadas” con registro en `rolls` y consecuencias de estado
+- [ ] Editor visual de prompts (backoffice) para `prompts/*.md`
+- [ ] Modo multi-rooms/sesiones
+- [ ] Persistencia de **resumen** y “capítulos” jugados
 
-Configura las Environment Variables en el panel (OPENAI_API_KEY, DATABASE_URL, ALLOWED_ORIGIN, etc.).
+---
 
-Estático: /web puede ir a cualquier CDN. Si no comparte dominio con el backend, usa ?api= y configura CORS en el backend.
+## Créditos
 
-Troubleshooting
+- Diseño y sistema de juego: equipo Galactic.  
+- Código: web vanilla + Node/Express.  
+- IA: OpenAI SDK (personalizable editando `prompts/*`).
 
-Server: FAIL en la cabecera → el cliente no puede alcanzar /api/health. Revisa ?api= o CORS.
-
-401/403 al llamar a endpoints → falta token (Authorization: Bearer ...). Vuelve a loguear.
-
-/world/ error sin BD → esperado. Añade DATABASE_URL o ignora esas funciones en modo demo.
-
-El Máster no responde → comprueba OPENAI_API_KEY y logs de server/dm.js.
-
-CORS bloqueado → ajusta ALLOWED_ORIGIN (pueden ser varios orígenes separados por coma).
-
-Roadmap corto
-
- Migraciones SQL oficiales (Neon)
-
- Resolver tiradas “server-autorizadas” con registro en rolls y consecuencias de estado
-
- Editor visual de prompts (backoffice) para prompts/*.md
-
- Modo multi-rooms/sesiones
-
- Persistencia cliente ↔ servidor del resumen y “capítulos” jugados
-
-Créditos
-
-Diseño y sistema de juego: equipo Galactic.
-
-Código: web vanilla + Node/Express.
-
-IA: OpenAI SDK (personalizable via prompts/*).
