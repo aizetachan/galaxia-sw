@@ -336,7 +336,7 @@ async function readMaybeJson(res) {
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  if (DM_MODE) headers['X-DM-Mode'] = DM_MODE; 
+
   const url = joinUrl(API_BASE, path);
   dgroup('api POST ' + url, () => console.log({ body }));
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
@@ -353,7 +353,7 @@ async function api(path, body) {
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
-  if (DM_MODE) headers['X-DM-Mode'] = DM_MODE; // 
+// 
   const url = joinUrl(API_BASE, path);
   dgroup('api GET ' + url, () => console.log({}));
   const res = await fetch(url, { method: 'GET', headers });
