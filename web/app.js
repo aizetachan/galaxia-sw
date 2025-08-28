@@ -25,34 +25,41 @@ function joinUrl(base, path) {
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
-// --- MODO DEL MÁSTER (fast | rich) --------------------------
-const DM_MODE = (getQuery('mode') || localStorage.getItem('sw:dm_mode') || '').toLowerCase();
+// === Modo del Máster (fast|rich) =============================================
+function normMode(m){ m=String(m||'').toLowerCase(); return (m==='fast'||m==='rich')?m:'rich'; }
 
-// Cambiar modo desde consola o comando: setDmMode('fast'|'rich')
-window.setDmMode = (m) => {
-  try { localStorage.setItem('sw:dm_mode', String(m || '').toLowerCase()); } catch {}
-  location.reload();
+// Prioridad: localStorage > ?mode= > 'rich'
+let DM_MODE = normMode(localStorage.getItem('sw:dm_mode') || getQuery('mode') || 'rich');
+
+// Exponer helpers
+window.getDmMode = () => DM_MODE;
+window.setDmMode = (mode) => {
+  const m = normMode(mode);
+  if (m === DM_MODE) return;
+  DM_MODE = m;
+  localStorage.setItem('sw:dm_mode', m);
+  // actualiza indicador sin recargar
+  try { setServerStatus(true, `Server: OK — M: ${DM_MODE}`); } catch {}
+  // Mensaje interno de confirmación
+  pushDM(`Modo del Máster fijado a ${DM_MODE}.`);
 };
 
-// === Config conmutador fallback de etiquetas ROLL ============================
+// === Conmutador de fallback de etiquetas ROLL (sin recargar) ==================
 function asBool(v, def = true) {
   if (v == null || v === '') return def;
   const s = String(v).toLowerCase();
   return !['0','false','no','off','nope'].includes(s);
 }
-
-// Preferencia admin (si existe) > parámetro URL (?rolltags=0|1) > por defecto TRUE
 const adminPref = localStorage.getItem('sw:cfg:rolltags'); // '0' | '1' | null
-const allowRollTagFallback = asBool(adminPref ?? getQuery('rolltags'), true);
+let allowRollTagFallback = asBool(adminPref ?? getQuery('rolltags'), true);
 
-// Exponer para depurar/cambiar desde consola o panel admin
 window.allowRollTagFallback = allowRollTagFallback;
 window.setRollTagFallback = (on) => {
-  const val = asBool(on, true) ? '1' : '0';
-  localStorage.setItem('sw:cfg:rolltags', val);
-  dlog('rolltag fallback =', val === '1');
-  // Sin reload para no perder conversación
+  allowRollTagFallback = asBool(on, true);
+  localStorage.setItem('sw:cfg:rolltags', allowRollTagFallback ? '1':'0');
+  pushDM(`Fallback de etiquetas de tirada ${allowRollTagFallback ? 'activado' : 'desactivado'}.`);
 };
+
 // === Conmutador de MODO del Máster (fast | rich) ============================
 const DM_MODE_KEY = 'sw:dm_mode';
 
@@ -87,13 +94,15 @@ let API_BASE =
   (typeof location !== 'undefined' ? (location.origin + '/api') : '') ||
   DEFAULT_API_BASE;
 
-function setServerStatus(ok, msg) {
-  const el = document.getElementById('server-status');
-  if (!el) return;
-  el.textContent = ok ? (msg || 'Server: OK') : (msg || 'Server: FAIL');
-  el.classList.toggle('ok', !!ok);
-  el.classList.toggle('bad', !ok);
-}
+  function setServerStatus(ok, msg) {
+    const el = document.getElementById('server-status');
+    if (!el) return;
+    const label = ok ? (msg || `Server: OK — M: ${DM_MODE}`) : (msg || 'Server: FAIL');
+    el.textContent = label;
+    el.classList.toggle('ok', !!ok);
+    el.classList.toggle('bad', !ok);
+  }
+  
 
 async function probeHealth(base) {
   const url = joinUrl(base, '/health');
@@ -790,11 +799,10 @@ function handleIncomingDMText(rawText) {
 //    Además, nunca se aplica para "observación pasiva".
 if (!usedMeta) {
   if (!allowRollTagFallback) {
-    // Forzamos a ignorar cualquier etiqueta de tirada
     txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
   } else {
     const lastUser = [...msgs].reverse().find(m => m.kind === 'user')?.text || '';
-    const passiveObs = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo)\b/i.test(lastUser);
+    const passiveObs = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i.test(lastUser);
 
     if (passiveObs) {
       if (/<<\s*ROLL/i.test(txt)) dlog('ROLL tag ignorada (observación pasiva)');
@@ -805,6 +813,9 @@ if (!usedMeta) {
         pendingRoll = { skill: r.skill };
         txt = r.cleaned;
         dlog('ROLL by tag →', r.skill);
+      } else {
+        // seguridad: oculta cualquier resto aunque no parseemos
+        txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
       }
     }
   }
@@ -814,6 +825,7 @@ if (!usedMeta) {
     txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
   }
 }
+
 
   // 5) Mostrar siempre la prosa
   pushDM(txt);
@@ -825,11 +837,12 @@ if (!usedMeta) {
 
 // --- Detectar etiqueta de tirada ---
 function parseRollTag(txt = '') {
-  const re = /<<\s*ROLL\b(?:\s+SKILL\s*=\s*"([^"]*)")?(?:\s+REASON\s*=\s*"([^"]*)")?\s*>>/i;
-  const m = re.exec(txt);
-  if (!m) return null;
-  const skill = (m[1] || 'Acción').trim();
-  const cleaned = txt.replace(re, '').trim();
+  const tag = /<<\s*ROLL\b([\s\S]*?)>>/i.exec(txt);
+  if (!tag) return null;
+  const attrs = tag[1] || '';
+  const mSkill = /SKILL\s*=\s*"([^"]*)"/i.exec(attrs);
+  const skill = (mSkill?.[1] || 'Acción').trim();
+  const cleaned = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim(); // limpia todo
   return { skill, cleaned };
 }
 
