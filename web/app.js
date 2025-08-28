@@ -50,10 +50,36 @@ window.allowRollTagFallback = allowRollTagFallback;
 window.setRollTagFallback = (on) => {
   const val = asBool(on, true) ? '1' : '0';
   localStorage.setItem('sw:cfg:rolltags', val);
-  location.reload();
-  dlog('rolltag fallback =', allowRollTagFallback);
-
+  dlog('rolltag fallback =', val === '1');
+  // Sin reload para no perder conversación
 };
+// === Conmutador de MODO del Máster (fast | rich) ============================
+const DM_MODE_KEY = 'sw:dm_mode';
+
+function reflectModeInUrl(mode){
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('mode', mode);
+    history.replaceState(null, '', u.toString());
+  } catch {}
+}
+
+function getDmMode(){
+  const q = (getQuery('mode') || '').toLowerCase();
+  const saved = (localStorage.getItem(DM_MODE_KEY) || '').toLowerCase();
+  const m = (q || saved || 'fast');
+  return (m === 'rich') ? 'rich' : 'fast';
+}
+
+function setDmMode(mode){
+  const m = (String(mode).toLowerCase() === 'rich') ? 'rich' : 'fast';
+  localStorage.setItem(DM_MODE_KEY, m);
+  reflectModeInUrl(m);
+  setServerStatus(true, `Server: OK — Modo: ${m}`);
+  pushDM(`Modo del Máster fijado a ${m}.`);
+  dlog('DM mode ->', m);
+}
+
 
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
@@ -833,14 +859,15 @@ function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build';
 async function talkToDM(message) {
   dlog('talkToDM start', { message, step, character, pendingConfirm });
   try {
-    const history = msgs.slice(-8);
     const res = await api('/dm/respond', {
       message,
       history,
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
-      clientState: getClientState()
+      clientState: getClientState(),
+      config: { mode: getDmMode() }   // <<< MODO activo
     });
+    
     handleIncomingDMText(res.text);
   } catch (e) {
     dlog('talkToDM error:', e?.data || e);
@@ -901,6 +928,15 @@ if (/^\/modo\s+(fast|rich)\b/i.test(value)) {
     setSending(false);
     return;
   }
+// Cambiar modo sin recargar
+{
+  const m = value.match(/^\/modo\s+(fast|rich)\b/i);
+  if (m) {
+    setDmMode(m[1].toLowerCase());
+    setSending(false);
+    return;
+  }
+}
 
   pushUser(value);
 
@@ -990,7 +1026,8 @@ async function resolveRoll() {
       history,
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
-      clientState: getClientState()
+      clientState: getClientState(),
+      config: { mode: getDmMode() }   // <<< MODO activo
     });
     
 
