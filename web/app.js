@@ -19,11 +19,32 @@ function getMeta(name) {
 function getQuery(name) {
   try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
 }
+
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
+// === Config conmutador fallback de etiquetas ROLL ============================
+function asBool(v, def = true) {
+  if (v == null || v === '') return def;
+  const s = String(v).toLowerCase();
+  return !['0','false','no','off','nope'].includes(s);
+}
+
+// Preferencia admin (si existe) > parámetro URL (?rolltags=0|1) > por defecto TRUE
+const adminPref = localStorage.getItem('sw:cfg:rolltags'); // '0' | '1' | null
+const allowRollTagFallback = asBool(adminPref ?? getQuery('rolltags'), true);
+
+// Exponer para depurar/cambiar desde consola o panel admin
+window.allowRollTagFallback = allowRollTagFallback;
+window.setRollTagFallback = (on) => {
+  const val = asBool(on, true) ? '1' : '0';
+  localStorage.setItem('sw:cfg:rolltags', val);
+  location.reload();
+  dlog('rolltag fallback =', allowRollTagFallback);
+
+};
 
 let API_BASE =
   (typeof window !== 'undefined' && window.API_BASE) ||
@@ -248,6 +269,12 @@ function formatMarkdown(t = '') {
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
+// --- Acciones que consideramos "observación pasiva" (para no pedir tiradas por etiqueta)
+const PASSIVE_VERBS = [
+  'miro','observo','echo un vistazo','escucho',
+  'me quedo quieto','me quedo quieta','esperar','esperando',
+  'contemplo','analizo','reviso','vigilo'
+];
 
 // Payload plano + anidado para /world/characters
 function charPayload(c) {
@@ -720,8 +747,13 @@ function handleIncomingDMText(rawText) {
   }
 
   // 4) Fallback a etiquetas SOLO si NO hubo meta JSON,
-  //    y nunca para "observación pasiva" del jugador.
-  if (!usedMeta) {
+//    y controlado por el flag allowRollTagFallback.
+//    Además, nunca se aplica para "observación pasiva".
+if (!usedMeta) {
+  if (!allowRollTagFallback) {
+    // Forzamos a ignorar cualquier etiqueta de tirada
+    txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
+  } else {
     const lastUser = [...msgs].reverse().find(m => m.kind === 'user')?.text || '';
     const passiveObs = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo)\b/i.test(lastUser);
 
@@ -736,12 +768,13 @@ function handleIncomingDMText(rawText) {
         dlog('ROLL by tag →', r.skill);
       }
     }
-  } else {
-    // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales
-    if (!meta.roll || String(meta.roll).toLowerCase() === 'null') {
-      txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
-    }
   }
+} else {
+  // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales
+  if (!meta.roll || String(meta.roll).toLowerCase() === 'null') {
+    txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
+  }
+}
 
   // 5) Mostrar siempre la prosa
   pushDM(txt);
@@ -760,21 +793,7 @@ function parseRollTag(txt = '') {
   const cleaned = txt.replace(re, '').trim();
   return { skill, cleaned };
 }
-// --- Parse 1ª linea para leer JSON -----
-function parseMetaJsonLine(txt = '') {
-  const i = txt.indexOf('\n');
-  const first = (i >= 0 ? txt.slice(0, i) : txt).trim();
-  try {
-    const meta = JSON.parse(first);
-    if (meta && typeof meta === 'object' && (
-        'roll' in meta || 'memo' in meta || 'options' in meta
-    )) {
-      const cleaned = (i >= 0 ? txt.slice(i + 1).trim() : '');
-      return { meta, cleaned };
-    }
-  } catch {}
-  return null;
-}
+
 
 // --- Detectar etiqueta de confirmación (robusto y global) ---
 function parseConfirmTag(txt = '') {
