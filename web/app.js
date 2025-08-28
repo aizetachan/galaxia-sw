@@ -741,6 +741,31 @@ async function showResumeOnDemand() {
   }
 }
 
+// === Helpers para meta JSON al principio del mensaje ===
+function tryParseJson(s){ try { return JSON.parse(s); } catch { return null; } }
+
+/**
+ * Si el texto empieza con un bloque ```json ... ``` o con un objeto JSON en la primera línea,
+ * lo extrae y devuelve { meta, rest } donde rest es el texto sin el bloque meta.
+ */
+function extractTopMeta(txt = '') {
+  let rest = String(txt || '');
+  // 1) Bloque con fences ```json ... ```
+  const fenced = rest.match(/^```json\s*\n([\s\S]*?)\n```/i);
+  if (fenced) {
+    const meta = tryParseJson(fenced[1]);
+    if (meta) return { meta, rest: rest.slice(fenced[0].length).trim() };
+  }
+  // 2) Objeto JSON en la primera línea
+  const firstLineObj = rest.match(/^\s*\{[\s\S]*?\}\s*(?:\n|$)/);
+  if (firstLineObj) {
+    const meta = tryParseJson(firstLineObj[0]);
+    if (meta) return { meta, rest: rest.slice(firstLineObj[0].length).trim() };
+  }
+  return { meta: null, rest };
+}
+
+// --- Prioridad META JSON > etiquetas
 // --- Prioridad META JSON > etiquetas
 function handleIncomingDMText(rawText) {
   let txt = String(rawText || '');
@@ -748,87 +773,54 @@ function handleIncomingDMText(rawText) {
   // (1) limpia siempre la CTA de tirada al empezar
   pendingRoll = null;
 
-  // 1) Primera línea cruda
-  const nl = txt.indexOf('\n');
-  const firstLine = (nl >= 0 ? txt.slice(0, nl) : txt).trim();
-  dlog('RAW first line →', firstLine);
-
-  // 2) Intentar leer META JSON de la 1ª línea (saneando bloque ```json)
+  // (2) Intentar capturar META JSON al inicio (fenced o en 1ª línea)
   let meta = null;
-  const first = firstLine.replace(/^```json\s*|\s*```$/g, '').trim();
-  try {
-    const m = JSON.parse(first);
-    if (m && typeof m === 'object' && ('roll' in m || 'memo' in m || 'options' in m)) meta = m;
-  } catch {}
+  const { meta: m, rest } = extractTopMeta(txt);
+  if (m) { meta = m; txt = rest; }
 
-  let usedMeta = false;
+  // (3) Aplicar META si existe
   if (meta) {
-    usedMeta = true;
-    // quitar la 1ª línea (meta) del texto que se mostrará
-    txt = (nl >= 0 ? txt.slice(nl + 1) : '').trim();
-
-    // --- ROLL desde JSON (PRIORITARIO)
+    // --- ROLL desde JSON
     if (typeof meta.roll === 'string' && meta.roll && meta.roll.toLowerCase() !== 'null') {
       const [skill, dc] = String(meta.roll).split(':');
       pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
     }
-
     // --- MEMO
     if (Array.isArray(meta.memo) && meta.memo.length) {
       const prev = load('sw:scene_memo', []);
       save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
     }
-
-    // --- OPTIONS
+    // --- OPTIONS (añadimos como “Sugerencias” al final)
     if (Array.isArray(meta.options) && meta.options.length) {
-      txt += '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
+      txt += (txt ? '\n\n' : '') + 'Sugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
     }
-
     dlog('META JSON', meta);
   }
 
-  // 3) Confirmaciones (igual que antes)
+  // (4) Confirmaciones → consumimos etiqueta y guardamos estado
   const c = parseConfirmTag(txt);
   if (c) {
     if (c.pending) pendingConfirm = c.pending;
     txt = c.cleaned;
   }
 
-  // 4) Fallback a etiquetas SOLO si NO hubo meta JSON,
-//    y controlado por el flag allowRollTagFallback.
-//    Además, nunca se aplica para "observación pasiva".
-if (!usedMeta) {
-  if (!allowRollTagFallback) {
-    txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
+  // (5) Tirada por etiqueta (fallback) SI no vino meta.roll
+  //     Siempre limpiamos la etiqueta del texto mostrado.
+  const rollTag = /<<\s*ROLL\b[\s\S]*?>>/gi;
+  if (!meta || !meta.roll || String(meta.roll).toLowerCase() === 'null') {
+    const r = parseRollTag(txt);
+    if (r) pendingRoll = { skill: r.skill };
+    txt = (r ? r.cleaned : txt.replace(rollTag, '')).trim();
   } else {
-    const lastUser = [...msgs].reverse().find(m => m.kind === 'user')?.text || '';
-    const passiveObs = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i.test(lastUser);
-
-    if (passiveObs) {
-      if (/<<\s*ROLL/i.test(txt)) dlog('ROLL tag ignorada (observación pasiva)');
-      txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
-    } else {
-      const r = parseRollTag(txt);
-      if (r) {
-        pendingRoll = { skill: r.skill };
-        txt = r.cleaned;
-        dlog('ROLL by tag →', r.skill);
-      } else {
-        // seguridad: oculta cualquier resto aunque no parseemos
-        txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
-      }
-    }
+    // Si ya vino meta, eliminamos cualquier etiqueta residual
+    txt = txt.replace(rollTag, '').trim();
   }
-} else {
-  // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales
-  if (!meta.roll || String(meta.roll).toLowerCase() === 'null') {
-    txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
-  }
-}
 
+  // (6) Seguridad extra: si quedara cualquier otra etiqueta <<...>>, la quitamos
+  txt = txt.replace(/<<[\s\S]*?>>/g, '').trim();
 
-  // 5) Mostrar siempre la prosa
-  pushDM(txt);
+  // (7) Mostrar prosa si queda algo
+  if (txt) pushDM(txt);
 }
 
 
