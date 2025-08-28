@@ -25,6 +25,15 @@ function joinUrl(base, path) {
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
+// --- MODO DEL MÁSTER (fast | rich) --------------------------
+const DM_MODE = (getQuery('mode') || localStorage.getItem('sw:dm_mode') || '').toLowerCase();
+
+// Cambiar modo desde consola o comando: setDmMode('fast'|'rich')
+window.setDmMode = (m) => {
+  try { localStorage.setItem('sw:dm_mode', String(m || '').toLowerCase()); } catch {}
+  location.reload();
+};
+
 // === Config conmutador fallback de etiquetas ROLL ============================
 function asBool(v, def = true) {
   if (v == null || v === '') return def;
@@ -301,6 +310,7 @@ async function readMaybeJson(res) {
 async function api(path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  if (DM_MODE) headers['X-DM-Mode'] = DM_MODE; 
   const url = joinUrl(API_BASE, path);
   dgroup('api POST ' + url, () => console.log({ body }));
   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
@@ -317,6 +327,7 @@ async function api(path, body) {
 async function apiGet(path) {
   const headers = {};
   if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  if (DM_MODE) headers['X-DM-Mode'] = DM_MODE; // 
   const url = joinUrl(API_BASE, path);
   dgroup('api GET ' + url, () => console.log({}));
   const res = await fetch(url, { method: 'GET', headers });
@@ -857,6 +868,16 @@ if (pendingConfirm && step !== 'done') {
   inputEl.value = '';
 
   // Comandos rápidos
+  // /modo fast  |  /modo rich
+if (/^\/modo\s+(fast|rich)\b/i.test(value)) {
+  const m = RegExp.$1.toLowerCase();
+  localStorage.setItem('sw:dm_mode', m);
+  pushDM(`Modo del Máster fijado a **${m}**.`);
+  location.reload();
+  setSending(false);
+  return;
+}
+
   if ((value === '/privado' || value === '/publico') && character) {
     character.publicProfile = (value === '/publico');
     save(KEY_CHAR, character);
