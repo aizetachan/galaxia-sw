@@ -666,6 +666,77 @@ async function showResumeOnDemand() {
   }
 }
 
+// --- Prioridad META JSON > etiquetas
+function handleIncomingDMText(rawText) {
+  let txt = String(rawText || '');
+
+  // 1) Debug: ver la primera línea cruda
+  const nl = txt.indexOf('\n');
+  const firstLine = (nl >= 0 ? txt.slice(0, nl) : txt).trim();
+  dlog('RAW first line →', firstLine);
+
+  // 2) Intentar leer META JSON de la 1ª línea
+  let meta = null;
+  try {
+    meta = JSON.parse(firstLine);
+    if (typeof meta !== 'object') meta = null;
+  } catch {}
+
+  let usedMeta = false;
+  if (meta && ('roll' in meta || 'memo' in meta || 'options' in meta)) {
+    usedMeta = true;
+    // quitar la 1ª línea (meta) del texto que se mostrará
+    txt = (nl >= 0 ? txt.slice(nl + 1) : '').trim();
+
+    // --- ROLL desde JSON (PRIORITARIO) ---
+    if (typeof meta.roll === 'string' && meta.roll) {
+      const [skill, dc] = String(meta.roll).split(':');
+      pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
+    }
+
+    // --- MEMO: guardar notas de escena para alimentar el PIN ---
+    if (Array.isArray(meta.memo) && meta.memo.length) {
+      const prev = load('sw:scene_memo', []);
+      save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
+    }
+
+    // --- OPTIONS: sugerencias (puedes renderizarlas como botones) ---
+    if (Array.isArray(meta.options) && meta.options.length) {
+      // versión rápida: añadir como texto
+      txt += '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
+      // o guarda en estado para pintarlas como botones
+      // setSuggestions(meta.options)
+    }
+
+    dlog('META JSON', meta);
+  }
+
+  // 3) Confirmaciones (igual que antes)
+  const c = parseConfirmTag(txt);
+  if (c) {
+    if (c.pending) pendingConfirm = c.pending;
+    txt = c.cleaned;
+  }
+
+  // 4) Tiradas por ETIQUETA SOLO si NO vino meta JSON
+  //    o si el meta no pidió tirada (roll nulo) y QUIERES permitir fallback.
+  if (!usedMeta) {
+    const r = parseRollTag(txt);
+    if (r) {
+      pendingRoll = { skill: r.skill };
+      txt = r.cleaned;
+    }
+  } else {
+    // Si vino meta y NO hay tirada, evitamos etiquetas que pidan tirada por error:
+    if (!meta.roll) {
+      txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
+    }
+  }
+
+  // 5) Renderizar la prosa (txt) como siempre
+  renderMasterMessage(txt);
+}
+
 
 
 // --- Detectar etiqueta de tirada ---
@@ -713,54 +784,6 @@ function parseConfirmTag(txt = '') {
 // ====== CTA de Confirmación ======
 function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build'; return s || 'name'; }
 
-// ====== Helper central para pintar respuestas del Máster ======
-function handleIncomingDMText(rawText) {
-  let txt = rawText || 'El neón chisporrotea sobre la barra. ¿Qué haces?';
-
-  // --- META JSON (primera línea) ---
-const metaJ = parseMetaJsonLine(txt);
-if (metaJ) {
-  const { meta } = metaJ;
-  txt = metaJ.cleaned || txt;
-
-  // roll: prepara la UI de tirada (igual que etiquetas)
-  if (meta && typeof meta.roll === 'string' && meta.roll) {
-    const skill = String(meta.roll).split(':')[0] || 'Acción';
-    pendingRoll = { skill };
-  }
-
-  // memo: guarda notas breves de escena para alimentar el PIN
-  if (Array.isArray(meta.memo) && meta.memo.length) {
-    const prev = load('sw:scene_memo', []);
-    save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
-  }
-
-  // options: muestra sugerencias (versión simple, texto)
-  if (Array.isArray(meta.options) && meta.options.length) {
-    const hint = '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
-    txt += hint;
-  }
-
-  dlog('META JSON', meta);
-}
-
-  // Confirmación que venga del Máster
-  const conf = parseConfirmTag(txt);
-  if (conf) {
-    pendingConfirm = conf.pending;
-    save(KEY_CONFIRM, pendingConfirm);
-    txt = conf.cleaned || txt;
-  }
-
-  // Tirada
-  const roll = parseRollTag(txt);
-  if (roll) {
-    pendingRoll = { skill: roll.skill };
-    txt = roll.cleaned || `Necesitamos una tirada para **${roll.skill}**. Pulsa “Resolver tirada”.`;
-  }
-
-  pushDM(txt);
-}
 
 // ============================================================
 //                     Hablar con el Máster
