@@ -667,8 +667,12 @@ async function showResumeOnDemand() {
 }
 
 // --- Prioridad META JSON > etiquetas
+// --- Prioridad META JSON > etiquetas
 function handleIncomingDMText(rawText) {
   let txt = String(rawText || '');
+
+  // (1) Siempre limpiamos la CTA de tirada; si el Máster pide tirada, la volveremos a fijar.
+  pendingRoll = null;
 
   // 1) Debug: ver la primera línea cruda
   const nl = txt.indexOf('\n');
@@ -679,7 +683,7 @@ function handleIncomingDMText(rawText) {
   let meta = null;
   try {
     meta = JSON.parse(firstLine);
-    if (typeof meta !== 'object') meta = null;
+    if (typeof meta !== 'object' || meta === null) meta = null;
   } catch {}
 
   let usedMeta = false;
@@ -689,7 +693,8 @@ function handleIncomingDMText(rawText) {
     txt = (nl >= 0 ? txt.slice(nl + 1) : '').trim();
 
     // --- ROLL desde JSON (PRIORITARIO) ---
-    if (typeof meta.roll === 'string' && meta.roll) {
+    // Acepta forma cadena "habilidad:DC"; ignora "null" (string) y null real
+    if (typeof meta.roll === 'string' && meta.roll && meta.roll.toLowerCase() !== 'null') {
       const [skill, dc] = String(meta.roll).split(':');
       pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
     }
@@ -704,8 +709,7 @@ function handleIncomingDMText(rawText) {
     if (Array.isArray(meta.options) && meta.options.length) {
       // versión rápida: añadir como texto
       txt += '\n\nSugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
-      // o guarda en estado para pintarlas como botones
-      // setSuggestions(meta.options)
+      // (si quieres botones, guarda meta.options en un estado y píntalos en render)
     }
 
     dlog('META JSON', meta);
@@ -718,8 +722,7 @@ function handleIncomingDMText(rawText) {
     txt = c.cleaned;
   }
 
-  // 4) Tiradas por ETIQUETA SOLO si NO vino meta JSON
-  //    o si el meta no pidió tirada (roll nulo) y QUIERES permitir fallback.
+  // 4) Tiradas por ETIQUETA SOLO si NO vino meta JSON.
   if (!usedMeta) {
     const r = parseRollTag(txt);
     if (r) {
@@ -727,15 +730,16 @@ function handleIncomingDMText(rawText) {
       txt = r.cleaned;
     }
   } else {
-    // Si vino meta y NO hay tirada, evitamos etiquetas que pidan tirada por error:
-    if (!meta.roll) {
+    // Si vino meta y NO hay tirada, eliminamos etiquetas ROLL residuales:
+    if (!meta.roll || String(meta.roll).toLowerCase() === 'null') {
       txt = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
     }
   }
 
-  // 5) Renderizar la prosa (txt) como siempre
-  renderMasterMessage(txt);
+  // 5) Mostrar siempre la prosa
+  pushDM(txt);                 // <- ANTES llamabas a renderMasterMessage(txt) (no existe)
 }
+
 
 
 
