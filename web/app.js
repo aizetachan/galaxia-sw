@@ -212,6 +212,46 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
+// ============================================================
+//        UI auth state (guest vs. logged) — DEFINICIÓN REAL
+// ============================================================
+function isLogged() {
+  return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
+}
+
+function updateAuthUI() {
+  const logged = isLogged();
+
+  // flags en <body>
+  document.body.classList.toggle('is-guest', !logged);
+  document.body.classList.toggle('is-logged', logged);
+
+  // tarjeta de invitado (puede venir con class="hidden" o con hidden)
+  const card = document.getElementById('guest-card');
+  if (card) {
+    card.hidden = !!logged;                        // atributo
+    card.classList.toggle('hidden', !!logged);     // clase utilitaria
+    card.style.display = logged ? 'none' : '';     // fallback duro
+  }
+}
+window.updateAuthUI = updateAuthUI;
+
+function handleLogout(){
+  try { localStorage.removeItem('sw:auth'); } catch {}
+  AUTH = null;
+  updateAuthUI();          // mostrar guest inmediatamente
+  // Si prefieres recargar, descomenta:
+  // location.reload();
+}
+
+// Sincroniza si otra pestaña cambia la sesión
+window.addEventListener('storage', (e) => {
+  if (e.key === 'sw:auth') {
+    try { AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null; } catch { AUTH = null; }
+    updateAuthUI();
+  }
+});
+
 
 // ============================================================
 //        UI helpers (FALTABAN)  ← ← ←
@@ -414,8 +454,7 @@ async function apiGet(path) {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  window.updateAuthUI?.();
-
+  updateAuthUI();
 
   if ((AUTH?.user?.id) && msgs.length === 0) {
     await showResumeIfAny();
@@ -1036,7 +1075,7 @@ async function doAuth(kind) {
 
     if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, character?.name || '');
-    window.updateAuthUI?.();
+    updateAuthUI();
 
     if (msgs.length === 0) {
       await showResumeIfAny();
