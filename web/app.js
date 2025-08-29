@@ -414,7 +414,8 @@ async function apiGet(path) {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  updateAuthUI();
+  window.updateAuthUI?.();
+
 
   if ((AUTH?.user?.id) && msgs.length === 0) {
     await showResumeIfAny();
@@ -1035,7 +1036,7 @@ async function doAuth(kind) {
 
     if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, character?.name || '');
-    updateAuthUI();
+    window.updateAuthUI?.();
 
     if (msgs.length === 0) {
       await showResumeIfAny();
