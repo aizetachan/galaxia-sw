@@ -1,4 +1,4 @@
-import { API_BASE, joinUrl } from './api.js';
+import { API_BASE, joinUrl, ensureApiBase } from './api.js';
 import { AUTH, setAuth } from './auth/session.js';
 
 const userEl = document.getElementById('admin-user');
@@ -45,6 +45,7 @@ async function handleLogin() {
 }
 
 async function loadUsers() {
+  await ensureApiBase();
   const { users } = await api('/admin/users');
   listEl.innerHTML = '';
   users.forEach(u => {
@@ -68,6 +69,7 @@ loginBtn.addEventListener('click', handleLogin);
 
 (async function init(){
   try{
+    await ensureApiBase();
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if(saved?.token && saved?.user?.username === 'admin'){
       setAuth(saved);
