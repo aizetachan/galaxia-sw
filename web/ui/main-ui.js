@@ -3,6 +3,12 @@ import { handleLogout, isLogged } from "../auth/session.js";
 // Identity bar setup
 const chatEl = document.getElementById('chat');
 const chatWrap = document.querySelector('.chat-wrap');
+const adminEl = document.getElementById('admin-settings');
+const composerEl = document.querySelector('.composer');
+const rollCtaEl = document.getElementById('roll-cta');
+const confirmCtaEl = document.getElementById('confirm-cta');
+const adminCloseBtn = document.getElementById('admin-close');
+const prevState = { composer: false, roll: false, confirm: false };
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
   identityEl = document.createElement('section');
@@ -10,6 +16,14 @@ if (!identityEl) {
   identityEl.className = 'identity-bar hidden';
   chatWrap?.insertBefore(identityEl, chatEl);
 }
+
+if (adminCloseBtn) adminCloseBtn.onclick = () => {
+  adminEl.hidden = true;
+  chatEl.hidden = false;
+  if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
+  if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
+  if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
+};
 
 export function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
@@ -38,7 +52,14 @@ export function setIdentityBar(userName, characterName){
   };
   const _settingsBtn = identityEl.querySelector('#settings-btn');
   if (_settingsBtn) _settingsBtn.onclick = () => {
-    window.open('./admin.html', '_blank');
+    prevState.composer = !!composerEl?.hidden;
+    prevState.roll = !!rollCtaEl?.hidden;
+    prevState.confirm = !!confirmCtaEl?.hidden;
+    chatEl.hidden = true;
+    adminEl.hidden = false;
+    if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
+    if (rollCtaEl) { rollCtaEl.hidden = true; }
+    if (confirmCtaEl) { confirmCtaEl.hidden = true; }
   };
   identityEl.classList.remove('hidden');
 }
