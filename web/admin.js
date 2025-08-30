@@ -6,10 +6,9 @@ const pinEl = document.getElementById('admin-pin');
 const loginBtn = document.getElementById('admin-login');
 const statusEl = document.getElementById('admin-status');
 const panelEl = document.getElementById('admin-panel');
-const listEl = document.getElementById('users-list');
 const loginSectionEl = document.getElementById('login-section');
-const usersTabBtn = document.getElementById('admin-users-tab');
-const usersTabEl = document.getElementById('admin-tab-users');
+const usersTabBtn = document.querySelector('.tabs .tab[data-tab="users"]');
+const usersTabEl = document.getElementById('tab-users');
 
 function authHeaders() {
   const h = {};
@@ -49,35 +48,37 @@ async function handleLogin() {
 
 async function loadUsers() {
   await ensureApiBase();
-  listEl.innerHTML = '';
+  const tbody = document.querySelector('#users-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
   try {
     const { users } = await api('/admin/users');
     if (!users || users.length === 0) {
-      const li = document.createElement('li');
-      li.textContent = 'No hay usuarios registrados';
-      listEl.appendChild(li);
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="3">No hay usuarios registrados</td>';
+      tbody.appendChild(tr);
       return;
     }
     users.forEach(u => {
-      const li = document.createElement('li');
-      li.textContent = `${u.id} - ${u.username} `;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${u.id}</td><td>${escapeHtml(u.username)}</td><td></td>`;
+      const actions = tr.lastElementChild;
       const editBtn = document.createElement('button');
       editBtn.textContent = 'Editar';
       editBtn.addEventListener('click', () => editUser(u));
-      li.appendChild(editBtn);
-      const btn = document.createElement('button');
-      btn.textContent = 'Eliminar';
-      btn.addEventListener('click', () => deleteUser(u.id));
-      li.appendChild(btn);
-      listEl.appendChild(li);
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Eliminar';
+      delBtn.addEventListener('click', () => deleteUser(u.id));
+      actions.append(editBtn, delBtn);
+      tbody.appendChild(tr);
     });
   } catch (e) {
-    const li = document.createElement('li');
     const msg = e?.error === 'DB_NOT_CONFIGURED'
       ? 'Base de datos no configurada'
       : (e?.error || e?.message || 'error');
-    li.textContent = `Error al cargar usuarios: ${msg}`;
-    listEl.appendChild(li);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="3">Error al cargar usuarios: ${escapeHtml(msg)}</td>`;
+    tbody.appendChild(tr);
   }
 }
 
@@ -108,14 +109,15 @@ if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
 document.addEventListener('admin-open', () => showTab('users'));
 
 listenAuthChanges(async () => {
-  if (AUTH?.token && AUTH?.user?.username === 'admin') {
+  if (AUTH?.token && AUTH?.user?.username === 'settings') {
     loginSectionEl.hidden = true;
     panelEl.hidden = false;
     showTab('users');
   } else {
     panelEl.hidden = true;
     loginSectionEl.hidden = false;
-    listEl.innerHTML = '';
+    const tbody = document.querySelector('#users-table tbody');
+    if (tbody) tbody.innerHTML = '';
   }
 });
 
@@ -123,7 +125,7 @@ listenAuthChanges(async () => {
   try{
     await ensureApiBase();
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
-    if(saved?.token && saved?.user?.username === 'admin'){
+    if(saved?.token && saved?.user?.username === 'settings'){
       setAuth(saved);
       loginSectionEl.hidden = true;
       panelEl.hidden = false;
@@ -131,3 +133,9 @@ listenAuthChanges(async () => {
     }
   } catch{}
 })();
+
+function escapeHtml(s='') {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}

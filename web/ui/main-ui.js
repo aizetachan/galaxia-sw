@@ -40,7 +40,7 @@ export function setIdentityBar(userName, characterName){
       <div class="id-user">${escapeHtml(u)}</div>
       ${ c ? `<div class="id-char muted">— ${escapeHtml(c)}</div>` : '' }
     </div>
-    ${ u === 'admin' ? `<button id="settings-btn" class="settings-btn" title="Ajustes" aria-label="Ajustes">⚙</button>` : '' }
+    ${ u === 'settings' ? `<button id="settings-btn" class="settings-btn" title="Ajustes" aria-label="Ajustes">⚙</button>` : '' }
     <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
   </div>
 `;

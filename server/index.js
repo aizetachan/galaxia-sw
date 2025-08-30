@@ -44,7 +44,7 @@ const corsOpts = {
     console.warn('[CORS] blocked:', origin, 'Allowed=', ALLOWED);
     return cb(null, false);
   },
-  methods: ['GET', 'POST', 'OPTIONS', 'PATCH'],
+  methods: ['GET', 'POST', 'OPTIONS', 'PATCH', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 200,
