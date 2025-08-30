@@ -1,3 +1,5 @@
+import { API_BASE, joinUrl } from "../api.js";
+
 // Session and localStorage management
 export let AUTH = null;
 
@@ -37,7 +39,12 @@ export function isLogged() {
   return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
 }
 
-export function handleLogout() {
+export async function handleLogout() {
+  const headers = {};
+  if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+  try {
+    await fetch(joinUrl(API_BASE, '/auth/logout'), { method: 'POST', headers });
+  } catch {}
   try { localStorage.removeItem('sw:auth'); } catch {}
   setAuth(null);
 }
