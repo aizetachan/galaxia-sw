@@ -92,9 +92,7 @@ export function requireAdmin(req,res,next){
 }
 
 export async function listUsers(){
-  if(!hasDb){
-    return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
-  }
+  if(!hasDb) throw new Error('DB_NOT_CONFIGURED');
   const {rows}=await sql(`SELECT id,username FROM users ORDER BY id`);
   return rows;
 }

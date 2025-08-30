@@ -47,21 +47,36 @@ async function handleLogin() {
 
 async function loadUsers() {
   await ensureApiBase();
-  const { users } = await api('/admin/users');
   listEl.innerHTML = '';
-  users.forEach(u => {
+  try {
+    const { users } = await api('/admin/users');
+    if (!users || users.length === 0) {
+      const li = document.createElement('li');
+      li.textContent = 'No hay usuarios registrados';
+      listEl.appendChild(li);
+      return;
+    }
+    users.forEach(u => {
+      const li = document.createElement('li');
+      li.textContent = `${u.id} - ${u.username} `;
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Editar';
+      editBtn.addEventListener('click', () => editUser(u));
+      li.appendChild(editBtn);
+      const btn = document.createElement('button');
+      btn.textContent = 'Eliminar';
+      btn.addEventListener('click', () => deleteUser(u.id));
+      li.appendChild(btn);
+      listEl.appendChild(li);
+    });
+  } catch (e) {
     const li = document.createElement('li');
-    li.textContent = `${u.id} - ${u.username} `;
-    const editBtn = document.createElement('button');
-    editBtn.textContent = 'Editar';
-    editBtn.addEventListener('click', () => editUser(u));
-    li.appendChild(editBtn);
-    const btn = document.createElement('button');
-    btn.textContent = 'Eliminar';
-    btn.addEventListener('click', () => deleteUser(u.id));
-    li.appendChild(btn);
+    const msg = e?.error === 'DB_NOT_CONFIGURED'
+      ? 'Base de datos no configurada'
+      : (e?.error || e?.message || 'error');
+    li.textContent = `Error al cargar usuarios: ${msg}`;
     listEl.appendChild(li);
-  });
+  }
 }
 
 async function deleteUser(id) {

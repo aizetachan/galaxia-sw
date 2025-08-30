@@ -111,8 +111,13 @@ api.post('/auth/logout', requireAuth, async (_req, res) => {
 
 /* ====== Admin ====== */
 api.get('/admin/users', requireAuth, requireAdmin, async (_req, res) => {
-  const users = await listUsers();
-  return res.json({ users });
+  try {
+    const users = await listUsers();
+    return res.json({ users });
+  } catch (e) {
+    console.error('[ADMIN/users] error', e);
+    return res.status(500).json({ error: e?.message || 'error' });
+  }
 });
 
 api.put('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
