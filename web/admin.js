@@ -30,7 +30,6 @@ async function api(path, opts = {}) {
 async function handleLogin() {
   statusEl.textContent = '';
   try {
-    await ensureApiBase();
     const { token, user } = await api('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username: userEl.value, pin: pinEl.value })
