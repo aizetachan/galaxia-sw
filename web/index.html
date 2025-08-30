@@ -65,8 +65,18 @@
           <span id="admin-status" class="muted"></span>
         </section>
         <section id="admin-panel" hidden>
-          <h3>Usuarios</h3>
-          <ul id="users-list"></ul>
+          <nav class="tabs">
+            <button class="tab active" data-tab="users">Usuarios</button>
+            <!-- futuro: <button class="tab" data-tab="generator">Generar</button> -->
+          </nav>
+          <div id="tab-users" class="tab-panel">
+            <table class="table" id="users-table">
+              <thead>
+                <tr><th>ID</th><th>Usuario</th><th>Acciones</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </section>
         <button id="admin-close" class="outline">Volver</button>
       </section>

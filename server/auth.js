@@ -14,15 +14,16 @@ function hashPinLegacy(username,pin){ return createHash('sha256').update(`${user
 
 const mem={ users:new Map(), sessions:new Map() }; let memId=1;
 
+const ADMIN_USER = process.env.ADMIN_USER || 'settings';
+const ADMIN_PIN = process.env.ADMIN_PIN || '0987';
+
 // Ensure default admin user exists
 async function ensureAdminUser(){
-  const ADMIN_USER='admin';
-  const ADMIN_PIN='0987';
   const exists=await dbFindUserByUsername(ADMIN_USER);
   if(!exists){
     const pin_hash=hashPinV2(ADMIN_PIN);
     await dbInsertUser(ADMIN_USER,pin_hash);
-    console.log('[AUTH] admin user created');
+    console.log('[AUTH] admin user created:', ADMIN_USER);
   }
 }
 
@@ -87,14 +88,12 @@ export async function getSession(token){ return dbGetSession(token); }
 export async function logout(token){ await dbDeleteSession(token); return { ok:true }; }
 
 export function requireAdmin(req,res,next){
-  if(req.auth?.username==='admin') return next();
+  if(req.auth?.username===ADMIN_USER) return next();
   return res.status(403).json({ error:'forbidden' });
 }
 
 export async function listUsers(){
-  if(!hasDb){
-    return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
-  }
+  if(!hasDb) throw new Error('DB_NOT_CONFIGURED');
   const {rows}=await sql(`SELECT id,username FROM users ORDER BY id`);
   return rows;
 }
