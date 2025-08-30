@@ -60,6 +60,7 @@ export function setIdentityBar(userName, characterName){
     if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
     if (rollCtaEl) { rollCtaEl.hidden = true; }
     if (confirmCtaEl) { confirmCtaEl.hidden = true; }
+    document.dispatchEvent(new Event('admin-open'));
   };
   identityEl.classList.remove('hidden');
 }

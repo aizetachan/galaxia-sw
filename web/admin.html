@@ -14,8 +14,13 @@
       <span id="admin-status" class="muted"></span>
     </section>
     <section id="admin-panel" hidden>
-      <h2>Usuarios</h2>
-      <ul id="users-list"></ul>
+      <nav id="admin-tabs">
+        <button id="admin-users-tab" data-tab="users" class="active">Usuarios</button>
+      </nav>
+      <div id="admin-tab-users" class="admin-tab">
+        <h2>Usuarios</h2>
+        <ul id="users-list"></ul>
+      </div>
     </section>
     <script type="module" src="./admin.js"></script>
   </body>

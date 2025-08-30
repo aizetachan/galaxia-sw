@@ -65,8 +65,13 @@
           <span id="admin-status" class="muted"></span>
         </section>
         <section id="admin-panel" hidden>
-          <h3>Usuarios</h3>
-          <ul id="users-list"></ul>
+          <nav id="admin-tabs">
+            <button id="admin-users-tab" data-tab="users" class="active">Usuarios</button>
+          </nav>
+          <div id="admin-tab-users" class="admin-tab">
+            <h3>Usuarios</h3>
+            <ul id="users-list"></ul>
+          </div>
         </section>
         <button id="admin-close" class="outline">Volver</button>
       </section>

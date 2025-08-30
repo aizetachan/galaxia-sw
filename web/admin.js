@@ -8,6 +8,8 @@ const statusEl = document.getElementById('admin-status');
 const panelEl = document.getElementById('admin-panel');
 const listEl = document.getElementById('users-list');
 const loginSectionEl = document.getElementById('login-section');
+const usersTabBtn = document.getElementById('admin-users-tab');
+const usersTabEl = document.getElementById('admin-tab-users');
 
 function authHeaders() {
   const h = {};
@@ -39,7 +41,7 @@ async function handleLogin() {
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
     loginSectionEl.hidden = true;
     panelEl.hidden = false;
-    await loadUsers();
+    showTab('users');
   } catch (e) {
     statusEl.textContent = e?.error || 'login_failed';
   }
@@ -79,6 +81,14 @@ async function loadUsers() {
   }
 }
 
+function showTab(tab) {
+  if (tab === 'users') {
+    if (usersTabEl) usersTabEl.hidden = false;
+    loadUsers();
+  }
+  if (usersTabBtn) usersTabBtn.classList.toggle('active', tab === 'users');
+}
+
 async function deleteUser(id) {
   if (!confirm('¿Eliminar usuario?')) return;
   await api(`/admin/users/${id}`, { method: 'DELETE' });
@@ -94,14 +104,14 @@ async function editUser(u) {
 }
 
 loginBtn.addEventListener('click', handleLogin);
+if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
+document.addEventListener('admin-open', () => showTab('users'));
 
 listenAuthChanges(async () => {
   if (AUTH?.token && AUTH?.user?.username === 'admin') {
     loginSectionEl.hidden = true;
     panelEl.hidden = false;
-    try {
-      await loadUsers();
-    } catch {}
+    showTab('users');
   } else {
     panelEl.hidden = true;
     loginSectionEl.hidden = false;
@@ -117,7 +127,7 @@ listenAuthChanges(async () => {
       setAuth(saved);
       loginSectionEl.hidden = true;
       panelEl.hidden = false;
-      await loadUsers();
+      showTab('users');
     }
   } catch{}
 })();

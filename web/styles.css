@@ -601,3 +601,13 @@ body.is-guest #guest-card .auth-row input {
 @media (prefers-reduced-motion: reduce){
   #guest-card .guest__bg{ display: none; }
 }
+
+/* ===== Admin panel ===== */
+#admin-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#admin-tabs button.active {
+  font-weight: bold;
+}
