@@ -1,4 +1,4 @@
-import { API_BASE, joinUrl, ensureApiBase } from './api.js';
+import { API_BASE, joinUrl, ensureApiBase } from './api.js'; // ensure API base resolved before requests
 import { AUTH, setAuth } from './auth/session.js';
 
 const userEl = document.getElementById('admin-user');
