@@ -9,6 +9,7 @@ const rollCtaEl = document.getElementById('roll-cta');
 const confirmCtaEl = document.getElementById('confirm-cta');
 const adminCloseBtn = document.getElementById('admin-close');
 const prevState = { composer: false, roll: false, confirm: false };
+
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
   identityEl = document.createElement('section');
@@ -16,11 +17,13 @@ if (!identityEl) {
   identityEl.className = 'identity-bar hidden';
   chatWrap?.insertBefore(identityEl, chatEl);
 }
-// Asegura mismo look que #chat (usa la clase 'chat')
-if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat');
 
+// Asegura mismo look que #chat y que arranque oculto
+if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat');
+if (adminEl) { adminEl.hidden = true; adminEl.classList.add('hidden'); }
 
 if (adminCloseBtn) adminCloseBtn.onclick = () => {
+  // Cerrar settings → volver al chat (un solo contenedor visible)
   adminEl.hidden = true; adminEl.classList.add('hidden');
   chatEl.hidden = false; chatEl.classList.remove('hidden');
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
@@ -31,11 +34,21 @@ if (adminCloseBtn) adminCloseBtn.onclick = () => {
 export function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
+
+  // Si NO es settings, blinda: oculta panel y vuelve al chat
+  if (u && u !== 'settings') {
+    if (adminEl && !adminEl.hidden) {
+      adminEl.hidden = true; adminEl.classList.add('hidden');
+      chatEl.hidden = false; chatEl.classList.remove('hidden');
+    }
+  }
+
   if (!u || isGuest){
     identityEl.classList.add('hidden');
     identityEl.innerHTML = '';
     return;
   }
+
   const c = String(characterName || '').trim();
   identityEl.innerHTML = `
   <div class="id-row">
@@ -47,24 +60,31 @@ export function setIdentityBar(userName, characterName){
     <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
   </div>
 `;
+
   const _logoutBtn = identityEl.querySelector('#logout-btn');
   if (_logoutBtn) _logoutBtn.onclick = async () => {
     await handleLogout();
     setIdentityBar('', '');
     updateAuthUI();
   };
+
   const _settingsBtn = identityEl.querySelector('#settings-btn');
   if (_settingsBtn) _settingsBtn.onclick = () => {
+    // Abrir Settings (solo existe el botón si u === 'settings')
     prevState.composer = !!composerEl?.hidden;
     prevState.roll = !!rollCtaEl?.hidden;
     prevState.confirm = !!confirmCtaEl?.hidden;
+
     chatEl.hidden = true;  chatEl.classList.add('hidden');
     adminEl.hidden = false; adminEl.classList.remove('hidden');
+
     if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
     if (rollCtaEl) { rollCtaEl.hidden = true; }
     if (confirmCtaEl) { confirmCtaEl.hidden = true; }
+
     document.dispatchEvent(new Event('admin-open'));
-  };  
+  };
+
   identityEl.classList.remove('hidden');
 }
 

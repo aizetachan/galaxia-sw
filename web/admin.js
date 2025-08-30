@@ -38,9 +38,12 @@ async function handleLogin() {
     });
     setAuth({ token, user });
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
-    loginSectionEl.hidden = true;
-    panelEl.hidden = false;
-    showTab('users');
+    // Si el panel está abierto y somos admin, pasar a Usuarios sin pedir más.
+    if (!document.getElementById('admin-settings')?.hidden && user?.username === 'settings') {
+      loginSectionEl.hidden = true;
+      panelEl.hidden = false;
+      showTab('users');
+    }
   } catch (e) {
     statusEl.textContent = e?.error || 'login_failed';
   }
@@ -63,12 +66,17 @@ async function loadUsers() {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${u.id}</td><td>${escapeHtml(u.username)}</td><td></td>`;
       const actions = tr.lastElementChild;
+
       const editBtn = document.createElement('button');
       editBtn.textContent = 'Editar';
+      editBtn.className = 'btn btn-secondary';
       editBtn.addEventListener('click', () => editUser(u));
+
       const delBtn = document.createElement('button');
       delBtn.textContent = 'Eliminar';
+      delBtn.className = 'btn btn-danger';
       delBtn.addEventListener('click', () => deleteUser(u.id));
+
       actions.append(editBtn, delBtn);
       tbody.appendChild(tr);
     });
@@ -104,34 +112,41 @@ async function editUser(u) {
   await loadUsers();
 }
 
+/* === Eventos === */
 if (loginBtn) loginBtn.addEventListener('click', handleLogin);
 if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
-document.addEventListener('admin-open', () => showTab('users'));
 
+// Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'settings'.
+// Si no es admin, ignoramos el evento (no se muestra login interno).
+document.addEventListener('admin-open', async () => {
+  await ensureApiBase();
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  if (!isAdmin) return; // ignorar si no es settings
+
+  loginSectionEl.hidden = true;
+  panelEl.hidden = false;
+  showTab('users');
+});
+
+// Si cambia el estado de auth mientras el panel está abierto, sincroniza la vista.
 listenAuthChanges(async () => {
-  if (AUTH?.token && AUTH?.user?.username === 'settings') {
+  const open = !document.getElementById('admin-settings')?.hidden;
+  if (!open) return;
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  if (isAdmin) {
     loginSectionEl.hidden = true;
     panelEl.hidden = false;
     showTab('users');
   } else {
+    // Si dejó de ser admin mientras estaba abierto, no mostramos login interno.
+    loginSectionEl.hidden = true;
     panelEl.hidden = true;
-    loginSectionEl.hidden = false;
-    const tbody = document.querySelector('#users-table tbody');
-    if (tbody) tbody.innerHTML = '';
   }
 });
 
+// Init: solo asegurar API_BASE; sin auto-abrir ni tocar la sesión global.
 (async function init(){
-  try{
-    await ensureApiBase();
-    const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
-    if(saved?.token && saved?.user?.username === 'settings'){
-      setAuth(saved);
-      loginSectionEl.hidden = true;
-      panelEl.hidden = false;
-      showTab('users');
-    }
-  } catch{}
+  try { await ensureApiBase(); } catch {}
 })();
 
 function escapeHtml(s='') {
