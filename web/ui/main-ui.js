@@ -30,7 +30,11 @@ export function setIdentityBar(userName, characterName){
   </div>
 `;
   const _logoutBtn = identityEl.querySelector('#logout-btn');
-  if (_logoutBtn) _logoutBtn.onclick = handleLogout;
+  if (_logoutBtn) _logoutBtn.onclick = async () => {
+    await handleLogout();
+    setIdentityBar('', '');
+    updateAuthUI();
+  };
   identityEl.classList.remove('hidden');
 }
 
