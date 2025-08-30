@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 
 import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world.js';         // /world/..., /characters/...
+import worldRouter from './world/index.js';   // /world/..., /characters/... 
 import chatRouter from './chat.js';
 import { register, login, requireAuth } from './auth.js';
 

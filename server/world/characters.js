@@ -1,85 +1,18 @@
-// server/world.js
+// server/world/characters.js
 import { Router } from 'express';
-import { q } from './db.js';
-import { optionalAuth } from './auth.js';
 import { randomUUID } from 'crypto';
+import { q } from '../db.js';
+import { optionalAuth } from '../auth.js';
+import {
+  ensureInt,
+  pick,
+  rollFormula,
+  outcomeFromDC,
+  applyStatePatch,
+  s,
+} from './utils.js';
 
 const router = Router();
-
-// ---------------------- helpers util ----------------------
-function ensureInt(v, fallback = null) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
-}
-function pick(obj, keys) {
-  const out = {};
-  for (const k of keys) if (k in obj) out[k] = obj[k];
-  return out;
-}
-function rollFormula(formula) {
-  const m = String(formula).trim().match(/^(\d+)d(\d+)([+-]\d+)?$/i);
-  if (!m) throw new Error('Fórmula inválida, usa p.ej. "2d6+1"');
-  const [, nStr, fStr, modStr] = m;
-  const n = parseInt(nStr, 10);
-  const f = parseInt(fStr, 10);
-  const mod = modStr ? parseInt(modStr, 10) : 0;
-  const dice = Array.from({ length: n }, () => 1 + Math.floor(Math.random() * f));
-  const total = dice.reduce((a, b) => a + b, 0) + mod;
-  return { dice, mod, faces: f, nDice: n, total };
-}
-function outcomeFromDC(total, dc) {
-  if (dc == null) return null;
-  if (total >= dc + 3) return 'success';
-  if (total >= dc) return 'mixed';
-  return 'fail';
-}
-function applyStatePatch(current, patch) {
-  const out = { ...current };
-  if (patch?.attrs) {
-    out.attrs = { ...(current.attrs || {}) };
-    for (const [k, v] of Object.entries(patch.attrs)) {
-      if (v && typeof v === 'object' && 'delta' in v) {
-        const from = Number(out.attrs?.[k] ?? 0);
-        out.attrs[k] = from + Number(v.delta || 0);
-      } else {
-        out.attrs[k] = v;
-      }
-    }
-  }
-  if (patch?.inventory) {
-    const cur = Array.isArray(current.inventory) ? [...current.inventory] : [];
-    for (const it of patch.inventory) {
-      const { op, id, qty = 1 } = it || {};
-      if (!id || !op) continue;
-      const idx = cur.findIndex((x) => x.id === id);
-      if (op === 'add') {
-        if (idx >= 0) cur[idx] = { ...cur[idx], qty: (cur[idx].qty || 0) + qty };
-        else cur.push({ id, qty });
-      } else if (op === 'remove' && idx >= 0) {
-        const newQty = (cur[idx].qty || 0) - qty;
-        if (newQty > 0) cur[idx] = { ...cur[idx], qty: newQty };
-        else cur.splice(idx, 1);
-      }
-    }
-    out.inventory = cur;
-  }
-  if (patch?.tags) {
-    const cur = new Set(Array.isArray(current.tags) ? current.tags : []);
-    const adds = patch.tags?.add || [];
-    const rems = patch.tags?.remove || [];
-    adds.forEach((t) => cur.add(t));
-    rems.forEach((t) => cur.delete(t));
-    out.tags = [...cur];
-  }
-  return out;
-}
-
-// Normalizador de strings cortos (para inserts/updates)
-function s(v, max = 200) {
-  if (v == null) return null;
-  const t = String(v).trim();
-  return t ? t.slice(0, max) : null;
-}
 
 // ===========================================================
 //    Perfil del personaje del usuario logueado (GET /me)
@@ -167,160 +100,6 @@ router.post('/world/characters', optionalAuth, async (req, res) => {
   } catch (e) {
     console.error('[WORLD] /characters DB error:', e?.message || e);
     return res.status(200).json({ ok: false, error: 'world_save_failed' });
-  }
-});
-
-// ===========================================================
-//                    Contexto del mundo
-// ===========================================================
-router.get('/world/context', async (req, res) => {
-  try {
-    const characterId = ensureInt(req.query.character_id);
-    const limit = Math.min(ensureInt(req.query.limit, 20) || 20, 100);
-    if (!characterId) return res.status(400).json({ ok: false, error: 'character_id requerido' });
-
-    const { rows: charRows } = await q(
-      `SELECT c.*, cs.attrs, cs.inventory, cs.tags
-         FROM characters c
-         LEFT JOIN character_state cs ON cs.character_id = c.id
-        WHERE c.id = $1`,
-      [characterId]
-    );
-    if (!charRows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
-    const character = charRows[0];
-
-    const { rows: nearby } = await q(
-      `SELECT e.*
-         FROM events e
-        WHERE e.visibility = 'public'
-          AND e.location IS NOT NULL
-          AND e.location = $1
-        ORDER BY e.ts DESC
-        LIMIT $2`,
-      [character.last_location || null, limit]
-    );
-
-    const { rows: facEvents } = await q(
-      `SELECT e.*
-         FROM faction_memberships fm
-         JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
-        WHERE fm.character_id = $1
-        ORDER BY e.ts DESC
-        LIMIT $2`,
-      [characterId, limit]
-    );
-
-    const { rows: targeted } = await q(
-      `SELECT e.*
-         FROM event_targets t
-         JOIN events e ON e.id = t.event_id
-        WHERE t.target_character_id = $1
-        ORDER BY e.ts DESC
-        LIMIT $2`,
-      [characterId, limit]
-    );
-
-    const { rows: myActs } = await q(
-      `SELECT e.*
-         FROM events e
-        WHERE e.actor_character_id = $1
-        ORDER BY e.ts DESC
-        LIMIT $2`,
-      [characterId, Math.min(limit, 10)]
-    );
-
-    const { rows: unreadRows } = await q(
-      `SELECT COUNT(*)::int AS c
-         FROM (
-           SELECT e.id
-             FROM event_targets t
-             JOIN events e ON e.id = t.event_id
-            WHERE t.target_character_id = $1
-           UNION
-           SELECT e.id
-             FROM faction_memberships fm
-             JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
-            WHERE fm.character_id = $1
-           UNION
-           SELECT e.id
-             FROM events e
-             JOIN characters c ON c.id = $1
-            WHERE e.visibility = 'public' AND e.location = c.last_location
-         ) x
-         LEFT JOIN event_reads r ON r.event_id = x.id AND r.character_id = $1
-        WHERE r.event_id IS NULL`,
-      [characterId]
-    );
-
-    res.json({
-      ok: true,
-      character,
-      nearby_events: nearby,
-      faction_events: facEvents,
-      targeted_events: targeted,
-      recent_actor_events: myActs,
-      unread_count: unreadRows?.[0]?.c ?? 0
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// ===========================================================
-//                         Inbox
-// ===========================================================
-router.get('/world/inbox', async (req, res) => {
-  try {
-    const characterId = ensureInt(req.query.character_id);
-    const limit = Math.min(ensureInt(req.query.limit, 50) || 50, 200);
-    if (!characterId) return res.status(400).json({ ok: false, error: 'character_id requerido' });
-
-    const { rows } = await q(
-      `SELECT e.*
-         FROM (
-           SELECT e.id
-             FROM event_targets t
-             JOIN events e ON e.id = t.event_id
-            WHERE t.target_character_id = $1
-           UNION
-           SELECT e.id
-             FROM faction_memberships fm
-             JOIN events e ON e.visibility = 'faction' AND e.faction_id = fm.faction_id
-            WHERE fm.character_id = $1
-           UNION
-           SELECT e.id
-             FROM events e
-             JOIN characters c ON c.id = $1
-            WHERE e.visibility = 'public' AND e.location = c.last_location
-         ) x
-         LEFT JOIN event_reads r ON r.event_id = x.id AND r.character_id = $1
-         JOIN events e ON e.id = x.id
-        WHERE r.event_id IS NULL
-        ORDER BY e.ts DESC
-        LIMIT $2`,
-      [characterId, limit]
-    );
-
-    res.json({ ok: true, events: rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-router.post('/events/read', async (req, res) => {
-  try {
-    const cid = ensureInt(req.body?.character_id);
-    const eid = ensureInt(req.body?.event_id);
-    if (!cid || !eid) return res.status(400).json({ ok: false, error: 'character_id y event_id requeridos' });
-    await q(
-      `INSERT INTO event_reads(character_id, event_id, read_at)
-       VALUES ($1,$2,now())
-       ON CONFLICT (character_id, event_id) DO NOTHING`,
-      [cid, eid]
-    );
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
