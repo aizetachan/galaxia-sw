@@ -99,6 +99,29 @@ export async function listUsers(){
   return rows;
 }
 
+export async function updateUser(id,{username,pin}){
+  const userId=Number(id);
+  if(!userId) return;
+  if(!hasDb){
+    for(const u of mem.users.values()){
+      if(u.id===userId){
+        const nu=normalizeUsername(username);
+        if(nu) u.username=nu;
+        if(pin) u.pin_hash=hashPinV2(pin);
+        break;
+      }
+    }
+    return;
+  }
+  const fields=[]; const values=[];
+  const nu=normalizeUsername(username);
+  if(nu){ fields.push(`username=$${fields.length+1}`); values.push(nu); }
+  if(pin){ fields.push(`pin_hash=$${fields.length+1}`); values.push(hashPinV2(pin)); }
+  if(!fields.length) return;
+  values.push(userId);
+  await sql(`UPDATE users SET ${fields.join(',')} WHERE id=$${fields.length+1}`,values);
+}
+
 export async function deleteUserCascade(id){
   const userId=Number(id);
   if(!userId) return;
