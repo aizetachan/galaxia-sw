@@ -104,7 +104,7 @@ async function editUser(u) {
   await loadUsers();
 }
 
-loginBtn.addEventListener('click', handleLogin);
+if (loginBtn) loginBtn.addEventListener('click', handleLogin);
 if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
 document.addEventListener('admin-open', () => showTab('users'));
 

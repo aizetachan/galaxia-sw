@@ -1,626 +1,309 @@
 /* =====================================================
    Galaxia SW — styles.css (drop-in, sin romper HTML)
-   Mantiene tus clases originales + tokens y mejoras SW
    ===================================================== */
 
 /* -------- 1) TOKENS / BASE -------- */
 :root{
-    --bg:#0b0d12;
-    --surface:#000000;
-    --text:#e7e9ee;
-    --muted:#8ea3b6;
-  
-    --holo:#4091EA; 
-    --holo-light:#4091EA80;                /* azul holográfico (ya usabas este) */
-    --holo-soft: rgba(64,145,234,.20);
-    --accent:#ffe81f;               /* amarillo “crawl” */
-  
-    --radius:14px;
-    --shadow:0 1px 4px rgba(0,0,0,.2);
-  
-    --chat-h:60vh;
-    --chat-min:420px;
-  }
-  
-  *{ box-sizing:border-box }
-  
-  body{
-    margin:0;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;
-    color:var(--text);
-    background:
-      radial-gradient(1200px 800px at 20% -10%, #102136 0%, transparent 60%),
-      radial-gradient(800px 600px at 110% 20%, #0b1a2a 0%, transparent 55%),
-      var(--bg);
-    min-height:100dvh;
-    overflow-x:hidden;
-  }
-  
-  /* Estrellas sutiles */
-  body::before{
-    content:"";
-    position:fixed; inset:0; pointer-events:none; opacity:.28;
-    background:
-      radial-gradient(2px 2px at 20% 30%, #fff8 70%, transparent 71%) repeat,
-      radial-gradient(1px 1px at 70% 60%, #fff6 70%, transparent 71%) repeat;
-    background-size: 400px 300px, 300px 200px;
-    animation: twinkle 12s linear infinite;
-  }
-  @keyframes twinkle{
-    0%,100%{ transform:translateY(0) }
-    50%{ transform:translateY(8px) }
-  }
-  
-  a,button{ transition:.15s ease all }
-  strong{ font-weight:600 }
-  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+  --bg:#0b0d12;
+  --surface:#000000;
+  --text:#e7e9ee;
+  --muted:#8ea3b6;
 
-  /* Spinner para cualquier <button> con la clase .loading */
-  button.loading{
-    position: relative;
-    /* oculta el texto sin tocar el color (el spinner hereda currentColor) */
-    text-indent: -9999px;
-    overflow: hidden;
-  }
-  button.loading::after{
-    content: "";
-    position: absolute;
-    inset: 0;               /* centra el spinner */
-    margin: auto;
-    width: 1.1em;
-    height: 1.1em;
-    border: 2px solid currentColor;  /* usa el color del botón (p.ej. #fff) */
-    border-right-color: transparent; /* hueco para efecto spinner */
-    border-radius: 50%;
-    animation: sw-spin .6s linear infinite;
-  }
-  @keyframes sw-spin { to { transform: rotate(360deg); } }
-  
-  /* opcional: apariencia de deshabilitado */
-  button:disabled { opacity: .6; cursor: not-allowed; }
+  --holo:#4091EA;
+  --holo-light:#4091EA80;
+  --holo-soft: rgba(64,145,234,.20);
+  --accent:#ffe81f;
 
+  --radius:14px;
+  --shadow:0 1px 4px rgba(0,0,0,.2);
 
-  
-  /* -------- 2) HEADER / FOOTER -------- */
-  .app-header,.app-footer{ padding:16px 20px }
-  .app-header h1{
-    margin:0 0 4px 0; font-size:20px;
-    text-shadow:0 0 18px #ffe81f33;
-  }
-  .muted{ opacity:.8; color:var(--muted); font-size:13px }
-  
-  /* Badge (para #server-status si quieres darle estilo) */
-  .badge{
-    display:inline-flex; align-items:center; gap:8px;
-    padding:4px 10px; border-radius:999px;
-    border:1px solid rgba(255,255,255,.15);
-    background:rgba(255,255,255,.06);
-  }
-  
-  /* -------- 3) LAYOUT -------- */
-  .chat-wrap{ max-width:920px; margin:0 auto; padding:0 20px }
-  
-  /* -------- 4) CHAT / MENSAJES -------- */
-  .chat{
-    height:var(--chat-h);
-    min-height:var(--chat-min);
-    background:var(--surface);
-    border:1px solid var(--holo);
-    border-radius:var(--radius);
-    padding:12px;
-    overflow:auto;
-    box-shadow:var(--shadow);
-  }
-  
-  /* Mensaje base con efecto “scanlines” sutil */
-  .msg{
-    margin:8px 0; padding:8px 10px;
-    border-radius:12px; line-height:1.35;
-    background:linear-gradient(180deg, #07131f, #060e18);
-    border:1px solid #0c3142;
-    box-shadow: inset 0 0 0 1px #00d1ff14, 0 0 0 1px #001018;
-    position:relative; overflow:hidden;
-  }
-  .msg::after{
-    content:""; position:absolute; inset:0; pointer-events:none;
-    background:repeating-linear-gradient(to bottom, #00d1ff06 0 2px, transparent 2px 4px);
-  }
-  
-  /* Roles (conservamos tus clases específicas) */
-  .msg.user{
-    background:#000;
-    border:1px solid #ffffff90;
-    box-shadow: inset 0 0 0 1px #ffffff22;
-  }
-  .msg.dm{
-    background:#000;
-    border:1px solid var(--holo-light);
-    box-shadow: inset 0 0 0 1px var(--holo-soft);
-  }
-  .msg .meta{ opacity:.6; font-size:12px; margin-bottom:2px }
-  
-  /* -------- 5) COMPOSER -------- */
-  .composer{
-    display:flex; gap:8px; margin:10px 0 16px;
-  }
-  .composer input{
-    flex:1; padding:10px 12px; border-radius:12px;
-    border:1px solid #10344a; background:#07131f; color:var(--text);
-    box-shadow: inset 0 0 0 1px #00d1ff10;
-  }
-  .composer input::placeholder{ color:#9db1c4aa }
-  
-  .composer button{
-    padding:10px 14px; border-radius:12px;
-    border:1px solid rgba(255,255,255,.2);
-    background:linear-gradient(90deg, #7af0ff, var(--holo));
-    color:#00141a; cursor:pointer; font-weight:700;
-    box-shadow:0 0 12px #00d1ff77, inset 0 -2px 0 #008fb1;
-  }
-  .composer button:hover{ filter:brightness(1.05) }
-  
-  /* -------- 6) CTA TIRADA -------- */
-  .roll-cta{
-    display:flex; gap:12px; align-items:center; justify-content:space-between;
-    margin:10px 0; padding:10px 12px;
-    border:1px solid rgba(255,255,255,.2);
-    border-radius:12px;
-    background:linear-gradient(180deg, #0b1624aa, #09121eaa);
-    backdrop-filter:blur(12px);
-    box-shadow:0 10px 40px #0008, 0 0 0 1px #0d2a38 inset;
-  }
-  .roll-cta.hidden{ display:none }
-  .roll-cta__actions button{
-    padding:8px 12px; border-radius:10px;
-    border:1px solid rgba(255,255,255,.2);
-    background:linear-gradient(90deg, #7af0ff, var(--holo));
-    color:#00141a; cursor:pointer; font-weight:700;
-    box-shadow:0 0 12px #00d1ff55, inset 0 -2px 0 #008fb1;
-  }
-  .roll-cta__actions .outline{
-    background:transparent; color:var(--text);
-    border:1px solid #0e3a4f; box-shadow: inset 0 0 0 1px #00d1ff22;
-  }
-  
-  /* -------- 7) AUTH -------- */
-  .auth-panel{ max-width:920px; margin:0 auto 8px; padding:0 20px }
-  .auth-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center }
-  .auth-row input{
-    padding:10px 12px; border-radius:12px;
-    border:1px solid rgba(255,255,255,.15);
-    background:#000; color:var(--text);
-  }
-  .auth-row button{
-    padding:10px 14px; border-radius:12px;
-    border:1px solid rgba(255,255,255,.2);
-    background:rgba(255,255,255,.08); color:var(--text);
-    cursor:pointer
-  }
-  .auth-row button.outline{ background:transparent }
-  
-  /* -------- 8) PEQUEÑAS UTILIDADES -------- */
-  .hidden{ display:none !important }
-  .text-center{ text-align:center }
-  .text-right{ text-align:right }
-  
-  /* -------- 9) RESPONSIVE SUAVE -------- */
-  @media (max-width:600px){
-    :root{ --chat-h:50vh }
-    .composer{ flex-wrap:wrap }
-    .composer button{ flex:1 1 80px }
-  }
+  --chat-h:60vh;
+  --chat-min:420px;
 
-  /* Botón "Enviar" plano (sin degradado ni relieve) */
-#send{
-    background: var(--holo);        /* color liso */
-    color: #fff;                 /* buen contraste sobre el holo */
-    border: 1px solid var(--holo-soft);
-    box-shadow: none;               /* sin brillo ni relieve */
-    transform: none;                /* sin “aplastado” al click */
-  }
-  
-  #send:hover{
-    filter: none;
-    background: #3a86dd;           /* tono un pelín más oscuro al hover */
-  }
-  
-  #send:active{
-    transform: none;
-  }
-  
-    /* Botón "Tirar dados" plano (sin degradado ni relieve) */
+  /* viewport seguro en móviles */
+  --vh: 100vh;
+}
+@supports (height: 100svh) { :root{ --vh: 100svh; } }
+@supports (height: 100dvh) { :root{ --vh: 100dvh; } }
+
+*{ box-sizing:border-box }
+
+html, body{
+  height:100%;
+  overflow:hidden;            /* solo scrollean #chat y #admin-settings */
+  overscroll-behavior:none;
+}
+
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 800px at 20% -10%, #102136 0%, transparent 60%),
+    radial-gradient(800px 600px at 110% 20%, #0b1a2a 0%, transparent 55%),
+    var(--bg);
+  min-height:var(--vh);
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  -webkit-text-size-adjust:100%;
+}
+
+a,button{ transition:.15s ease all }
+strong{ font-weight:600 }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+
+/* Estrellas sutiles */
+body::before{
+  content:"";
+  position:fixed; inset:0; pointer-events:none; opacity:.28;
+  background:
+    radial-gradient(2px 2px at 20% 30%, #fff8 70%, transparent 71%) repeat,
+    radial-gradient(1px 1px at 70% 60%, #fff6 70%, transparent 71%) repeat;
+  background-size: 400px 300px, 300px 200px;
+  animation: twinkle 12s linear infinite;
+}
+@keyframes twinkle{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(8px) } }
+
+/* -------- 2) HEADER / FOOTER -------- */
+.app-header,.app-footer{ padding:16px 20px }
+.app-header h1{ margin:0 0 4px 0; font-size:20px; text-shadow:0 0 18px #ffe81f33 }
+.muted{ opacity:.8; color:var(--muted); font-size:13px }
+.app-footer{ display:none }  /* pedido explícito */
+
+/* Badge */
+.badge{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:4px 10px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.06);
+}
+
+/* -------- 3) LAYOUT PRINCIPAL -------- */
+.chat-wrap{
+  max-width:920px; margin:0 auto; padding:0 20px;
+  display:flex; flex-direction:column; min-height:0; flex:1 1 auto; overflow:hidden;
+}
+
+/* Las pantallas que scrollean (chat y settings) */
+#chat,
+#admin-settings{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;               /* único scroll de la app */
+  -webkit-overflow-scrolling:touch;
+  height:var(--chat-h);
+  min-height:var(--chat-min);
+  background:var(--surface);
+  border:1px solid var(--holo);
+  border-radius:var(--radius);
+  padding:12px;
+  box-shadow:var(--shadow);
+}
+
+/* -------- 4) BARRA DE IDENTIDAD -------- */
+.identity-bar{ margin:4px 0 8px 0 }
+.identity-bar .id-row{
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+}
+.identity-bar .id-left{ display:flex; align-items:baseline; gap:12px; flex:1; min-width:0 }
+.identity-bar .id-user{ font-size:20px; font-weight:600; letter-spacing:.02em }
+.identity-bar .id-char{ color:var(--muted); font-size:13px; margin-left:8px; opacity:.9 }
+.identity-bar .logout-btn,
+.identity-bar .settings-btn{
+  display:flex; align-items:center; justify-content:center;
+  height:28px; min-width:28px; padding:0 8px; flex-shrink:0;
+  border-radius:10px; border:1px solid rgba(255,255,255,.25);
+  background:transparent; color:inherit; cursor:pointer;
+}
+.identity-bar .logout-btn:hover,
+.identity-bar .settings-btn:hover{ border-color:rgba(255,255,255,.45) }
+@media (max-width:768px){
+  .identity-bar{ display:block }
+  .identity-bar .logout-btn,.identity-bar .settings-btn{ height:26px; min-width:26px; padding:0 6px }
+}
+
+/* -------- 5) MENSAJES -------- */
+.msg{
+  margin:8px 0; padding:8px 10px; border-radius:12px; line-height:1.35;
+  background:linear-gradient(180deg, #07131f, #060e18);
+  border:1px solid #0c3142;
+  box-shadow: inset 0 0 0 1px #00d1ff14, 0 0 0 1px #001018;
+  position:relative; overflow:hidden;
+}
+.msg::after{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:repeating-linear-gradient(to bottom, #00d1ff06 0 2px, transparent 2px 4px);
+}
+.msg.user{
+  background:#000; border:1px solid #ffffff90; box-shadow: inset 0 0 0 1px #ffffff22;
+}
+.msg.dm{
+  background:#000; border:1px solid var(--holo-light); box-shadow: inset 0 0 0 1px var(--holo-soft);
+}
+.msg .meta{ opacity:.6; font-size:12px; margin-bottom:2px }
+
+/* -------- 6) COMPOSER -------- */
+.composer{ display:flex; gap:8px; margin:10px 0 16px; flex:0 0 auto; padding-bottom:calc(env(safe-area-inset-bottom, 0px)) }
+.composer input{
+  flex:1; padding:10px 12px; border-radius:12px;
+  border:1px solid #10344a; background:#07131f; color:var(--text);
+  box-shadow: inset 0 0 0 1px #00d1ff10; font-size:16px;  /* anti-zoom iOS */
+}
+.composer input::placeholder{ color:#9db1c4aa }
+.composer button{
+  padding:10px 14px; border-radius:12px;
+  border:1px solid rgba(255,255,255,.2);
+  background:linear-gradient(90deg, #7af0ff, var(--holo));
+  color:#00141a; cursor:pointer; font-weight:700;
+  box-shadow:0 0 12px #00d1ff77, inset 0 -2px 0 #008fb1;
+}
+.composer button:hover{ filter:brightness(1.05) }
+
+/* Botones planos solicitados */
+#send,
 #resolve-btn{
-    background: var(--holo);        /* color liso */
-    color: #fff;                 /* buen contraste sobre el holo */
-    border: 1px solid var(--holo-soft);
-    box-shadow: none;               /* sin brillo ni relieve */
-    transform: none;                /* sin “aplastado” al click */
-  }
-  
-  #resolve-btn:hover{
-    filter: none;
-    background: #3a86dd;           /* tono un pelín más oscuro al hover */
-  }
-  
-  #resolve-btn:active{
-    transform: none;
-  }
+  background:var(--holo); color:#fff; border:1px solid var(--holo-soft);
+  box-shadow:none; transform:none;
+}
+#send:hover,#resolve-btn:hover{ background:#3a86dd; filter:none }
+#send:active,#resolve-btn:active{ transform:none }
 
-  /* Estados de auth (presentación) */
-body.is-guest #guest-card { display: block; }
+/* -------- 7) CTA TIRADA -------- */
+.roll-cta{
+  display:flex; gap:12px; align-items:center; justify-content:space-between;
+  margin:10px 0; padding:10px 12px;
+  border:1px solid rgba(255,255,255,.2);
+  border-radius:12px;
+  background:linear-gradient(180deg, #0b1624aa, #09121eaa);
+  backdrop-filter:blur(12px);
+  box-shadow:0 10px 40px #0008, 0 0 0 1px #0d2a38 inset;
+}
+.roll-cta.hidden{ display:none }
+.roll-cta__actions button{
+  padding:8px 12px; border-radius:10px;
+  border:1px solid rgba(255,255,255,.2);
+  background:linear-gradient(90deg, #7af0ff, var(--holo));
+  color:#00141a; cursor:pointer; font-weight:700;
+  box-shadow:0 0 12px #00d1ff55, inset 0 -2px 0 #008fb1;
+}
+.roll-cta__actions .outline{
+  background:transparent; color:var(--text);
+  border:1px solid #0e3a4f; box-shadow: inset 0 0 0 1px #00d1ff22;
+}
+
+/* -------- 8) AUTH / MODO INVITADO -------- */
+.auth-panel{ max-width:920px; margin:0 auto 8px; padding:0 20px }
+.auth-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+.auth-row input{
+  padding:10px 12px; border-radius:12px;
+  border:1px solid rgba(255,255,255,.15);
+  background:#000; color:var(--text);
+}
+.auth-row button{
+  padding:10px 14px; border-radius:12px;
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.08); color:var(--text);
+  cursor:pointer
+}
+.auth-row button.outline{ background:transparent }
+
+body.is-guest #guest-card { display:block }
 body.is-guest #chat,
 body.is-guest .composer,
 body.is-guest #roll-cta,
-body.is-guest #confirm-cta { display: none; }
+body.is-guest #confirm-cta { display:none }
+body.is-logged #guest-card { display:none }
 
-body.is-logged #guest-card { display: none; }
-
-/* Detalles visuales de la tarjeta (opcional, usa tus tokens) */
-#guest-card .guest-info{
+/* Tarjeta de invitado con vídeo de fondo */
+#guest-card{
   border:1px solid var(--holo);
   background:var(--surface);
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:18px 20px;
   max-width:760px;
-  margin:16px auto 0 auto;
+  margin:16px auto 0;
   text-align:center;
+  position:relative; overflow:hidden;
 }
 #guest-card .guest-title{
-  margin:0 0 6px 0;
-  letter-spacing:.12em;
-  font-weight:700;
-  color:var(--holo);
+  margin:0 0 6px 0; letter-spacing:.12em; font-weight:700; color:var(--holo);
 }
-/* ===== Tamaño fijo de inputs/botones SOLO en pantalla inicial (guest) ===== */
-body.is-guest #guest-card { --field-h: 46px; }    /* altura uniforme */
-@media (max-width: 700px) {
-  body.is-guest #guest-card { --field-h: 44px; }  /* un poco más compacto en móvil */
-}
-
-body.is-guest #guest-card .auth-row input,
-body.is-guest #guest-card .auth-row button {
-  height: var(--field-h);
-  min-height: var(--field-h);
-  max-height: var(--field-h);
-  line-height: calc(var(--field-h) - 2px); /* ajusta por el borde */
-  padding: 0 14px;                         /* sin padding vertical para no crecer */
-  box-sizing: border-box;
-  font-size: 16px;                         /* evita auto-zoom de iOS */
-  -webkit-appearance: none;
-     -moz-appearance: none;
-          appearance: none;
-}
-
-/* Mantener centrado y con buen ancho */
-body.is-guest #guest-card .auth-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  width: 100%;
-  max-width: 900px;
-  margin: 20px auto 0;
-}
-
-body.is-guest #guest-card .auth-row input { flex: 0 1 260px; }
-body.is-guest #guest-card .auth-row button { flex: 0 0 auto; padding-inline: 20px; }
-
-/* En móvil: apilado, pero con la misma altura fija */
-@media (max-width: 700px) {
-  body.is-guest #guest-card .auth-row { flex-direction: column; max-width: 480px; gap: 10px; }
-  body.is-guest #guest-card .auth-row input,
-  body.is-guest #guest-card .auth-row button { width: 100%; }
-}
-
-/* ===== Layout fijo: sin scroll global; solo scrollea el chat ===== */
-html, body {
-  height: 100%;
-  overflow: hidden;                 /* <- bloquea scroll de página */
-}
-
-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;                /* asegura cubrir viewport */
-  -webkit-text-size-adjust: 100%;   /* iOS: evita “reflow” raro */
-}
-
-/* Contenedor principal: ocupa el alto disponible y NO scrollea */
-main.chat-wrap {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;                 /* <- nada de scroll aquí */
-  min-height: 0;                    /* clave para que el hijo (#chat) pueda overflow:auto */
-}
-
-/* Solo el timeline del chat scrollea */
-#chat {
-  flex: 1 1 auto;
-  overflow-y: auto;                 /* <- único scroll de la app */
-  -webkit-overflow-scrolling: touch;/* scroll suave en iOS */
-  min-height: 0;
-}
-
-/* Elementos bajo el chat permanecen fijos */
-#roll-cta,
-#confirm-cta,
-.composer {
-  flex: 0 0 auto;
-}
-
-/* ===== Modo invitado: sin chat y sin scroll ===== */
-body.is-guest #chat { display: none; }
-body.is-guest main.chat-wrap { overflow: hidden; }
-
-/* ===== Anti-zoom en inputs (móvil) ===== */
-/* Ya lo aplicamos en la pantalla guest; añadimos para el composer del chat */
-.composer input {
-  font-size: 16px;                  /* iOS no hace zoom con >=16px */
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-/* (Por si usas inputs en otros CTAs dentro del chat) */
-input[type="text"],
-input[type="number"],
-input[type="password"],
-textarea {
-  font-size: 16px;
-}
-
-/* ===== Solo el chat scrollea; el resto fijo en todos los breakpoints ===== */
-
-/* El documento no scrollea */
-html, body {
-  height: 100%;
-  overflow: hidden;                  /* bloquea scroll global */
-  overscroll-behavior: none;         /* sin 'bounce' en iOS/Android */
-}
-
-/* Altura exacta del viewport en móviles con barras dinámicas */
-:root { --vh: 100vh; }
-@supports (height: 100svh) { :root { --vh: 100svh; } }
-@supports (height: 100dvh) { :root { --vh: 100dvh; } }
-
-body {
-  height: var(--vh);
-  min-height: var(--vh);
-  display: grid;                     /* header / main / footer fijos */
-  grid-template-rows: auto 1fr auto;
-  -webkit-text-size-adjust: 100%;
-  margin: 0;
-}
-
-/* Contenedor principal no scrollea: solo su hijo #chat */
-main.chat-wrap {
-  min-height: 0;                     /* <- clave para que #chat pueda overflow */
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-/* El ÚNICO scroll de la app */
-#chat {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 0;
-  -webkit-overflow-scrolling: touch; /* scroll suave en iOS */
-  overscroll-behavior: contain;
-}
-
-/* CTA/Composer pegados sin provocar scroll global */
-#roll-cta, #confirm-cta, .composer { flex: 0 0 auto; }
-
-/* Safe area en el pie y el composer para iOS */
-.app-footer, .composer {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px));
-}
-
-/* Modo invitado: sin chat y sin scroll */
-body.is-guest #chat { display: none; }
-body.is-guest main.chat-wrap { overflow: hidden; }
-
-/* Anti-zoom de inputs (móvil) */
-.composer input,
-body.is-guest #guest-card .auth-row input {
-  font-size: 16px;                   /* evita zoom al enfocar */
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-/* =========================
-   Mobile tweaks (<= 768px)
-   ========================= */
-   @media (max-width: 768px){
-    /* 1) Más aire lateral en el chat */
-    .chat-wrap{
-      padding-left: 8px;
-      padding-right: 8px;
-  
-      /* 2) Que el área de chat aproveche la altura disponible */
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;         /* fallback genérico */
-    }
-  
-    /* Mejora para móviles modernos (evita el bug de la barra del navegador) */
-    @supports (height: 100svh){
-      .chat-wrap{ min-height: 100svh; }
-    }
-  
-    /* 3) El contenedor del log de mensajes crece para ocupar el espacio libre */
-    .chat{
-      flex: 1 1 auto;            /* crece verticalmente */
-      height: auto;              /* ignora el height fijo */
-      min-height: 0;             /* evita forzar altura mínima en pantallas pequeñas */
-    }
-  }
-  /* ===== Quitar el footer en todos los dispositivos ===== */
-.app-footer { display: none; }
-
-/* ===== Versión mobile: más alto y con padding lateral ===== */
-@media (max-width: 768px){
-  /* Estructura flexible para que <main> ocupe la altura libre del viewport */
-  body{
-    display:flex;
-    flex-direction:column;
-    min-height:100vh;
-  }
-  @supports (height: 100svh){
-    body{ min-height:100svh; }
-  }
-
-  /* El contenedor del chat ocupa todo el espacio disponible */
-  .chat-wrap{
-    flex:1 1 auto;
-    display:flex;
-    flex-direction:column;
-    padding-left:8px;
-    padding-right:8px;
-    padding-bottom:0px;
-  }
-
-  /* El log de mensajes crece (sin height fijo) */
-  .chat{
-    flex:1 1 auto;
-    height:auto;   /* sobrescribe el 60vh */
-    min-height:0;  /* evita overflow en pantallas pequeñas */
-  }
-
-  /* Un poco de aire seguro para iOS/Android */
-  .composer{
-    padding-bottom: max(0px, env(safe-area-inset-bottom));
-  }
-  #send{
-    flex: 0 0 auto;           /* NO crecer en flex */
-    width: auto !important;   /* ancho según contenido */
-    min-width: 0 !important;  /* anula min-width global si lo hubiera */
-    padding: 8px 14px;        /* reduce padding horizontal */
-    font-size: 14px;          /* (opcional) más compacto */
-  }
-}
-/* ===== Barra de identidad (usuario + personaje) ===== */
-.identity-bar{ margin:4px 0 8px 0; }
-
-.identity-bar .id-row{
-  display:flex; gap:12px; align-items:baseline;
-}
-.identity-bar .id-user{
-  /* mismo estilo visual que el título (GALACTIC) */
-  font-size:20px; font-weight:600; letter-spacing:.02em;
-}
-.identity-bar .id-char{
-  color: var(--muted);       /* gris del sistema */
-  font-size: 13px;
-  margin-left: 8px;          /* separación respecto al usuario */
-  opacity: .9;               /* un pelín más marcado que .muted por si acaso */
-}
-
-/* mobile: respeta el padding lateral que pusimos al chat */
-@media (max-width:768px){
-  .identity-bar{ margin-left:0; margin-right:0;display:block}
-}
-/* ===== Mobile: ocultar título y descripción del header ===== */
-@media (max-width: 768px){
-  .app-header h1,
-  .app-header .muted { 
-    display: none;
-  }
-  .app-header{
-    padding-top: 16px;
-    padding-bottom: 16px; }
-}
-
-/* ===== Identity bar: layout + botón salir ===== */
-.identity-bar .id-row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between; /* nombres a la izq, botón a la dcha */
-  gap:12px;
-  flex-wrap:wrap;
-}
-.identity-bar .id-left{
-  display:flex;
-  align-items:baseline;
-  gap:12px;
-  flex:1;
-  min-width:0;
-}
-.identity-bar .logout-btn,
-.identity-bar .settings-btn{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  flex-shrink:0;
-  height:28px;            /* aprox. misma altura visual que la barra */
-  min-width:28px;
-  padding:0 8px;
-  border-radius:10px;
-  border:1px solid rgba(255,255,255,.25);
-  background:transparent;
-  color:inherit;
-  cursor:pointer;
-}
-.identity-bar .logout-btn:hover,
-.identity-bar .settings-btn:hover{
-  border-color: rgba(255,255,255,.45);
-}
-@media (max-width:768px){
-  .identity-bar .logout-btn,
-  .identity-bar .settings-btn{
-    height:26px;
-    min-width:26px;
-    padding:0 6px;
-  }
-}
-
-
-/* ===== Video de fondo para la tarjeta de invitado (#guest-card) ===== */
-#guest-card{
-  position: relative;
-  overflow: hidden;                 /* respeta bordes y recorta exceso */
-}
-
-#guest-card{ position:relative; overflow:hidden; }
 #guest-card .guest__bg{
-  position:absolute; inset:0;
-  width:100%; height:100%;
+  position:absolute; inset:0; width:100%; height:100%;
   object-fit:cover; object-position:50% 50%;
-  z-index:0; pointer-events:none;
-  opacity:.25;                /* ← 60% */
-  background:#000;
+  z-index:0; pointer-events:none; opacity:.25; background:#000;
 }
-#guest-card > *:not(.guest__bg){ position:relative; z-index:1; }
+#guest-card > *:not(.guest__bg){ position:relative; z-index:1 }
+@media (prefers-reduced-motion: reduce){ #guest-card .guest__bg{ display:none } }
 
-/* Asegura que el contenido quede por encima del vídeo */
-#guest-card > *:not(.guest__bg){ position: relative; z-index: 1; }
-
-/* Respeta reducción de movimiento */
-@media (prefers-reduced-motion: reduce){
-  #guest-card .guest__bg{ display: none; }
+/* Tamaño fijo inputs/botón en guest */
+body.is-guest #guest-card { --field-h:46px }
+@media (max-width:700px){ body.is-guest #guest-card { --field-h:44px } }
+body.is-guest #guest-card .auth-row{
+  display:flex; align-items:center; justify-content:center; gap:14px;
+  width:100%; max-width:900px; margin:20px auto 0;
+}
+body.is-guest #guest-card .auth-row input,
+body.is-guest #guest-card .auth-row button{
+  height:var(--field-h); min-height:var(--field-h); max-height:var(--field-h);
+  line-height:calc(var(--field-h) - 2px); padding:0 14px; font-size:16px;
+  -webkit-appearance:none; appearance:none;
+}
+body.is-guest #guest-card .auth-row input{ flex:0 1 260px }
+body.is-guest #guest-card .auth-row button{ flex:0 0 auto; padding-inline:20px }
+@media (max-width:700px){
+  body.is-guest #guest-card .auth-row{ flex-direction:column; max-width:480px; gap:10px }
+  body.is-guest #guest-card .auth-row input,
+  body.is-guest #guest-card .auth-row button{ width:100% }
 }
 
-/* ===== Admin panel ===== */
-.tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+/* -------- 9) ADMIN (Settings) -------- */
+.tabs{
+  display:flex; gap:8px; align-items:center;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  padding-bottom:8px; margin-bottom:12px;
+  position:sticky; top:0; z-index:5; background:var(--surface);
 }
-.tabs .tab.active {
-  font-weight: bold;
+.tab{
+  padding:6px 10px; border-radius:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background:transparent; cursor:pointer;
+}
+.tab.active{ background:rgba(255,255,255,.06); font-weight:600 }
+
+.table{ width:100%; border-collapse:collapse }
+.table th,.table td{ padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08); text-align:left }
+.table button{
+  border:1px solid rgba(255,255,255,.12); background:transparent;
+  padding:6px 10px; border-radius:8px; cursor:pointer; margin-right:8px;
+}
+.table button:hover{ background:rgba(255,255,255,.06) }
+#admin-close.outline{
+  border:1px solid rgba(255,255,255,.12); background:transparent;
+  padding:6px 12px; border-radius:10px; align-self:flex-start;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
+/* -------- 10) Spinner para botones .loading -------- */
+button.loading{
+  position:relative; text-indent:-9999px; overflow:hidden;
 }
-.table th,
-.table td {
-  padding: 4px 8px;
-  border: 1px solid #0e3a4f;
+button.loading::after{
+  content:""; position:absolute; inset:0; margin:auto;
+  width:1.1em; height:1.1em;
+  border:2px solid currentColor; border-right-color:transparent;
+  border-radius:50%; animation: sw-spin .6s linear infinite;
 }
-.table th {
-  text-align: left;
+@keyframes sw-spin{ to{ transform:rotate(360deg) } }
+
+/* -------- 11) RESPONSIVE -------- */
+@media (max-width:768px){
+  /* más aire y altura fluida del área scroll */
+  .chat-wrap{ padding-left:8px; padding-right:8px; min-height:var(--vh) }
+  #chat, #admin-settings{ height:auto; min-height:0 }
+  .composer{ padding-bottom:max(0px, env(safe-area-inset-bottom)) }
+  #send{ flex:0 0 auto; width:auto !important; min-width:0 !important; padding:8px 14px; font-size:14px }
+  /* Ocultar título/desc header en móvil */
+  .app-header h1, .app-header .muted{ display:none }
+  .app-header{ padding-top:16px; padding-bottom:16px }
 }
