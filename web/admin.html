@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Admin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <h1>Panel de administración</h1>
+    <section id="login-section">
+      <input id="admin-user" placeholder="Usuario" />
+      <input id="admin-pin" placeholder="PIN" maxlength="4" inputmode="numeric" />
+      <button id="admin-login">Entrar</button>
+      <span id="admin-status" class="muted"></span>
+    </section>
+    <section id="admin-panel" hidden>
+      <h2>Usuarios</h2>
+      <ul id="users-list"></ul>
+    </section>
+    <script type="module" src="./admin.js"></script>
+  </body>
+</html>

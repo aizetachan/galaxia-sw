@@ -55,6 +55,23 @@
       <!-- Chat real (se muestra solo cuando hay sesión) -->
       <section id="chat" class="chat"></section>
 
+      <!-- Panel de administración (se muestra al abrir ajustes) -->
+      <section id="admin-section" class="chat hidden" hidden>
+        <div class="id-row" style="margin-bottom:8px">
+          <button id="admin-close" class="outline" type="button">← Volver</button>
+        </div>
+        <section id="login-section">
+          <input id="admin-user" placeholder="Usuario" />
+          <input id="admin-pin" placeholder="PIN" maxlength="4" inputmode="numeric" />
+          <button id="admin-login">Entrar</button>
+          <span id="admin-status" class="muted"></span>
+        </section>
+        <section id="admin-panel" hidden>
+          <h2>Usuarios</h2>
+          <ul id="users-list"></ul>
+        </section>
+      </section>
+
       <!-- CTA de tirada -->
       <section id="roll-cta" class="roll-cta hidden" aria-live="polite">
         <div class="roll-cta__text">
@@ -122,5 +139,7 @@
 
     <!-- App principal -->
     <script type="module" src="./main.js"></script>
+    <!-- Panel de administración -->
+    <script type="module" src="./admin.js"></script>
   </body>
 </html>
