@@ -2,13 +2,29 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-export const hasDb = !!process.env.DATABASE_URL;
+// Database connection options
+const {
+  DATABASE_URL,
+  PG_MAX = '10',
+  PG_IDLE_TIMEOUT = '30000',
+  PG_CONNECTION_TIMEOUT = '2000',
+} = process.env;
+
+export const hasDb = !!DATABASE_URL;
 
 export let pool = null;
 if (hasDb) {
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: DATABASE_URL,
+    max: parseInt(PG_MAX, 10),
+    idleTimeoutMillis: parseInt(PG_IDLE_TIMEOUT, 10),
+    connectionTimeoutMillis: parseInt(PG_CONNECTION_TIMEOUT, 10),
     ssl: { rejectUnauthorized: false },
+  });
+
+  // Log unexpected errors on the idle client
+  pool.on('error', (err) => {
+    console.error('PG pool error', err);
   });
 }
 
