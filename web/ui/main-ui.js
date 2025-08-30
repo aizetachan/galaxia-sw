@@ -18,30 +18,27 @@ if (!identityEl) {
   chatWrap?.insertBefore(identityEl, chatEl);
 }
 
-// Asegura mismo look que #chat y que arranque oculto
+/* === Garantiza mismo contenedor/ancho que el chat === */
+if (adminEl && chatWrap && adminEl.parentElement !== chatWrap) {
+  // mueve #admin-settings a .chat-wrap, justo detrás del chat
+  chatWrap.insertBefore(adminEl, chatEl.nextSibling);
+}
+// Igual look que el chat y oculto al inicio
 if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat');
 if (adminEl) { adminEl.hidden = true; adminEl.classList.add('hidden'); }
 
+/* === Botón "volver" dentro de settings === */
 if (adminCloseBtn) adminCloseBtn.onclick = () => {
-  // Cerrar settings → volver al chat (un solo contenedor visible)
-  adminEl.hidden = true; adminEl.classList.add('hidden');
-  chatEl.hidden = false; chatEl.classList.remove('hidden');
-  if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
-  if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
-  if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
+  closeSettings();
 };
 
+/* === Render de la barra de identidad === */
 export function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
 
-  // Si NO es settings, blinda: oculta panel y vuelve al chat
-  if (u && u !== 'settings') {
-    if (adminEl && !adminEl.hidden) {
-      adminEl.hidden = true; adminEl.classList.add('hidden');
-      chatEl.hidden = false; chatEl.classList.remove('hidden');
-    }
-  }
+  // Si NO es settings, cierra el panel si estuviera abierto
+  if (u && u !== 'settings') closeSettings();
 
   if (!u || isGuest){
     identityEl.classList.add('hidden');
@@ -70,7 +67,13 @@ export function setIdentityBar(userName, characterName){
 
   const _settingsBtn = identityEl.querySelector('#settings-btn');
   if (_settingsBtn) _settingsBtn.onclick = () => {
-    // Abrir Settings (solo existe el botón si u === 'settings')
+    // TOGGLE: si está abierto, cerrar; si está cerrado, abrir
+    const isOpen = adminEl && !adminEl.hidden;
+    if (isOpen) {
+      closeSettings();
+      return;
+    }
+    // Abrir settings
     prevState.composer = !!composerEl?.hidden;
     prevState.roll = !!rollCtaEl?.hidden;
     prevState.confirm = !!confirmCtaEl?.hidden;
@@ -104,6 +107,16 @@ export function updateAuthUI(){
     card.classList.toggle('hidden', !!logged);
     card.style.display = logged ? 'none' : '';
   }
+}
+
+/* === Helpers === */
+function closeSettings(){
+  if (!adminEl) return;
+  adminEl.hidden = true; adminEl.classList.add('hidden');
+  chatEl.hidden = false; chatEl.classList.remove('hidden');
+  if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
+  if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
+  if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
 }
 
 // Simple HTML escaper reused from main

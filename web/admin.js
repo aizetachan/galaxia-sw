@@ -38,7 +38,6 @@ async function handleLogin() {
     });
     setAuth({ token, user });
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
-    // Si el panel está abierto y somos admin, pasar a Usuarios sin pedir más.
     if (!document.getElementById('admin-settings')?.hidden && user?.username === 'settings') {
       loginSectionEl.hidden = true;
       panelEl.hidden = false;
@@ -116,19 +115,17 @@ async function editUser(u) {
 if (loginBtn) loginBtn.addEventListener('click', handleLogin);
 if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
 
-// Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'settings'.
-// Si no es admin, ignoramos el evento (no se muestra login interno).
+// Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'settings'
 document.addEventListener('admin-open', async () => {
   await ensureApiBase();
   const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
-  if (!isAdmin) return; // ignorar si no es settings
-
+  if (!isAdmin) return;
   loginSectionEl.hidden = true;
   panelEl.hidden = false;
   showTab('users');
 });
 
-// Si cambia el estado de auth mientras el panel está abierto, sincroniza la vista.
+// Si cambia el estado de auth mientras el panel está abierto, sincroniza
 listenAuthChanges(async () => {
   const open = !document.getElementById('admin-settings')?.hidden;
   if (!open) return;
@@ -138,13 +135,12 @@ listenAuthChanges(async () => {
     panelEl.hidden = false;
     showTab('users');
   } else {
-    // Si dejó de ser admin mientras estaba abierto, no mostramos login interno.
     loginSectionEl.hidden = true;
     panelEl.hidden = true;
   }
 });
 
-// Init: solo asegurar API_BASE; sin auto-abrir ni tocar la sesión global.
+// Init: solo asegurar API_BASE
 (async function init(){
   try { await ensureApiBase(); } catch {}
 })();
