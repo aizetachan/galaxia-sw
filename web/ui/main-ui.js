@@ -61,7 +61,7 @@ export function setIdentityBar(userName, characterName){
     if (rollCtaEl) { rollCtaEl.hidden = true; }
     if (confirmCtaEl) { confirmCtaEl.hidden = true; }
     document.dispatchEvent(new Event('admin-open'));
-  };
+  };  
   identityEl.classList.remove('hidden');
 }
 

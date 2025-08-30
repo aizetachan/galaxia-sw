@@ -92,6 +92,7 @@ export function requireAdmin(req,res,next){
   return res.status(403).json({ error:'forbidden' });
 }
 
+
 export async function listUsers(){
   if(!hasDb){
     return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
