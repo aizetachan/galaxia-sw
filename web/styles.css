@@ -29,9 +29,17 @@
 
 html, body{
   height:100%;
-  overflow:hidden;                 /* solo scrollean #chat y #admin-settings */
   overscroll-behavior:none;
 }
+/* Home (sin login): scroll normal; con sesión (chat/settings) bloqueamos el body */
+body{
+  overflow-x:hidden;
+  overflow-y:auto;
+}
+body.is-logged{
+  overflow:hidden;                 /* solo cuando hay sesión el scroll se traslada al panel */
+}
+
 
 body{
   margin:0;

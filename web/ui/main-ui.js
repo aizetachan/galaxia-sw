@@ -20,7 +20,6 @@ if (!identityEl) {
 
 /* === Garantiza mismo contenedor/ancho que el chat === */
 if (adminEl && chatWrap && adminEl.parentElement !== chatWrap) {
-  // mueve #admin-settings a .chat-wrap, justo detrás del chat
   chatWrap.insertBefore(adminEl, chatEl.nextSibling);
 }
 // Igual look que el chat y oculto al inicio
@@ -28,9 +27,7 @@ if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat'
 if (adminEl) { adminEl.hidden = true; adminEl.classList.add('hidden'); }
 
 /* === Botón "volver" dentro de settings === */
-if (adminCloseBtn) adminCloseBtn.onclick = () => {
-  closeSettings();
-};
+if (adminCloseBtn) adminCloseBtn.onclick = () => closeSettings();
 
 /* === Render de la barra de identidad === */
 export function setIdentityBar(userName, characterName){
@@ -61,6 +58,8 @@ export function setIdentityBar(userName, characterName){
   const _logoutBtn = identityEl.querySelector('#logout-btn');
   if (_logoutBtn) _logoutBtn.onclick = async () => {
     await handleLogout();
+    // 🔒 Cierra el panel de settings si estaba abierto
+    closeSettings();
     setIdentityBar('', '');
     updateAuthUI();
   };
