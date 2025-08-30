@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { hasDb, sql } from './db.js';
 import { optionalAuth } from './auth.js';
+import { userLightNotes, userThreadSummary, userTurnCount } from './memory.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -128,10 +129,6 @@ const LIGHT_NOTES_MAX = 20;
 const THREAD_SUMMARY_MAX_LEN = 1000;
 const SUMMARY_EVERY_TURNS = Number(process.env.SUMMARY_EVERY_TURNS ?? 6);
 const SUMMARY_HISTORY_TRIGGER = Number(process.env.SUMMARY_HISTORY_TRIGGER ?? 40);
-
-const userLightNotes = new Map();     // userId -> string[]
-const userThreadSummary = new Map();  // userId -> string
-const userTurnCount = new Map();      // userId -> number
 
 function getNotes(userId){ return userLightNotes.get(userId) || []; }
 function setNotes(userId, notes){

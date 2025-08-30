@@ -1,6 +1,7 @@
 // server/auth.js
 import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHash } from 'crypto';
 import { hasDb, sql } from './db.js';
+import { mem } from './memory.js';
 
 const now = () => new Date();
 const addDays = (d) => new Date(Date.now() + d * 24 * 60 * 60 * 1000);
@@ -12,7 +13,7 @@ function hashPinV2(pin){ const salt=randomBytes(16).toString('hex'); const key=s
 function verifyPinV2(pin, stored){ const parts=String(stored).split(':'); if(parts.length!==3||parts[0]!=='v2')return false; const[,salt,keyHex]=parts; const a=Buffer.from(keyHex,'hex'); const b=Buffer.from(scryptSync(String(pin),salt,64).toString('hex'),'hex'); return a.length===b.length && timingSafeEqual(a,b); }
 function hashPinLegacy(username,pin){ return createHash('sha256').update(`${username}:${pin}`).digest('hex'); }
 
-const mem={ users:new Map(), sessions:new Map() }; let memId=1;
+let memId=1;
 
 async function dbFindUserByUsername(username){ if(!hasDb) return mem.users.get(username)||null;
   const {rows}=await sql(`SELECT id,username,pin_hash,created_at FROM users WHERE username=$1 LIMIT 1`,[username]); return rows[0]||null; }
