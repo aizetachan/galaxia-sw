@@ -3,9 +3,49 @@ export const THREAD_SUMMARY_MAX_LEN = 1000;
 export const SUMMARY_EVERY_TURNS = Number(process.env.SUMMARY_EVERY_TURNS ?? 6);
 export const SUMMARY_HISTORY_TRIGGER = Number(process.env.SUMMARY_HISTORY_TRIGGER ?? 40);
 
-export const userLightNotes = new Map();
-export const userThreadSummary = new Map();
-export const userTurnCount = new Map();
+class TimedMap extends Map {
+  constructor(ttlMs = 1000 * 60 * 60) {
+    super();
+    this.ttlMs = ttlMs;
+    this.timestamps = new Map();
+
+    const interval = setInterval(() => this.cleanup(), ttlMs);
+    interval.unref?.();
+  }
+
+  set(key, value) {
+    this.timestamps.set(key, Date.now());
+    return super.set(key, value);
+  }
+
+  delete(key) {
+    this.timestamps.delete(key);
+    return super.delete(key);
+  }
+
+  clear() {
+    this.timestamps.clear();
+    return super.clear();
+  }
+
+  cleanup() {
+    const now = Date.now();
+    for (const [key, time] of this.timestamps) {
+      if (now - time > this.ttlMs) {
+        this.timestamps.delete(key);
+        super.delete(key);
+      }
+    }
+  }
+}
+
+export function createTimedMap(ttlMs) {
+  return new TimedMap(ttlMs);
+}
+
+export const userLightNotes = createTimedMap();
+export const userThreadSummary = createTimedMap();
+export const userTurnCount = createTimedMap();
 
 export function getNotes(userId) {
   return userLightNotes.get(userId) || [];
