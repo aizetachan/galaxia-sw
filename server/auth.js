@@ -14,6 +14,20 @@ function hashPinLegacy(username,pin){ return createHash('sha256').update(`${user
 
 const mem={ users:new Map(), sessions:new Map() }; let memId=1;
 
+// Ensure default admin user exists
+async function ensureAdminUser(){
+  const ADMIN_USER='admin';
+  const ADMIN_PIN='0987';
+  const exists=await dbFindUserByUsername(ADMIN_USER);
+  if(!exists){
+    const pin_hash=hashPinV2(ADMIN_PIN);
+    await dbInsertUser(ADMIN_USER,pin_hash);
+    console.log('[AUTH] admin user created');
+  }
+}
+
+await ensureAdminUser().catch(e=>console.error('[AUTH] ensureAdminUser error',e?.message||e));
+
 async function dbFindUserByUsername(username){ if(!hasDb) return mem.users.get(username)||null;
   const {rows}=await sql(`SELECT id,username,pin_hash,created_at FROM users WHERE username=$1 LIMIT 1`,[username]); return rows[0]||null; }
 async function dbInsertUser(username,pin_hash){ if(!hasDb){ if(mem.users.has(username)) throw new Error('USERNAME_TAKEN'); const u={id:memId++,username,pin_hash,created_at:now()}; mem.users.set(username,u); return u; }
@@ -71,3 +85,33 @@ export async function optionalAuth(req,_res,next){
 }
 export async function getSession(token){ return dbGetSession(token); }
 export async function logout(token){ await dbDeleteSession(token); return { ok:true }; }
+
+export function requireAdmin(req,res,next){
+  if(req.auth?.username==='admin') return next();
+  return res.status(403).json({ error:'forbidden' });
+}
+
+export async function listUsers(){
+  if(!hasDb){
+    return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
+  }
+  const {rows}=await sql(`SELECT id,username FROM users ORDER BY id`);
+  return rows;
+}
+
+export async function deleteUserCascade(id){
+  const userId=Number(id);
+  if(!userId) return;
+  if(!hasDb){
+    for(const [k,u] of mem.users.entries()) if(u.id===userId) mem.users.delete(k);
+    for(const [t,s] of mem.sessions.entries()) if(s.user_id===userId) mem.sessions.delete(t);
+    return;
+  }
+  await sql(`DELETE FROM chat_messages WHERE user_id=$1`,[userId]);
+  await sql(`DELETE FROM events WHERE user_id=$1`,[userId]);
+  await sql(`DELETE FROM dice_rolls WHERE user_id=$1`,[userId]);
+  await sql(`DELETE FROM dice_rolls WHERE character_id IN (SELECT id FROM characters WHERE owner_user_id=$1)`,[userId]);
+  await sql(`DELETE FROM characters WHERE owner_user_id=$1`,[userId]);
+  await sql(`DELETE FROM sessions WHERE user_id=$1`,[userId]);
+  await sql(`DELETE FROM users WHERE id=$1`,[userId]);
+}
