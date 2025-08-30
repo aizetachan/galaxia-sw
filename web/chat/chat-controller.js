@@ -49,6 +49,10 @@ function extractTopMeta(txt = '') {
   return { meta: null, rest };
 }
 
+function stripProtoTags(s = '') {
+  return String(s).replace(/<<[\s\S]*?>>/g, '');
+}
+
 export function handleIncomingDMText(rawText){
   let txt = String(rawText || '');
   pendingRoll = null;
@@ -73,6 +77,15 @@ export function handleIncomingDMText(rawText){
       save('sw:last_resume', meta.resume);
     }
   }
+
+  const rollTag = txt.match(/<<ROLL\s+SKILL="([^"]+)"(?:\s+REASON="([^"]*)")?\s*>>/i);
+  if (rollTag) {
+    const [, skill, reason] = rollTag;
+    pendingRoll = { ...(pendingRoll || {}), skill: skill.trim(), ...(reason ? { reason: reason.trim() } : {}) };
+    txt = txt.replace(rollTag[0], '').trim();
+  }
+
+  txt = stripProtoTags(txt).trim();
 
   if (txt) pushDM(txt);
 }
