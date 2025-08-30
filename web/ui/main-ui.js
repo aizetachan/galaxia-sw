@@ -26,6 +26,7 @@ export function setIdentityBar(userName, characterName){
       <div class="id-user">${escapeHtml(u)}</div>
       ${ c ? `<div class="id-char muted">— ${escapeHtml(c)}</div>` : '' }
     </div>
+    ${ u === 'admin' ? `<button id="settings-btn" class="settings-btn" title="Ajustes" aria-label="Ajustes">⚙</button>` : '' }
     <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
   </div>
 `;
@@ -34,6 +35,10 @@ export function setIdentityBar(userName, characterName){
     await handleLogout();
     setIdentityBar('', '');
     updateAuthUI();
+  };
+  const _settingsBtn = identityEl.querySelector('#settings-btn');
+  if (_settingsBtn) _settingsBtn.onclick = () => {
+    window.open('./admin.html', '_blank');
   };
   identityEl.classList.remove('hidden');
 }
