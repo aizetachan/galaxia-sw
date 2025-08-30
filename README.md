@@ -41,7 +41,7 @@ Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo I
   ├─ api/index.js       # Adaptador para Vercel (export default app)
   ├─ auth.js            # Registro/login por username + PIN (con fallback en memoria)
   ├─ dm.js              # “Máster” (IA). Construye prompts y responde /api/dm/respond
-  ├─ world.js           # Mundo vivo (personajes, eventos, estado…) [requiere Postgres]
+  ├─ world/             # Mundo vivo (personajes, eventos, estado…) [requiere Postgres]
   ├─ chat.js            # Historial del chat (si hay BD)
   ├─ db.js              # Conexión a Postgres (Neon). Fallback: sin BD.
   ├─ openai.js          # Ping a OpenAI (comprobación de credenciales)
@@ -254,7 +254,7 @@ El Máster narra **éxito/fallo** y consecuencias de forma breve y clara.
 - `POST /api/events`
 - `GET  /api/characters/:id/timeline`
 
-> **Esquema BD**: crear tablas `users`, `sessions`, `characters`, `character_state (+ _history)`, `events (+ event_targets, event_reads)`, `faction_memberships`, `chat_messages`. Tomar como referencia las consultas en `world.js`, `auth.js` y `chat.js`.
+> **Esquema BD**: crear tablas `users`, `sessions`, `characters`, `character_state (+ _history)`, `events (+ event_targets, event_reads)`, `faction_memberships`, `chat_messages`. Tomar como referencia las consultas en los módulos de `world/`, `auth.js` y `chat.js`.
 
 ---
 
