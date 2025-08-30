@@ -539,17 +539,21 @@ body.is-guest #guest-card .auth-row input {
   align-items:center;
   justify-content:space-between; /* nombres a la izq, botón a la dcha */
   gap:12px;
+  flex-wrap:wrap;
 }
 .identity-bar .id-left{
   display:flex;
   align-items:baseline;
   gap:12px;
+  flex:1;
+  min-width:0;
 }
 .identity-bar .logout-btn,
 .identity-bar .settings-btn{
   display:flex;
   align-items:center;
   justify-content:center;
+  flex-shrink:0;
   height:28px;            /* aprox. misma altura visual que la barra */
   min-width:28px;
   padding:0 8px;

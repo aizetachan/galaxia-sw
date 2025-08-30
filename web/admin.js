@@ -1,5 +1,5 @@
 import { API_BASE, joinUrl, ensureApiBase } from './api.js';
-import { AUTH, setAuth } from './auth/session.js';
+import { AUTH, setAuth, listenAuthChanges } from './auth/session.js';
 
 const userEl = document.getElementById('admin-user');
 const pinEl = document.getElementById('admin-pin');
@@ -7,6 +7,7 @@ const loginBtn = document.getElementById('admin-login');
 const statusEl = document.getElementById('admin-status');
 const panelEl = document.getElementById('admin-panel');
 const listEl = document.getElementById('users-list');
+const loginSectionEl = document.getElementById('login-section');
 
 function authHeaders() {
   const h = {};
@@ -36,7 +37,7 @@ async function handleLogin() {
     });
     setAuth({ token, user });
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
-    document.getElementById('login-section').hidden = true;
+    loginSectionEl.hidden = true;
     panelEl.hidden = false;
     await loadUsers();
   } catch (e) {
@@ -51,6 +52,10 @@ async function loadUsers() {
   users.forEach(u => {
     const li = document.createElement('li');
     li.textContent = `${u.id} - ${u.username} `;
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Editar';
+    editBtn.addEventListener('click', () => editUser(u));
+    li.appendChild(editBtn);
     const btn = document.createElement('button');
     btn.textContent = 'Eliminar';
     btn.addEventListener('click', () => deleteUser(u.id));
@@ -65,7 +70,29 @@ async function deleteUser(id) {
   await loadUsers();
 }
 
+async function editUser(u) {
+  const username = prompt('Nuevo nombre de usuario:', u.username);
+  if (username === null) return;
+  const pin = prompt('Nuevo PIN (opcional):', '');
+  await api(`/admin/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ username, pin: pin || undefined }) });
+  await loadUsers();
+}
+
 loginBtn.addEventListener('click', handleLogin);
+
+listenAuthChanges(async () => {
+  if (AUTH?.token && AUTH?.user?.username === 'admin') {
+    loginSectionEl.hidden = true;
+    panelEl.hidden = false;
+    try {
+      await loadUsers();
+    } catch {}
+  } else {
+    panelEl.hidden = true;
+    loginSectionEl.hidden = false;
+    listEl.innerHTML = '';
+  }
+});
 
 (async function init(){
   try{
@@ -73,7 +100,7 @@ loginBtn.addEventListener('click', handleLogin);
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     if(saved?.token && saved?.user?.username === 'admin'){
       setAuth(saved);
-      document.getElementById('login-section').hidden = true;
+      loginSectionEl.hidden = true;
       panelEl.hidden = false;
       await loadUsers();
     }

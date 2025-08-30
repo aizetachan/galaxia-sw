@@ -5,7 +5,7 @@ import cors from 'cors';
 import dmRouter from './dm.js';               // /respond, etc.
 import worldRouter from './world/index.js';   // /world/..., /characters/...
 import chatRouter from './chat.js';
-import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascade } from './auth.js';
+import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascade, updateUser } from './auth.js';
 
 const app = express();
 const api = express.Router();
@@ -113,6 +113,13 @@ api.post('/auth/logout', requireAuth, async (_req, res) => {
 api.get('/admin/users', requireAuth, requireAdmin, async (_req, res) => {
   const users = await listUsers();
   return res.json({ users });
+});
+
+api.put('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { username, pin } = req.body || {};
+  await updateUser(id, { username, pin });
+  return res.json({ ok: true });
 });
 
 api.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
