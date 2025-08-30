@@ -5,7 +5,7 @@ import cors from 'cors';
 import dmRouter from './dm.js';               // /respond, etc.
 import worldRouter from './world/index.js';   // /world/..., /characters/...
 import chatRouter from './chat.js';
-import { register, login, requireAuth } from './auth.js';
+import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascade } from './auth.js';
 
 const app = express();
 const api = express.Router();
@@ -107,6 +107,19 @@ api.post('/auth/logout', requireAuth, async (_req, res) => {
     console.error('[AUTH/logout] error', e);
     return res.status(500).json({ error: 'logout_failed' });
   }
+});
+
+/* ====== Admin ====== */
+api.get('/admin/users', requireAuth, requireAdmin, async (_req, res) => {
+  const users = await listUsers();
+  return res.json({ users });
+});
+
+api.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  if (Number(id) === req.auth.userId) return res.status(400).json({ error: 'cannot_delete_self' });
+  await deleteUserCascade(id);
+  return res.json({ ok: true });
 });
 
 /* ====== DM y World ====== */
