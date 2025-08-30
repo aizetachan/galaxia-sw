@@ -1,135 +1,6 @@
-// === DEBUG helpers ===
-const DEBUG = true;
-function dlog(...a) { if (DEBUG) console.log('[WEB]', ...a); }
-function dgroup(label, fn) {
-  if (!DEBUG) return fn?.();
-  console.groupCollapsed(label);
-  try { fn?.(); } finally { console.groupEnd(); }
-}
+import { dlog, dgroup, API_BASE, joinUrl, setServerStatus, probeHealth, ensureApiBase } from "./api.js";
+import { getDmMode, setDmMode, allowRollTagFallback, setRollTagFallback } from "./state.js";
 
-// ============================================================
-//               Config API (robusta, sin <meta>)
-// ============================================================
-const API_STORE_KEY = 'sw:api_base';
-const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
-
-function getMeta(name) {
-  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
-}
-function getQuery(name) {
-  try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
-}
-function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');
-  const p = String(path || '').replace(/^\/+/, '');
-  return `${b}/${p}`;
-}
-
-/* =========================
-   MODO DEL MÁSTER (ÚNICO)
-   ========================= */
-const DM_MODE_KEY = 'sw:dm_mode';
-const VALID_MODES = new Set(['fast','rich']);
-
-function getDmMode(){
-  const saved = (localStorage.getItem(DM_MODE_KEY) || '').toLowerCase();
-  return VALID_MODES.has(saved) ? saved : 'rich';
-}
-function setDmMode(mode){
-  const m = (String(mode||'').toLowerCase());
-  const next = VALID_MODES.has(m) ? m : 'rich';
-  localStorage.setItem(DM_MODE_KEY, next);
-  setServerStatus(true, `Server: OK — M: ${next}`);
-  pushDM(`Modo del Máster fijado a ${next}.`);
-  dlog('DM mode ->', next);
-}
-window.getDmMode = getDmMode;
-window.setDmMode = setDmMode;
-
-/* =========== Roll tags fallback =========== */
-function asBool(v, def = true) {
-  if (v == null || v === '') return def;
-  const s = String(v).toLowerCase();
-  return !['0','false','no','off','nope'].includes(s);
-}
-const adminPref = localStorage.getItem('sw:cfg:rolltags');
-let allowRollTagFallback = asBool(adminPref ?? getQuery('rolltags'), true);
-window.allowRollTagFallback = allowRollTagFallback;
-window.setRollTagFallback = (on) => {
-  allowRollTagFallback = asBool(on, true);
-  localStorage.setItem('sw:cfg:rolltags', allowRollTagFallback ? '1':'0');
-  pushDM(`Fallback de etiquetas de tirada ${allowRollTagFallback ? 'activado' : 'desactivado'}.`);
-};
-
-let API_BASE =
-  (typeof window !== 'undefined' && window.API_BASE) ||
-  getMeta('api-base') ||
-  (typeof location !== 'undefined' ? (location.origin + '/api') : '') ||
-  DEFAULT_API_BASE;
-
-function setServerStatus(ok, msg) {
-  const el = document.getElementById('server-status');
-  if (!el) return;
-  const label = ok ? (msg || `Server: OK — M: ${getDmMode()}`) : (msg || 'Server: FAIL');
-  el.textContent = label;
-  el.classList.toggle('ok', !!ok);
-  el.classList.toggle('bad', !ok);
-}
-
-async function probeHealth(base) {
-  const url = joinUrl(base, '/health');
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
-  try {
-    const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
-    const ct = r.headers.get('content-type') || '';
-    const txt = await r.text();
-    dlog('probe', { base, status: r.status, ct });
-    if (!r.ok) return { ok: false, reason: `HTTP ${r.status}`, text: txt };
-    if (!ct.includes('application/json')) return { ok: false, reason: 'not-json', text: txt };
-    try {
-      const j = JSON.parse(txt);
-      if (j && (j.ok === true || 'ts' in j)) return { ok: true, json: j };
-      return { ok: false, reason: 'json-no-ok', json: j };
-    } catch { return { ok: false, reason: 'json-parse', text: txt }; }
-  } catch (e) {
-    return { ok: false, reason: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error') };
-  } finally { clearTimeout(timer); }
-}
-
-async function ensureApiBase() {
-  const override = getQuery('api');
-  const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
-  const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
-  const metaTag  = getMeta('api-base') || '';
-  const cached   = localStorage.getItem(API_STORE_KEY) || '';
-
-  const candidates = [override, winSet, origin, metaTag, DEFAULT_API_BASE, cached]
-    .filter(Boolean)
-    .map(s => String(s).replace(/\/+$/, ''));
-
-  const seen = new Set();
-  const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
-
-  dgroup('API candidates', () => console.table(unique.map((b,i)=>({ i, base:b }))));
-
-  for (const base of unique) {
-    const result = await probeHealth(base);
-    dgroup(`probe ${base}`, () => console.log(result));
-    if (result.ok) {
-      API_BASE = base;
-      try { localStorage.setItem(API_STORE_KEY, API_BASE); } catch {}
-      if (typeof window !== 'undefined') window.API_BASE = API_BASE;
-      dlog('Using API_BASE =', API_BASE);
-      setServerStatus(true, `Server: OK — M: ${getDmMode()}`);
-      return;
-    }
-  }
-  console.warn('[API] No healthy base found. Using initial:', API_BASE || '(empty)');
-  setServerStatus(false, 'Server: FAIL (no health)');
-}
-
-// ============================================================
 //                        Estado
 // ============================================================
 let AUTH = { token: null, user: null };
@@ -360,6 +231,7 @@ function formatMarkdown(t = '') {
 function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
 function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
 function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
+window.pushDM = pushDM;
 
 const PASSIVE_VERBS = [
   'miro','observo','echo un vistazo','escucho',
@@ -1195,3 +1067,9 @@ async function doAuth(kind) {
     new MutationObserver(apply).observe(card, { attributes:true, attributeFilter:['hidden','class','style'] });
   }
 })();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(e => dlog('SW registration failed', e));
+  });
+}
