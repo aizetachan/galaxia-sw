@@ -47,6 +47,7 @@ async function handleLogin() {
 
 async function loadUsers() {
   try {
+    await ensureApiBase();
     const { users } = await api('/admin/users');
     listEl.innerHTML = '';
     users.forEach(u => {
