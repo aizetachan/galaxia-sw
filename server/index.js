@@ -3,11 +3,12 @@ import express from 'express';
 import cors from 'cors';
 
 import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world/index.js';   // /world/..., /characters/... 
+import worldRouter from './world/index.js';   // /world/..., /characters/...
 import chatRouter from './chat.js';
-import { register, login, requireAuth } from './auth.js';
+import { register, login, requireAuth, logout } from './auth.js';
 
 const app = express();
+const api = express.Router();
 
 /* ====== Logging ====== */
 app.use((req, _res, next) => {
@@ -63,11 +64,11 @@ function healthPayload() {
 }
 app.get('/health', (_req, res) => res.json(healthPayload()));
 app.head('/health', (_req, res) => res.status(200).end());
-app.get('/api/health', (_req, res) => res.json(healthPayload()));
-app.head('/api/health', (_req, res) => res.status(200).end());
+api.get('/health', (_req, res) => res.json(healthPayload()));
+api.head('/health', (_req, res) => res.status(200).end());
 
 /* ====== Auth (todas bajo /api/auth/*) ====== */
-app.post('/api/auth/register', async (req, res) => {
+api.post('/auth/register', async (req, res) => {
   console.log('[AUTH/register] body=', req.body);
   try {
     const { username, pin } = req.body || {};
@@ -82,7 +83,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+api.post('/auth/login', async (req, res) => {
   console.log('[AUTH/login] body=', req.body);
   try {
     const { username, pin } = req.body || {};
@@ -94,13 +95,14 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/auth/me', requireAuth, async (req, res) => {
+api.get('/auth/me', requireAuth, async (req, res) => {
   console.log('[AUTH/me] uid=', req.auth.userId, 'user=', req.auth.username);
   return res.json({ user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-app.post('/api/auth/logout', requireAuth, async (_req, res) => {
+api.post('/auth/logout', requireAuth, async (req, res) => {
   try {
+    await logout(req.auth.token);
     return res.json({ ok: true });
   } catch (e) {
     console.error('[AUTH/logout] error', e);
@@ -110,16 +112,16 @@ app.post('/api/auth/logout', requireAuth, async (_req, res) => {
 
 /* ====== DM y World ====== */
 // DM queda exactamente igual (expectativa del front: /api/dm/respond)
-app.use('/api/dm', dmRouter);
+api.use('/dm', dmRouter);
 
 // 🔧 IMPORTANTE: montamos worldRouter en /api (no en /api/world)
 // Porque dentro del router usamos prefijos /world/... y /characters/...
 // Resultado final: /api/world/..., /api/characters/:id/state, etc.
-app.use('/api', worldRouter);
-app.use('/api/chat', chatRouter);
+api.use(worldRouter);
+api.use('/chat', chatRouter);
 
 /* ====== Tiradas demo ====== */
-app.post('/api/roll', async (req, res) => {
+api.post('/roll', async (req, res) => {
   const { skill } = req.body || {};
   const n = Math.floor(Math.random() * 20) + 1;
   const outcome = n >= 11 ? 'success' : 'fail';
@@ -128,11 +130,14 @@ app.post('/api/roll', async (req, res) => {
   return res.json({ ok: true, roll: n, outcome, text });
 });
 
+app.use('/api', api);
+app.use('/api/v1', api);
+
 /* ====== Raíz opcional ====== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
 
 /* ====== 404 en /api/* ====== */
-app.use('/api', (req, res) => {
+app.use(['/api', '/api/v1'], (req, res) => {
   console.warn('[API 404]', req.method, req.originalUrl);
   return res.status(404).json({ error: 'not_found', path: req.originalUrl });
 });
