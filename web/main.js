@@ -245,6 +245,8 @@ async function apiGet(path) {
     authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
+  await loadHistoryIfEmpty();
+
   updateAuthUI();
 
   if ((AUTH?.user?.id) && msgs.length === 0) {
@@ -734,6 +736,26 @@ async function showResumeIfAny() {
   } catch (e) { dlog('resume fail', e?.data || e); }
 }
 
+async function loadHistoryIfEmpty() {
+  if (!isLogged() || msgs.length > 0) return;
+  try {
+    const r = await apiGet('/chat/history');
+    const rows = r?.messages;
+    if (Array.isArray(rows) && rows.length) {
+      const mapped = rows.map((m) => ({
+        user: m.role === 'user' ? (character?.name || 'Tú') : 'Máster',
+        text: m.text,
+        kind: m.role === 'user' ? 'user' : 'dm',
+        ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+      }));
+      setMsgs(mapped);
+      save(KEY_MSGS, msgs);
+    }
+  } catch (e) {
+    dlog('history load fail', e?.data || e);
+  }
+}
+
 // ============================================================
 //                     Auth (robusto con 404)
 // ============================================================
@@ -776,6 +798,8 @@ async function doAuth(kind) {
       character = me.character; save(KEY_CHAR, character);
       step = 'done'; save(KEY_STEP, step);
     }
+
+    await loadHistoryIfEmpty();
 
     if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, character?.name || '');
