@@ -1,19 +1,13 @@
 import { dlog, dgroup, API_BASE, joinUrl, setServerStatus, probeHealth, ensureApiBase } from "./api.js";
 import { getDmMode, setDmMode, allowRollTagFallback, setRollTagFallback } from "./state.js";
+import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentityFromState } from "./ui/main-ui.js";
+import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
+import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll } from "./chat/chat-controller.js";
 
 //                        Estado
 // ============================================================
-let AUTH = { token: null, user: null };
-const baseKey = (suffix) => (AUTH?.user?.id ? `sw:${AUTH.user.id}:${suffix}` : `sw:guest:${suffix}`);
-let KEY_MSGS = baseKey('msgs');
-let KEY_CHAR = baseKey('char');
-let KEY_STEP = baseKey('step');
-let KEY_CONFIRM = baseKey('confirm');
-
-let msgs = load(KEY_MSGS, []);
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
-let pendingRoll = null;
 let pendingConfirm = load(KEY_CONFIRM, null);
 let lastRoll = null;
 
@@ -24,51 +18,17 @@ const UI = {
   authKind: null,
   confirmLoading: false,
 };
+setRenderCallback(render);
 
 // ============================================================
 //                        DOM
 // ============================================================
 const chatEl = document.getElementById('chat');
 
-const chatWrap = document.querySelector('.chat-wrap');
-let identityEl = document.getElementById('identity-bar');
-if (!identityEl) {
-  identityEl = document.createElement('section');
-  identityEl.id = 'identity-bar';
-  identityEl.className = 'identity-bar hidden';
-  chatWrap.insertBefore(identityEl, chatEl);
-}
-
-function setIdentityBar(userName, characterName){
-  const u = String(userName || '').trim();
-  const isGuest = /^guest$/i.test(u);
-  if (!u || isGuest){
-    identityEl.classList.add('hidden');
-    identityEl.innerHTML = '';
-    return;
-  }
-  const c = String(characterName || '').trim();
-  identityEl.innerHTML = `
-  <div class="id-row">
-    <div class="id-left">
-      <div class="id-user">${escapeHtml(u)}</div>
-      ${ c ? `<div class="id-char muted">— ${escapeHtml(c)}</div>` : '' }
-    </div>
-    <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
-  </div>
-`;
-  const _logoutBtn = identityEl.querySelector('#logout-btn');
-  if (_logoutBtn) _logoutBtn.onclick = handleLogout;
-  identityEl.classList.remove('hidden');
-}
+const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
 window.setIdentityBar = setIdentityBar;
-
-function updateIdentityFromState(){
-  const user = (AUTH?.user?.username) || '';
-  const char = character?.name || '';
-  setIdentityBar(user, char);
-}
 window.updateIdentityFromState = updateIdentityFromState;
+window.pushDM = pushDM;
 
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
@@ -83,45 +43,9 @@ const resolveBtn = document.getElementById('resolve-btn');
 const cancelBtn = document.getElementById('cancel-btn');
 const rollTitleEl = document.getElementById('roll-title');
 const rollOutcomeEl = document.getElementById('roll-outcome');
-// ============================================================
-//        UI auth state (guest vs. logged) — DEFINICIÓN REAL
-// ============================================================
-function isLogged() {
-  return !!(AUTH && AUTH.token && AUTH.user && AUTH.user.id);
-}
 
-function updateAuthUI() {
-  const logged = isLogged();
-
-  // flags en <body>
-  document.body.classList.toggle('is-guest', !logged);
-  document.body.classList.toggle('is-logged', logged);
-
-  // tarjeta de invitado (puede venir con class="hidden" o con hidden)
-  const card = document.getElementById('guest-card');
-  if (card) {
-    card.hidden = !!logged;                        // atributo
-    card.classList.toggle('hidden', !!logged);     // clase utilitaria
-    card.style.display = logged ? 'none' : '';     // fallback duro
-  }
-}
 window.updateAuthUI = updateAuthUI;
-
-function handleLogout(){
-  try { localStorage.removeItem('sw:auth'); } catch {}
-  AUTH = null;
-  updateAuthUI();          // mostrar guest inmediatamente
-  // Si prefieres recargar, descomenta:
-  // location.reload();
-}
-
-// Sincroniza si otra pestaña cambia la sesión
-window.addEventListener('storage', (e) => {
-  if (e.key === 'sw:auth') {
-    try { AUTH = JSON.parse(localStorage.getItem('sw:auth') || 'null') || null; } catch { AUTH = null; }
-    updateAuthUI();
-  }
-});
+listenAuthChanges(updateAuthUI);
 
 
 // ============================================================
@@ -215,8 +139,6 @@ function setConfirmLoading(on) {
 // ============================================================
 //                       Utils / helpers
 // ============================================================
-function load(k, fb) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : fb; } catch { return fb; } }
-function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 function now() { return Date.now(); }
 function hhmm(ts) { return new Date(ts).toLocaleTimeString(); }
 function escapeHtml(s='') {
@@ -228,10 +150,7 @@ function formatMarkdown(t = '') {
   const safe = escapeHtml(t);
   return safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 }
-function emit(m) { msgs = [...msgs, m]; save(KEY_MSGS, msgs); render(); }
-function pushDM(text) { emit({ user: 'Máster', text, kind: 'dm', ts: now() }); }
-function pushUser(text) { emit({ user: character?.name || 'Tú', text, kind: 'user', ts: now() }); }
-window.pushDM = pushDM;
+// funciones de chat provienen de chat-controller.js
 
 const PASSIVE_VERBS = [
   'miro','observo','echo un vistazo','escucho',
@@ -306,19 +225,19 @@ async function apiGet(path) {
     const saved = JSON.parse(localStorage.getItem('sw:auth') || 'null');
     dlog('Saved auth =', saved);
     if (saved?.token && saved?.user?.id) {
-      AUTH = saved;
+      setAuth(saved);
       await apiGet('/auth/me').catch(async (e) => {
         if (e.response?.status === 401) throw new Error('UNAUTHORIZED');
         throw e;
       });
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
+      setMsgs(load(KEY_MSGS, []));
+      character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
       authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
-      AUTH = null;
+      setAuth(null);
       localStorage.removeItem('sw:auth');
-      KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-      msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name');
+      setMsgs(load(KEY_MSGS, []));
+      character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name');
       pendingConfirm = null; save(KEY_CONFIRM, null);
     }
   } catch (e) {
@@ -344,7 +263,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   if (authRegisterBtn) authRegisterBtn.addEventListener('click', () => doAuth('register'));
   if (cancelBtn) cancelBtn.addEventListener('click', () => {
     pushDM('🎲 Tirada cancelada (… )');
-    pendingRoll = null;
+    setPendingRoll(null);
     updateRollCta();
   });
 
@@ -539,97 +458,6 @@ function extractTopMeta(txt = '') {
   return { meta: null, rest };
 }
 
-function handleIncomingDMText(rawText) {
-  let txt = String(rawText || '');
-  pendingRoll = null;
-
-  let meta = null;
-  const { meta: m, rest } = extractTopMeta(txt);
-  if (m) { meta = m; txt = rest; }
-
-  if (meta) {
-    if (typeof meta.roll === 'string' && meta.roll && meta.roll.toLowerCase() !== 'null') {
-      const [skill, dc] = String(meta.roll).split(':');
-      pendingRoll = { skill: (skill || 'Acción').trim(), dc: dc ? Number(dc) : null };
-    }
-    if (Array.isArray(meta.memo) && meta.memo.length) {
-      const prev = load('sw:scene_memo', []);
-      save('sw:scene_memo', [...prev, ...meta.memo].slice(-10));
-    }
-    if (Array.isArray(meta.options) && meta.options.length) {
-      txt += (txt ? '\n\n' : '') + 'Sugerencias: ' + meta.options.map(o => `“${o}”`).join(' · ');
-    }
-    dlog('META JSON', meta);
-  }
-
-  const c = parseConfirmTag(txt);
-  if (c) {
-    if (c.pending) pendingConfirm = c.pending;
-    txt = c.cleaned;
-  }
-
-  const rollTag = /<<\s*ROLL\b[\s\S]*?>>/gi;
-  if (!meta || !meta.roll || String(meta.roll).toLowerCase() === 'null') {
-    const r = parseRollTag(txt);
-    if (r) pendingRoll = { skill: r.skill };
-    txt = (r ? r.cleaned : txt.replace(rollTag, '')).trim();
-  } else {
-    txt = txt.replace(rollTag, '').trim();
-  }
-
-  txt = txt.replace(/<<[\s\S]*?>>/g, '').trim();
-
-  if (txt) pushDM(txt);
-}
-
-function parseRollTag(txt = '') {
-  const tag = /<<\s*ROLL\b([\s\S]*?)>>/i.exec(txt);
-  if (!tag) return null;
-  const attrs = tag[1] || '';
-  const mSkill = /SKILL\s*=\s*"([^"]*)"/i.exec(attrs);
-  const skill = (mSkill?.[1] || 'Acción').trim();
-  const cleaned = txt.replace(/<<\s*ROLL\b[\s\S]*?>>/gi, '').trim();
-  return { skill, cleaned };
-}
-function parseConfirmTag(txt = '') {
-  const tagRe = /<<\s*CONFIRM\b([\s\S]*?)>>/gi;
-  let match, lastAttrs = null;
-  let cleaned = txt;
-  cleaned = cleaned.replace(tagRe, '').trim();
-  while ((match = tagRe.exec(txt)) !== null) lastAttrs = match[1] || '';
-  if (!lastAttrs) return null;
-
-  const attrs = {};
-  for (const mm of String(lastAttrs).matchAll(/(\w+)\s*=\s*"([^"]*)"/g)) attrs[mm[1].toUpperCase()] = mm[2];
-  let pending = null;
-  if (attrs.NAME) pending = { type: 'name', name: attrs.NAME };
-  else if (attrs.SPECIES && attrs.ROLE) pending = { type: 'build', species: attrs.SPECIES, role: attrs.ROLE };
-  return { pending, cleaned };
-}
-function mapStageForDM(s) { if (s === 'species' || s === 'role') return 'build'; return s || 'name'; }
-
-// ============================================================
-//                     Hablar con el Máster
-// ============================================================
-async function talkToDM(message) {
-  dlog('talkToDM start', { message, step, character, pendingConfirm });
-  try {
-    const hist = msgs.slice(-8);
-    const res = await api('/dm/respond', {
-      message,
-      history: hist,
-      character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step),
-      clientState: getClientState(),
-      config: { mode: getDmMode() }   // <<< modo activo
-    });
-    handleIncomingDMText(res.text);
-  } catch (e) {
-    dlog('talkToDM error:', e?.data || e);
-    pushDM('El canal se llena de estática. Intenta de nuevo en un momento.');
-  }
-}
-
 // ============================================================
 //                       Send flow
 // ============================================================
@@ -676,7 +504,7 @@ async function send() {
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
     localStorage.removeItem(KEY_CONFIRM);
-    msgs = []; character = null; step = 'name'; pendingRoll = null; pendingConfirm = null;
+    resetMsgs(); character = null; step = 'name'; setPendingRoll(null); pendingConfirm = null;
     pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo se va a llamar tu personaje?`);
     setSending(false);
     return;
@@ -784,7 +612,7 @@ async function resolveRoll() {
     pushDM('Algo se interpone; la situación se complica.');
   } finally {
     busy = false;
-    pendingRoll = null;
+    setPendingRoll(null);
     updateRollCta();
     render();
     try {
@@ -895,7 +723,7 @@ async function showResumeIfAny() {
       }
       const transcript = inflateTranscriptFromResume(r.text);
       if (transcript.length) {
-        msgs = transcript;
+        setMsgs(transcript);
         save(KEY_MSGS, msgs);
       }
     }
@@ -917,20 +745,20 @@ async function doAuth(kind) {
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     const { token, user } = (await api(url, { username, pin }));
-    AUTH = { token, user };
-    localStorage.setItem('sw:auth', JSON.stringify(AUTH));
+    setAuth({ token, user });
+    localStorage.setItem('sw:auth', JSON.stringify({ token, user }));
 
     migrateGuestToUser(user.id);
 
-    KEY_MSGS = baseKey('msgs'); KEY_CHAR = baseKey('char'); KEY_STEP = baseKey('step'); KEY_CONFIRM = baseKey('confirm');
-    msgs = load(KEY_MSGS, []); character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
+    setMsgs(load(KEY_MSGS, []));
+    character = load(KEY_CHAR, null); step = load(KEY_STEP, 'name'); pendingConfirm = load(KEY_CONFIRM, null);
 
     // Limpieza bienvenida de guest y preparación de onboarding/retomar
     {
       const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
       const esSoloBienvenida =
         Array.isArray(msgs) && msgs.length <= 1 && t0.includes('HoloCanal') && t0.includes('inicia sesión');
-      if (esSoloBienvenida) { msgs = []; save(KEY_MSGS, msgs); }
+      if (esSoloBienvenida) { resetMsgs(); }
       if (kind === 'register') {
         step = 'name'; save(KEY_STEP, step);
         pendingConfirm = null; save(KEY_CONFIRM, null);
