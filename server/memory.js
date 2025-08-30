@@ -3,9 +3,9 @@ export const THREAD_SUMMARY_MAX_LEN = 1000;
 export const SUMMARY_EVERY_TURNS = Number(process.env.SUMMARY_EVERY_TURNS ?? 6);
 export const SUMMARY_HISTORY_TRIGGER = Number(process.env.SUMMARY_HISTORY_TRIGGER ?? 40);
 
-const userLightNotes = new Map();
-const userThreadSummary = new Map();
-const userTurnCount = new Map();
+export const userLightNotes = new Map();
+export const userThreadSummary = new Map();
+export const userTurnCount = new Map();
 
 export function getNotes(userId) {
   return userLightNotes.get(userId) || [];
