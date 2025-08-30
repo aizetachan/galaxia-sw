@@ -16,10 +16,13 @@ if (!identityEl) {
   identityEl.className = 'identity-bar hidden';
   chatWrap?.insertBefore(identityEl, chatEl);
 }
+// Asegura mismo look que #chat (usa la clase 'chat')
+if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat');
+
 
 if (adminCloseBtn) adminCloseBtn.onclick = () => {
-  adminEl.hidden = true;
-  chatEl.hidden = false;
+  adminEl.hidden = true; adminEl.classList.add('hidden');
+  chatEl.hidden = false; chatEl.classList.remove('hidden');
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
   if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
   if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
@@ -55,8 +58,8 @@ export function setIdentityBar(userName, characterName){
     prevState.composer = !!composerEl?.hidden;
     prevState.roll = !!rollCtaEl?.hidden;
     prevState.confirm = !!confirmCtaEl?.hidden;
-    chatEl.hidden = true;
-    adminEl.hidden = false;
+    chatEl.hidden = true;  chatEl.classList.add('hidden');
+    adminEl.hidden = false; adminEl.classList.remove('hidden');
     if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
     if (rollCtaEl) { rollCtaEl.hidden = true; }
     if (confirmCtaEl) { confirmCtaEl.hidden = true; }

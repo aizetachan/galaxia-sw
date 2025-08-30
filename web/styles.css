@@ -307,3 +307,18 @@ button.loading::after{
   .app-header h1, .app-header .muted{ display:none }
   .app-header{ padding-top:16px; padding-bottom:16px }
 }
+
+#chat,
+#admin-settings{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  height:var(--chat-h);
+  min-height:var(--chat-min);
+  background:var(--surface);
+  border:1px solid var(--holo);
+  border-radius:var(--radius);
+  padding:12px;
+  box-shadow:var(--shadow);
+}
