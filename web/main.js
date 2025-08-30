@@ -555,12 +555,16 @@ async function send() {
       }
     }
 
-    try { await talkToDM(value); }
+    try {
+      await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode);
+    }
     finally { setSending(false); }
     return;
   }
 
-  try { await talkToDM(value); }
+  try {
+    await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode);
+  }
   finally { setSending(false); }
 }
 
