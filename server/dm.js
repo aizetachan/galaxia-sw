@@ -2,34 +2,20 @@
 import { Router } from 'express';
 import { hasDb, sql } from './db.js';
 import { optionalAuth } from './auth.js';
-import fs from 'fs';
-import path from 'path';
+import { getPrompt } from './prompts.js';
+import { getOpenAI } from './openai-client.js';
+import {
+  getNotes,
+  setNotes,
+  getSummary,
+  setSummary,
+  bumpTurns,
+  SUMMARY_EVERY_TURNS,
+  SUMMARY_HISTORY_TRIGGER,
+} from './memory.js';
 
 const router = Router();
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-
-/* ========= Lectura de prompts .md (ruta correcta + fallback legacy) ========= */
-function readPrompt(filename) {
-  const candidates = [
-    path.join(process.cwd(), 'server', 'prompts', filename),
-    path.join(process.cwd(), 'server', 'data', 'prompts', filename),
-  ];
-  for (const p of candidates) {
-    try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8'); } catch {}
-  }
-  return '';
-}
-
-/* ========= Carga perezosa del SDK ========= */
-let openaiClient = null;
-async function getOpenAI() {
-  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing');
-  if (openaiClient) return openaiClient;
-  const mod = await import('openai');
-  const OpenAI = mod.default || mod.OpenAI || mod;
-  openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return openaiClient;
-}
 
 /* ========= helpers ========= */
 function extractUserText(body) {
@@ -123,31 +109,6 @@ async function getRecentChatSummary(userId, limit = 200) {
   return { lines, lastTs };
 }
 
-/* ========= Memoria ligera (servidor) & resumen ========= */
-const LIGHT_NOTES_MAX = 20;
-const THREAD_SUMMARY_MAX_LEN = 1000;
-const SUMMARY_EVERY_TURNS = Number(process.env.SUMMARY_EVERY_TURNS ?? 6);
-const SUMMARY_HISTORY_TRIGGER = Number(process.env.SUMMARY_HISTORY_TRIGGER ?? 40);
-
-const userLightNotes = new Map();     // userId -> string[]
-const userThreadSummary = new Map();  // userId -> string
-const userTurnCount = new Map();      // userId -> number
-
-function getNotes(userId){ return userLightNotes.get(userId) || []; }
-function setNotes(userId, notes){
-  userLightNotes.set(userId, [...notes].slice(-LIGHT_NOTES_MAX));
-}
-function getSummary(userId){ return userThreadSummary.get(userId) || ''; }
-function setSummary(userId, text){
-  const t = String(text || '').slice(-THREAD_SUMMARY_MAX_LEN);
-  userThreadSummary.set(userId, t);
-}
-function bumpTurns(userId){
-  const n = (userTurnCount.get(userId) || 0) + 1;
-  userTurnCount.set(userId, n);
-  return n;
-}
-
 /* ========= Políticas y protocolo ========= */
 const languagePolicy = [
   'IDIOMA:',
@@ -166,7 +127,7 @@ const tagProtocol = [
   'La etiqueta debe ir en una LÍNEA PROPIA, como ÚLTIMA línea del mensaje.',
 ].join('\n');
 
-const dicePolicy = readPrompt('dice-rules.md') || [
+const dicePolicy = getPrompt('dice-rules.md') || [
   'CUÁNDO PEDIR TIRADA:',
   '- Pide tirada cuando haya riesgo real, oposición, incertidumbre o impacto narrativo.',
   'CÓMO PEDIRLA:',
@@ -186,8 +147,8 @@ const introPolicy = [
 
 /* ========= PIN & SYSTEM ========= */
 function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) {
-  const core = readPrompt('prompt-master.md');
-  const game = readPrompt('game-rules.md');
+  const core = getPrompt('prompt-master.md');
+  const game = getPrompt('game-rules.md');
   // --- PIN (memoria activa, 3 líneas) ---
   const pinCanon = 'CANON: Space-opera PG-13; la reputación tiene consecuencias; la violencia pública atrae a la ley.';
   
