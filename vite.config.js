@@ -7,6 +7,6 @@ export default defineConfig({
     emptyOutDir: true
   },
   define: {
-    DEBUG: false
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development')
   }
 });

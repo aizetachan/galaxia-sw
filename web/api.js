@@ -1,5 +1,5 @@
 // === DEBUG helpers ===
-const DEBUG = true;
+const DEBUG = process.env.NODE_ENV !== 'production';
 export function dlog(...a) { if (DEBUG) console.log('[WEB]', ...a); }
 export function dgroup(label, fn) {
   if (!DEBUG) return fn?.();
