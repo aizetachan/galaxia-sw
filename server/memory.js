@@ -7,7 +7,7 @@ export const SUMMARY_HISTORY_TRIGGER = Number(
   process.env.SUMMARY_HISTORY_TRIGGER ?? 40,
 );
 
-function createTimedMap(ttlMs = 1000 * 60 * 60) {
+function createTimedMap(ttlMs = 1000 * 60 * 60 * 4) {
   const data = new Map();
   const expires = new Map();
 
