@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run dev:front\" \"npm run dev:server\"",
+    "dev:front": "vite",
+    "dev:server": "npm run dev --prefix server",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node tests/test-runner.js"
