@@ -1,5 +1,13 @@
 // === DEBUG helpers ===
-const DEBUG = process.env.NODE_ENV !== 'production';
+// Use Vite's runtime env flags instead of Node's `process.env` which is
+// undefined in the browser. If `import.meta.env.PROD` is true we are running a
+// production build; otherwise enable debug logs. Falling back to `true`
+// mirrors the previous behaviour when the env flag is missing.
+const DEBUG = !(
+  typeof import.meta !== 'undefined' &&
+  import.meta.env &&
+  import.meta.env.PROD
+);
 export function dlog(...a) { if (DEBUG) console.log('[WEB]', ...a); }
 export function dgroup(label, fn) {
   if (!DEBUG) return fn?.();
