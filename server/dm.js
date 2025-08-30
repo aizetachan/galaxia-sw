@@ -12,6 +12,9 @@ import {
   bumpTurns,
   SUMMARY_EVERY_TURNS,
   SUMMARY_HISTORY_TRIGGER,
+  userLightNotes,
+  userThreadSummary,
+  userTurnCount,
 } from './memory.js';
 
 const router = Router();
