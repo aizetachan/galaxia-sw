@@ -11,14 +11,14 @@ let userEl,
     usersTabEl;
 
 export function setupAdminDom(root = document) {
-  userEl = root.getElementById('admin-user');
-  pinEl = root.getElementById('admin-pin');
-  loginBtn = root.getElementById('admin-login');
-  statusEl = root.getElementById('admin-status');
-  panelEl = root.getElementById('admin-panel');
-  loginSectionEl = root.getElementById('login-section');
+  userEl = root.querySelector('#admin-user');
+  pinEl = root.querySelector('#admin-pin');
+  loginBtn = root.querySelector('#admin-login');
+  statusEl = root.querySelector('#admin-status');
+  panelEl = root.querySelector('#admin-panel');
+  loginSectionEl = root.querySelector('#login-section');
   usersTabBtn = root.querySelector('.tabs .tab[data-tab="users"]');
-  usersTabEl = root.getElementById('tab-users');
+  usersTabEl = root.querySelector('#tab-users');
 
   if (loginBtn) loginBtn.addEventListener('click', handleLogin);
   if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
