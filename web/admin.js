@@ -1,14 +1,28 @@
 import { API_BASE, joinUrl, ensureApiBase } from './api.js';
 import { AUTH, setAuth, listenAuthChanges } from './auth/session.js';
 
-const userEl = document.getElementById('admin-user');
-const pinEl = document.getElementById('admin-pin');
-const loginBtn = document.getElementById('admin-login');
-const statusEl = document.getElementById('admin-status');
-const panelEl = document.getElementById('admin-panel');
-const loginSectionEl = document.getElementById('login-section');
-const usersTabBtn = document.querySelector('.tabs .tab[data-tab="users"]');
-const usersTabEl = document.getElementById('tab-users');
+let userEl,
+    pinEl,
+    loginBtn,
+    statusEl,
+    panelEl,
+    loginSectionEl,
+    usersTabBtn,
+    usersTabEl;
+
+export function setupAdminDom(root = document) {
+  userEl = root.getElementById('admin-user');
+  pinEl = root.getElementById('admin-pin');
+  loginBtn = root.getElementById('admin-login');
+  statusEl = root.getElementById('admin-status');
+  panelEl = root.getElementById('admin-panel');
+  loginSectionEl = root.getElementById('login-section');
+  usersTabBtn = root.querySelector('.tabs .tab[data-tab="users"]');
+  usersTabEl = root.getElementById('tab-users');
+
+  if (loginBtn) loginBtn.addEventListener('click', handleLogin);
+  if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
+}
 
 function authHeaders() {
   const h = {};
@@ -38,7 +52,7 @@ async function handleLogin() {
     });
     setAuth({ token, user });
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
-    if (!document.getElementById('admin-settings')?.hidden && user?.username === 'settings') {
+    if (user?.username === 'settings') {
       loginSectionEl.hidden = true;
       panelEl.hidden = false;
       showTab('users');
@@ -111,10 +125,6 @@ async function editUser(u) {
   await loadUsers();
 }
 
-/* === Eventos === */
-if (loginBtn) loginBtn.addEventListener('click', handleLogin);
-if (usersTabBtn) usersTabBtn.addEventListener('click', () => showTab('users'));
-
 // Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'settings'
 document.addEventListener('admin-open', async () => {
   await ensureApiBase();
@@ -127,7 +137,7 @@ document.addEventListener('admin-open', async () => {
 
 // Si cambia el estado de auth mientras el panel está abierto, sincroniza
 listenAuthChanges(async () => {
-  const open = !document.getElementById('admin-settings')?.hidden;
+  const open = !!document.getElementById('admin-user');
   if (!open) return;
   const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
   if (isAdmin) {
