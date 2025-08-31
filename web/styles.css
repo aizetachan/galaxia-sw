@@ -91,8 +91,7 @@ body::before{
 }
 
 /* Un único estilo para el contenedor de conversación y el de settings */
-#chat,
-#admin-settings{
+#chat{
   flex:1 1 auto;
   min-height:0;
   overflow-y:auto;                 /* único scroll de la app */
@@ -108,7 +107,7 @@ body::before{
 }
 
 /* Ocultación consistente */
-.hidden, #admin-settings[hidden]{ display:none !important; }
+.hidden{ display:none !important; }
 
 /* -------- 4) BARRA DE IDENTIDAD -------- */
 .identity-bar{ margin:4px 0 8px }
@@ -267,7 +266,7 @@ button.loading::after{
 /* -------- 11) RESPONSIVE -------- */
 @media (max-width:768px){
   .chat-wrap{ padding-left:8px; padding-right:8px; min-height:var(--vh) }
-  #chat, #admin-settings{ height:auto; min-height:0 }
+  #chat{ height:auto; min-height:0 }
   .composer{ padding-bottom:max(0px, env(safe-area-inset-bottom)) }
   #send{ flex:0 0 auto; width:auto !important; min-width:0 !important; padding:8px 14px; font-size:14px }
   .app-header h1, .app-header .muted{ display:none }

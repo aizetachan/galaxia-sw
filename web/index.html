@@ -61,32 +61,6 @@
       <!-- Chat real (se muestra solo cuando hay sesión) -->
       <section id="chat" class="chat"></section>
 
-      <!-- Panel de administración (reemplaza al chat) -->
-      <section id="admin-settings" class="chat hidden">
-        <h2>Panel de administración</h2>
-        <section id="login-section">
-          <input id="admin-user" placeholder="Usuario" />
-          <input id="admin-pin" placeholder="PIN" maxlength="4" inputmode="numeric" />
-          <button id="admin-login">Entrar</button>
-          <span id="admin-status" class="muted"></span>
-        </section>
-        <section id="admin-panel" hidden>
-          <nav class="tabs">
-            <button class="tab active" data-tab="users">Usuarios</button>
-            <!-- futuro: <button class="tab" data-tab="generator">Generar</button> -->
-          </nav>
-          <div id="tab-users" class="tab-panel">
-            <table class="table" id="users-table">
-              <thead>
-                <tr><th>ID</th><th>Usuario</th><th>Acciones</th></tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </section>
-        <button id="admin-close" class="outline">Volver</button>
-      </section>
-
       <!-- CTA de tirada -->
       <section id="roll-cta" class="roll-cta hidden" aria-live="polite">
         <div class="roll-cta__text">

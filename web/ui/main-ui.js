@@ -1,15 +1,15 @@
 import { handleLogout, isLogged } from "../auth/session.js";
-import { prepareAdminPanel } from "../admin.js";
+import { prepareAdminPanel, setupAdminDom } from "../admin.js";
 
 // Identity bar setup
 const chatEl = document.getElementById('chat');
 const chatWrap = document.querySelector('.chat-wrap');
-const adminEl = document.getElementById('admin-settings');
 const composerEl = document.querySelector('.composer');
 const rollCtaEl = document.getElementById('roll-cta');
 const confirmCtaEl = document.getElementById('confirm-cta');
-const adminCloseBtn = document.getElementById('admin-close');
 const prevState = { composer: false, roll: false, confirm: false };
+let savedChatNodes = null;
+let settingsOpen = false;
 
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
@@ -19,16 +19,6 @@ if (!identityEl) {
   chatWrap?.insertBefore(identityEl, chatEl);
 }
 
-/* === Garantiza mismo contenedor/ancho que el chat === */
-if (adminEl && chatWrap && adminEl.parentElement !== chatWrap) {
-  chatWrap.insertBefore(adminEl, chatEl.nextSibling);
-}
-// Igual look que el chat y oculto al inicio
-if (adminEl && !adminEl.classList.contains('chat')) adminEl.classList.add('chat');
-if (adminEl) { adminEl.hidden = true; adminEl.classList.add('hidden'); }
-
-/* === Botón "volver" dentro de settings === */
-if (adminCloseBtn) adminCloseBtn.onclick = () => closeSettings();
 
 /* === Render de la barra de identidad === */
 export function setIdentityBar(userName, characterName){
@@ -67,31 +57,12 @@ export function setIdentityBar(userName, characterName){
 
   const _settingsBtn = identityEl.querySelector('#settings-btn');
   if (_settingsBtn) _settingsBtn.onclick = async () => {
-    // TOGGLE: si está abierto, cerrar; si está cerrado, abrir
-    const isOpen = adminEl && !adminEl.hidden;
-    if (isOpen) {
+    if (settingsOpen) {
       closeSettings();
       return;
     }
-    // 1) Guardar estado actual
-    prevState.composer = !!composerEl?.hidden;
-    prevState.roll = !!rollCtaEl?.hidden;
-    prevState.confirm = !!confirmCtaEl?.hidden;
-  
-    // 2) Prepara el panel (carga datos con el contenedor aún oculto)
-    try { await prepareAdminPanel(); } catch {}
-  
-    // 3) Abrir settings “de golpe” (sin estados intermedios visibles)
-    chatEl.hidden = true;  chatEl.classList.add('hidden');
-    adminEl.hidden = false; adminEl.classList.remove('hidden');
-  
-    if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
-    if (rollCtaEl) { rollCtaEl.hidden = true; }
-    if (confirmCtaEl) { confirmCtaEl.hidden = true; }
-  
-    // Notificar apertura para flujos existentes
-    document.dispatchEvent(new Event('admin-open'));
-  };  
+    await openSettings();
+  };
 
   identityEl.classList.remove('hidden');
 }
@@ -115,13 +86,69 @@ export function updateAuthUI(){
 }
 
 /* === Helpers === */
+async function openSettings(){
+  settingsOpen = true;
+  prevState.composer = !!composerEl?.hidden;
+  prevState.roll = !!rollCtaEl?.hidden;
+  prevState.confirm = !!confirmCtaEl?.hidden;
+  savedChatNodes = Array.from(chatEl.childNodes);
+
+  chatEl.style.visibility = 'hidden';
+  chatEl.replaceChildren(createAdminMarkup());
+  setupAdminDom();
+  const adminCloseBtn = document.getElementById('admin-close');
+  if (adminCloseBtn) adminCloseBtn.onclick = () => closeSettings();
+
+  try { await prepareAdminPanel(); } catch {}
+  chatEl.style.visibility = '';
+
+  if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
+  if (rollCtaEl) { rollCtaEl.hidden = true; }
+  if (confirmCtaEl) { confirmCtaEl.hidden = true; }
+
+  document.dispatchEvent(new Event('admin-open'));
+}
+
 function closeSettings(){
-  if (!adminEl) return;
-  adminEl.hidden = true; adminEl.classList.add('hidden');
-  chatEl.hidden = false; chatEl.classList.remove('hidden');
+  if (!settingsOpen) return;
+  settingsOpen = false;
+
+  chatEl.style.visibility = 'hidden';
+  if (savedChatNodes) chatEl.replaceChildren(...savedChatNodes);
+  chatEl.style.visibility = '';
+
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
   if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
   if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
+}
+
+function createAdminMarkup(){
+  const tpl = document.createElement('template');
+  tpl.innerHTML = `
+        <h2>Panel de administración</h2>
+        <section id="login-section">
+          <input id="admin-user" placeholder="Usuario" />
+          <input id="admin-pin" placeholder="PIN" maxlength="4" inputmode="numeric" />
+          <button id="admin-login">Entrar</button>
+          <span id="admin-status" class="muted"></span>
+        </section>
+        <section id="admin-panel" hidden>
+          <nav class="tabs">
+            <button class="tab active" data-tab="users">Usuarios</button>
+            <!-- futuro: <button class="tab" data-tab="generator">Generar</button> -->
+          </nav>
+          <div id="tab-users" class="tab-panel">
+            <table class="table" id="users-table">
+              <thead>
+                <tr><th>ID</th><th>Usuario</th><th>Acciones</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+        <button id="admin-close" class="outline">Volver</button>
+  `;
+  return tpl.content.cloneNode(true);
 }
 
 // Simple HTML escaper reused from main
