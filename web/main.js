@@ -30,6 +30,8 @@ window.setIdentityBar = setIdentityBar;
 window.updateIdentityFromState = updateIdentityFromState;
 window.pushDM = pushDM;
 
+let firstRenderDone = false;
+
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
 const authLoginBtn = document.getElementById('auth-login');
@@ -331,19 +333,28 @@ function render() {
     `;
   }
 
-  updateIdentityFromState();
-  if (chatEl) chatEl.innerHTML = html;
-  if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+  if (!firstRenderDone) {
+    document.getElementById('identity-bar')?.classList.add('hidden');
+  }
+
+  requestAnimationFrame(() => {
+    if (chatEl) {
+      chatEl.innerHTML = html;
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+    updateIdentityFromState();
+
+    const yes = document.getElementById('confirm-yes-inline');
+    const no  = document.getElementById('confirm-no-inline');
+    if (yes) yes.onclick = () => handleConfirmDecision('yes');
+    if (no)  no.onclick  = () => handleConfirmDecision('no');
+
+    setConfirmLoading(UI.confirmLoading);
+    firstRenderDone = true;
+  });
 
   updatePlaceholder();
   updateRollCta();
-
-  const yes = document.getElementById('confirm-yes-inline');
-  const no  = document.getElementById('confirm-no-inline');
-  if (yes) yes.onclick = () => handleConfirmDecision('yes');
-  if (no)  no.onclick  = () => handleConfirmDecision('no');
-
-  setConfirmLoading(UI.confirmLoading);
   setSending(UI.sending);
   setAuthLoading(UI.authLoading, UI.authKind);
 }
