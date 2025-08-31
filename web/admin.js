@@ -150,3 +150,21 @@ function escapeHtml(s='') {
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+// === Preload helper para evitar flicker en Settings ===
+export async function prepareAdminPanel() {
+  try { await ensureApiBase(); } catch {}
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  if (isAdmin) {
+    // Asegura estado del panel aunque esté oculto
+    if (loginSectionEl) loginSectionEl.hidden = true;
+    if (panelEl) panelEl.hidden = false;
+    // Pre-carga de usuarios en la tabla (está oculta, así que no parpadea)
+    try { await loadUsers(); } catch {}
+  } else {
+    // No admin: dejamos la sección de login lista (sin cargar nada)
+    if (panelEl) panelEl.hidden = true;
+    if (loginSectionEl) loginSectionEl.hidden = false;
+  }
+}
+// Exponer global por compatibilidad
+window.prepareAdminPanel = prepareAdminPanel;

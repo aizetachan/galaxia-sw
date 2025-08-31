@@ -273,3 +273,6 @@ button.loading::after{
   .app-header h1, .app-header .muted{ display:none }
   .app-header{ padding-top:16px; padding-bottom:16px }
 }
+/* Guardas de hidratación para evitar FOUC */
+html.preload body { visibility: hidden; }
+html.ready body { visibility: visible; }

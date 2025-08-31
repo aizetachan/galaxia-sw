@@ -271,6 +271,11 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
 
   render();
   dlog('Boot done');
+  try {
+    document.documentElement.classList.remove('preload');
+    document.documentElement.classList.add('ready');
+  } catch {}
+  
 })();
 
 // ============================================================

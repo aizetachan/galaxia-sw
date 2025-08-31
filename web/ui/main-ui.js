@@ -1,4 +1,5 @@
 import { handleLogout, isLogged } from "../auth/session.js";
+import { prepareAdminPanel } from "../admin.js";
 
 // Identity bar setup
 const chatEl = document.getElementById('chat');
@@ -65,27 +66,32 @@ export function setIdentityBar(userName, characterName){
   };
 
   const _settingsBtn = identityEl.querySelector('#settings-btn');
-  if (_settingsBtn) _settingsBtn.onclick = () => {
+  if (_settingsBtn) _settingsBtn.onclick = async () => {
     // TOGGLE: si está abierto, cerrar; si está cerrado, abrir
     const isOpen = adminEl && !adminEl.hidden;
     if (isOpen) {
       closeSettings();
       return;
     }
-    // Abrir settings
+    // 1) Guardar estado actual
     prevState.composer = !!composerEl?.hidden;
     prevState.roll = !!rollCtaEl?.hidden;
     prevState.confirm = !!confirmCtaEl?.hidden;
-
+  
+    // 2) Prepara el panel (carga datos con el contenedor aún oculto)
+    try { await prepareAdminPanel(); } catch {}
+  
+    // 3) Abrir settings “de golpe” (sin estados intermedios visibles)
     chatEl.hidden = true;  chatEl.classList.add('hidden');
     adminEl.hidden = false; adminEl.classList.remove('hidden');
-
+  
     if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
     if (rollCtaEl) { rollCtaEl.hidden = true; }
     if (confirmCtaEl) { confirmCtaEl.hidden = true; }
-
+  
+    // Notificar apertura para flujos existentes
     document.dispatchEvent(new Event('admin-open'));
-  };
+  };  
 
   identityEl.classList.remove('hidden');
 }

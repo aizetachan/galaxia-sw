@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
 
     <title>GALACTIC</title>
+        <!-- CSS crítico mínimo para evitar parpadeos durante la carga -->
+        <style>
+          html.preload body { visibility: hidden; }
+          html.ready body { visibility: visible; }
+        </style>
+        <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
