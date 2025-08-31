@@ -9,7 +9,7 @@ const rollCtaEl = document.getElementById('roll-cta');
 const confirmCtaEl = document.getElementById('confirm-cta');
 const prevState = { composer: false, roll: false, confirm: false };
 let savedChatNodes = null;
-let settingsOpen = false;
+let panelOpen = false;
 
 let identityEl = document.getElementById('identity-bar');
 if (!identityEl) {
@@ -25,8 +25,8 @@ export function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
 
-  // Si NO es settings, cierra el panel si estuviera abierto
-  if (u && u !== 'settings') closeSettings();
+  // Si NO es settings, cierra cualquier panel abierto
+  if (u && u !== 'settings') closePanel();
 
   if (!u || isGuest){
     identityEl.classList.add('hidden');
@@ -49,16 +49,16 @@ export function setIdentityBar(userName, characterName){
   const _logoutBtn = identityEl.querySelector('#logout-btn');
   if (_logoutBtn) _logoutBtn.onclick = async () => {
     await handleLogout();
-    // 🔒 Cierra el panel de settings si estaba abierto
-    closeSettings();
+    // 🔒 Cierra el panel si estaba abierto
+    closePanel();
     setIdentityBar('', '');
     updateAuthUI();
   };
 
   const _settingsBtn = identityEl.querySelector('#settings-btn');
   if (_settingsBtn) _settingsBtn.onclick = async () => {
-    if (settingsOpen) {
-      closeSettings();
+    if (panelOpen) {
+      closePanel();
       return;
     }
     await openSettings();
@@ -86,42 +86,48 @@ export function updateAuthUI(){
 }
 
 /* === Helpers === */
-async function openSettings(){
-  settingsOpen = true;
+async function openPanel(options){
+  panelOpen = true;
   prevState.composer = !!composerEl?.hidden;
   prevState.roll = !!rollCtaEl?.hidden;
   prevState.confirm = !!confirmCtaEl?.hidden;
   savedChatNodes = Array.from(chatEl.childNodes);
 
-  chatEl.style.visibility = 'hidden';
   chatEl.classList.add('settings-panel');
-  chatEl.replaceChildren(createAdminMarkup());
-  setupAdminDom();
-  const adminCloseBtn = document.getElementById('admin-close');
-  if (adminCloseBtn) adminCloseBtn.onclick = () => closeSettings();
+  chatEl.replaceChildren(options.markup());
+  options.setup?.(chatEl);
+  const closeBtn = chatEl.querySelector(options.closeSelector || '#panel-close');
+  if (closeBtn) closeBtn.onclick = () => closePanel();
 
-  try { await prepareAdminPanel(); } catch {}
-  chatEl.style.visibility = '';
+  try { await options.prepare?.(); } catch {}
 
   if (composerEl) { composerEl.hidden = true; composerEl.classList.add('hidden'); }
   if (rollCtaEl) { rollCtaEl.hidden = true; }
   if (confirmCtaEl) { confirmCtaEl.hidden = true; }
 
-  document.dispatchEvent(new Event('admin-open'));
+  if (options.event) document.dispatchEvent(new Event(options.event));
 }
 
-function closeSettings(){
-  if (!settingsOpen) return;
-  settingsOpen = false;
+function closePanel(){
+  if (!panelOpen) return;
+  panelOpen = false;
 
-  chatEl.style.visibility = 'hidden';
   if (savedChatNodes) chatEl.replaceChildren(...savedChatNodes);
   chatEl.classList.remove('settings-panel');
-  chatEl.style.visibility = '';
 
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
   if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }
   if (confirmCtaEl) { confirmCtaEl.hidden = prevState.confirm; }
+}
+
+async function openSettings(){
+  await openPanel({
+    markup: createAdminMarkup,
+    setup: setupAdminDom,
+    prepare: prepareAdminPanel,
+    closeSelector: '#admin-close',
+    event: 'admin-open'
+  });
 }
 
 function createAdminMarkup(){
