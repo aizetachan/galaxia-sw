@@ -94,6 +94,7 @@ async function openSettings(){
   savedChatNodes = Array.from(chatEl.childNodes);
 
   chatEl.style.visibility = 'hidden';
+  chatEl.classList.add('settings-panel');
   chatEl.replaceChildren(createAdminMarkup());
   setupAdminDom();
   const adminCloseBtn = document.getElementById('admin-close');
@@ -115,6 +116,7 @@ function closeSettings(){
 
   chatEl.style.visibility = 'hidden';
   if (savedChatNodes) chatEl.replaceChildren(...savedChatNodes);
+  chatEl.classList.remove('settings-panel');
   chatEl.style.visibility = '';
 
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
