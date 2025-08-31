@@ -24,6 +24,18 @@ setRenderCallback(render);
 //                        DOM
 // ============================================================
 const chatEl = document.getElementById('chat');
+let chatPlaceholder = null;
+if (document.documentElement.classList.contains('preload') && chatEl) {
+  chatPlaceholder = document.createElement('div');
+  chatPlaceholder.id = 'chat-placeholder';
+  chatPlaceholder.className = 'msg';
+  chatPlaceholder.style.visibility = 'hidden';
+  const t = document.createElement('div');
+  t.className = 'text';
+  t.textContent = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+  chatPlaceholder.appendChild(t);
+  chatEl.appendChild(chatPlaceholder);
+}
 
 const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
 window.setIdentityBar = setIdentityBar;
@@ -215,7 +227,7 @@ async function apiGet(path) {
 // ============================================================
 //                          BOOT
 // ============================================================
-(async function boot() {
+async function boot() {
   dlog('Boot start');
   await ensureApiBase();
   dlog('API_BASE ready =', API_BASE);
@@ -271,11 +283,18 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
 
   render();
   dlog('Boot done');
+}
+
+(async () => {
   try {
-    document.documentElement.classList.remove('preload');
-    document.documentElement.classList.add('ready');
-  } catch {}
-  
+    await boot();
+  } finally {
+    if (chatPlaceholder) chatPlaceholder.remove();
+    try {
+      document.documentElement.classList.remove('preload');
+      document.documentElement.classList.add('ready');
+    } catch {}
+  }
 })();
 
 // ============================================================
