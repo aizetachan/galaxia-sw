@@ -21,5 +21,11 @@ for (const dir of PROMPT_DIRS) {
 export function getPrompt(name) {
   return cache[name] || '';
 }
+export function getPromptSection(file, section) {
+  const s = cache[file] || '';
+  const re = new RegExp(`<!-- SECTION:${section} -->([\\s\\S]*?)<!-- \\/SECTION -->`, 'i');
+  const m = re.exec(s);
+  return m ? m[1].trim() : s; // fallback: todo el archivo
+}
 
 export default cache;
