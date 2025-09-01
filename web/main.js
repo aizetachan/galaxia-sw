@@ -1032,23 +1032,31 @@ async function handleBrushClick(btn) {
     const r = await fetch(joinUrl(API_BASE, '/scene-image'), {
       method: 'POST',
       headers,
-      body: JSON.stringify({ masterText: txtEl.textContent || '', scene }),
+      body: JSON.stringify({ masterText: (txtEl.textContent || '').trim(), scene }),
     });
-    const data = await r.json();
 
-    shimmer.remove();
-    if (!data?.ok || !data?.dataUrl) {
-      throw new Error(data?.error || 'fail');
+    if (!r.ok) {
+      // Log claro para depurar (verás el texto en la pestaña Console)
+      const errText = await r.text().catch(() => '');
+      console.error('[IMG] /scene-image failed:', r.status, errText);
+      throw new Error(`HTTP ${r.status}`);
     }
 
-    // Cargar e inyectar la imagen SOLO cuando esté lista
+    const data = await r.json();
+    shimmer.remove();
+
+    const src = data?.dataUrl || data?.url; // por compatibilidad
+    if (!src) throw new Error('no_image_src');
+
+    // Cargar e inyectar la imagen SOLO cuando esté completamente lista
     const img = new Image();
     img.alt = 'Escena generada';
     img.decoding = 'async';
     img.loading = 'lazy';
     img.onload = () => { slot.hidden = false; slot.innerHTML = ''; slot.appendChild(img); };
     img.onerror = () => { slot.hidden = true; slot.innerHTML = ''; };
-    img.src = data.dataUrl;
+    img.src = src;
+
   } catch (e) {
     try { shimmer.remove(); } catch {}
     const err = document.createElement('div');

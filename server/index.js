@@ -194,7 +194,6 @@ app.use('/api/v1', api);
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
 
 /* ====== Scene Image (text-to-image) ====== */
-// Simple prompt builder to keep control server-side
 function buildSceneImagePrompt({ masterText = '', scene = {} }) {
   const location   = scene?.location   || 'sci-fi spaceport interior';
   const mood       = scene?.mood       || 'tense, cinematic';
@@ -221,41 +220,42 @@ function buildSceneImagePrompt({ masterText = '', scene = {} }) {
 
 api.post('/scene-image', requireAuth, async (req, res) => {
   try {
-    const { masterText, scene } = req.body || {};
-    if (!masterText || typeof masterText !== 'string') {
+    let { masterText, scene } = req.body || {};
+    if (typeof masterText !== 'string') masterText = '';
+    const text = masterText.trim();
+    if (!text) {
+      // Devolvemos 400 claro si no llega texto usable
       return res.status(400).json({ error: 'masterText_required' });
     }
 
-    // 👇 ESTA LÍNEA SE QUEDA IGUAL
     const openai = await getOpenAI();
-
-    const prompt = buildSceneImagePrompt({ masterText, scene });
+    const prompt = buildSceneImagePrompt({ masterText: text, scene });
 
     const t0 = Date.now();
-    // 👇 ESTA ES LA PARTE QUE CAMBIA (size válido + sin quality de momento)
+
+    // 🚫 Sin response_format / quality para máxima compatibilidad de SDK
     const out = await openai.images.generate({
       model: 'gpt-image-1',
-      size: '1024x1024',       // válidos: '1024x1024', '1792x1024', '1024x1792'
+      size: '1024x1024',      // seguro, rápido y soportado
       prompt,
-      response_format: 'b64_json',
-      // quality: 'high',      // opcional, aumenta latencia/coste
-      // seed: 4242,           // opcional para consistencia
+      // seed: 4242,          // opcional para consistencia
     });
 
-    const b64 = out?.data?.[0]?.b64_json;
-    if (!b64) return res.status(502).json({ error: 'no_image_returned' });
+    const d = out?.data?.[0] || null;
+    const b64 = d?.b64_json || null;
+    const url = d?.url || null;
+
+    const src = b64 ? `data:image/png;base64,${b64}` : url;
+    if (!src) return res.status(502).json({ error: 'no_image_payload' });
 
     return res.json({
       ok: true,
       ms: Date.now() - t0,
-      dataUrl: `data:image/png;base64,${b64}`
+      dataUrl: src,           // mantenemos el mismo nombre de campo que usa el front
     });
   } catch (e) {
-    // 👇 REEMPLAZA TU catch POR ESTE
     const status = e?.status || 500;
     const msg    = e?.error?.message || e?.message || 'image_generation_failed';
-
-    // Log detallado del cuerpo si existe
     try {
       if (e?.response) {
         const txt = await e.response.text();
@@ -264,13 +264,10 @@ api.post('/scene-image', requireAuth, async (req, res) => {
         console.error('[scene-image]', status, msg);
       }
     } catch(_) {}
-
-    return res.status(status < 500 ? status : 500).json({
-      error: msg,
-      status,
-    });
+    return res.status(status < 500 ? status : 500).json({ error: msg, status });
   }
 });
+
 
 
 api.post('/scene-image', requireAuth, async (req, res) => {
