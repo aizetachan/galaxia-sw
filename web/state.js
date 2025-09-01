@@ -1,4 +1,14 @@
-import { setServerStatus, dlog, getQuery } from './api.js';
+// state.js
+import { setServerStatus, dlog } from './api.js';
+
+// Helper local para leer ?query
+function getQuery(name) {
+  try {
+    return new URL(location.href).searchParams.get(name) || '';
+  } catch {
+    return '';
+  }
+}
 
 // =========================
 //   MODO DEL MÁSTER (ÚNICO)
