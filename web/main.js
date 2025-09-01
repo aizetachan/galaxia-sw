@@ -965,29 +965,37 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js').catch(e => dlog('SW registration failed', e));
   });
 }
-// ============================================================
+/// ============================================================
 //          Scene image (🖌️) — decorate DM bubbles
 // ============================================================
 function decorateDMs() {
   const root = document.getElementById('chat');
   if (!root) return;
 
-  // Para cada mensaje del Máster (kind=dm) con texto, inyecta botón + slot imagen
-  const dmMsgs = root.querySelectorAll('.msg.dm');
+  // Soportamos varias estructuras de DOM:
+  const selector = '.msg.dm, .msg[data-kind="dm"], [data-role="dm"]';
+  const dmMsgs = root.querySelectorAll(selector);
+
+  let count = 0;
   dmMsgs.forEach((box) => {
     if (box.dataset.enhanced === '1') return;
 
-    const txt = box.querySelector('.text');
-    const meta = box.querySelector('.meta');
-    if (!txt || !meta) return; // salta los "msg dm" de hora (no tienen .text)
+    // 1) Localiza contenedores
+    // meta/header: donde pondremos el botón
+    const meta = box.querySelector('.meta') || box.querySelector('.header') || box.querySelector('.name') || box;
+    // texto: lo usaremos para construir el prompt
+    const txt = box.querySelector('.text') || box;
 
-    // Slot de imagen antes del texto
+    if (!meta || !txt) return;
+
+    // 2) Slot de imagen antes del texto
     const slot = document.createElement('div');
     slot.className = 'scene-image-slot';
     slot.hidden = true;
+    slot.style.minHeight = '1px'; // evita colapsos por CSS heredado
     box.insertBefore(slot, txt);
 
-    // Botón pincel junto a la etiqueta del Máster
+    // 3) Botón pincel junto al nombre del Máster
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'brush-btn';
@@ -996,8 +1004,24 @@ function decorateDMs() {
     meta.appendChild(btn);
 
     box.dataset.enhanced = '1';
+    count++;
   });
+
+  console.log('[IMG] decorateDMs → añadidos', count, 'botones');
 }
+
+function getMasterTextFromBox(box){
+  // 1) Preferimos .text
+  let t = (box.querySelector('.text')?.textContent || '').trim();
+  // 2) Si está vacío, probamos dataset/raw
+  if (!t) t = (box.querySelector('.text')?.dataset?.raw || '').trim();
+  // 3) Último recurso: nodos de texto directos
+  if (!t) {
+    t = [...box.childNodes].map(n => n.nodeType === 3 ? n.textContent : '').join(' ').replace(/\s+/g,' ').trim();
+  }
+  return t;
+}
+
 
 async function handleBrushClick(btn) {
   const box = btn.closest('.msg.dm');
@@ -1029,33 +1053,47 @@ async function handleBrushClick(btn) {
     const headers = { 'Content-Type': 'application/json' };
     if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
 
+    const text = getMasterTextFromBox(box);
+
     const r = await fetch(joinUrl(API_BASE, '/scene-image'), {
       method: 'POST',
       headers,
-      body: JSON.stringify({ masterText: (txtEl.textContent || '').trim(), scene }),
+      body: JSON.stringify({ masterText: (text || '').trim(), scene }),
     });
 
+    console.log('[IMG] HTTP status:', r.status);
+
     if (!r.ok) {
-      // Log claro para depurar (verás el texto en la pestaña Console)
       const errText = await r.text().catch(() => '');
       console.error('[IMG] /scene-image failed:', r.status, errText);
-      throw new Error(`HTTP ${r.status}`);
+      shimmer.remove();
+      const err = document.createElement('div');
+      err.className = 'scene-image-error';
+      err.textContent = 'No se pudo generar la imagen.';
+      box.insertBefore(err, txtEl);
+      setTimeout(() => err.remove(), 4000);
+      return;
     }
 
     const data = await r.json();
     shimmer.remove();
 
-    const src = data?.dataUrl || data?.url; // por compatibilidad
-    if (!src) throw new Error('no_image_src');
+    const src = data?.dataUrl || data?.url || '';
+    console.log('[IMG] payload keys:', Object.keys(data || {}), 'src length:', src?.length || 0);
 
-    // Cargar e inyectar la imagen SOLO cuando esté completamente lista
-    const img = new Image();
-    img.alt = 'Escena generada';
-    img.decoding = 'async';
-    img.loading = 'lazy';
-    img.onload = () => { slot.hidden = false; slot.innerHTML = ''; slot.appendChild(img); };
-    img.onerror = () => { slot.hidden = true; slot.innerHTML = ''; };
-    img.src = src;
+    if (!src) {
+      const err = document.createElement('div');
+      err.className = 'scene-image-error';
+      err.textContent = 'Imagen vacía.';
+      box.insertBefore(err, txtEl);
+      setTimeout(() => err.remove(), 4000);
+      return;
+    }
+
+    // Inyecta imagen (con fallback a blob: si CSP bloquea data:)
+    injectSceneImage(slot, src);
+
+
 
   } catch (e) {
     try { shimmer.remove(); } catch {}
@@ -1069,6 +1107,120 @@ async function handleBrushClick(btn) {
     btn.classList.remove('loading');
   }
 }
+
+// Convierte dataURL -> blob: URL (fallback cuando CSP bloquea data:)
+function dataUrlToBlobUrl(dataUrl) {
+  try {
+    const [head, b64] = dataUrl.split(',');
+    const mime = (head.match(/data:(.*?);base64/) || [,'image/png'])[1];
+    const bin = atob(b64);
+    const len = bin.length;
+    const u8  = new Uint8Array(len);
+    for (let i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
+    const blob = new Blob([u8], { type: mime });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    console.warn('[IMG] dataUrlToBlobUrl failed:', e);
+    return null;
+  }
+}
+
+// Inyecta la imagen en el slot con fallback y logs
+function injectSceneImage(slot, src) {
+  const img = new Image();
+  img.alt = 'Escena generada';
+  img.decoding = 'async';
+  img.loading = 'lazy';
+  img.style.display = 'block';
+  img.style.width = '100%';
+
+  console.log('[IMG] render src type =', src?.slice(0, 30));
+
+  img.onload = () => {
+    slot.hidden = false;
+    slot.innerHTML = '';
+    slot.appendChild(img);
+    console.log('[IMG] loaded, size:', img.naturalWidth, 'x', img.naturalHeight);
+  };
+
+  img.onerror = () => {
+    if (src && src.startsWith('data:image/')) {
+      const blobUrl = dataUrlToBlobUrl(src);
+      if (blobUrl) {
+        console.warn('[IMG] data: blocked? retrying as blob:');
+        img.onerror = () => {
+          console.error('[IMG] blob fallback also failed');
+          slot.hidden = true;
+          slot.innerHTML = '';
+        };
+        img.src = blobUrl;
+        return;
+      }
+    }
+    console.error('[IMG] image load error');
+    slot.hidden = true;
+    slot.innerHTML = '';
+  };
+
+  img.src = src;
+}
+// Convierte dataURL -> blob: URL (fallback cuando CSP bloquea data:)
+function dataUrlToBlobUrl(dataUrl) {
+  try {
+    const [head, b64] = dataUrl.split(',');
+    const mime = (head.match(/data:(.*?);base64/) || [,'image/png'])[1];
+    const bin = atob(b64);
+    const len = bin.length;
+    const u8  = new Uint8Array(len);
+    for (let i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
+    const blob = new Blob([u8], { type: mime });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    console.warn('[IMG] dataUrlToBlobUrl failed:', e);
+    return null;
+  }
+}
+
+// Inyecta la imagen en el slot con fallback y logs
+function injectSceneImage(slot, src) {
+  const img = new Image();
+  img.alt = 'Escena generada';
+  img.decoding = 'async';
+  img.loading = 'lazy';
+  img.style.display = 'block';
+  img.style.width = '100%';
+
+  console.log('[IMG] render src type =', src?.slice(0, 30));
+
+  img.onload = () => {
+    slot.hidden = false;
+    slot.innerHTML = '';
+    slot.appendChild(img);
+    console.log('[IMG] loaded, size:', img.naturalWidth, 'x', img.naturalHeight);
+  };
+
+  img.onerror = () => {
+    if (src && src.startsWith('data:image/')) {
+      const blobUrl = dataUrlToBlobUrl(src);
+      if (blobUrl) {
+        console.warn('[IMG] data: blocked? retrying as blob:');
+        img.onerror = () => {
+          console.error('[IMG] blob fallback also failed');
+          slot.hidden = true;
+          slot.innerHTML = '';
+        };
+        img.src = blobUrl;
+        return;
+      }
+    }
+    console.error('[IMG] image load error');
+    slot.hidden = true;
+    slot.innerHTML = '';
+  };
+
+  img.src = src;
+}
+
 
 // Delegación global de clicks
 document.addEventListener('click', (ev) => {

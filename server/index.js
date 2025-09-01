@@ -224,7 +224,6 @@ api.post('/scene-image', requireAuth, async (req, res) => {
     if (typeof masterText !== 'string') masterText = '';
     const text = masterText.trim();
     if (!text) {
-      // Devolvemos 400 claro si no llega texto usable
       return res.status(400).json({ error: 'masterText_required' });
     }
 
@@ -233,40 +232,30 @@ api.post('/scene-image', requireAuth, async (req, res) => {
 
     const t0 = Date.now();
 
-    // 🚫 Sin response_format / quality para máxima compatibilidad de SDK
     const out = await openai.images.generate({
       model: 'gpt-image-1',
-      size: '1024x1024',      // seguro, rápido y soportado
-      prompt,
-      // seed: 4242,          // opcional para consistencia
+      size: '1024x1024',   // estable y rápido
+      prompt
+      // seed: 4242,        // opcional para consistencia
     });
 
-    const d = out?.data?.[0] || null;
+    const d   = out?.data?.[0] || null;
     const b64 = d?.b64_json || null;
     const url = d?.url || null;
 
     const src = b64 ? `data:image/png;base64,${b64}` : url;
     if (!src) return res.status(502).json({ error: 'no_image_payload' });
 
-    return res.json({
-      ok: true,
-      ms: Date.now() - t0,
-      dataUrl: src,           // mantenemos el mismo nombre de campo que usa el front
-    });
+    return res.json({ ok: true, ms: Date.now() - t0, dataUrl: src });
   } catch (e) {
     const status = e?.status || 500;
     const msg    = e?.error?.message || e?.message || 'image_generation_failed';
-    try {
-      if (e?.response) {
-        const txt = await e.response.text();
-        console.error('[scene-image]', status, msg, txt.slice(0, 600));
-      } else {
-        console.error('[scene-image]', status, msg);
-      }
-    } catch(_) {}
+    console.error('[scene-image]', status, msg);
+    if (e?.stack) console.error('[scene-image stack]', e.stack.slice(0, 800));
     return res.status(status < 500 ? status : 500).json({ error: msg, status });
   }
 });
+
 
 
 

@@ -9,17 +9,22 @@ export async function getOpenAI() {
   const mod = await import('openai');
   const OpenAI = mod.default || mod.OpenAI || mod;
 
-  const organization = process.env.OPENAI_ORG || undefined;     // ej: org_abc123
-  const project      = process.env.OPENAI_PROJECT || undefined;  // ej: proj_xyz789
+  // Solo pasamos org/proj si tienen el prefijo correcto para evitar ReferenceError
+  const rawOrg = process.env.OPENAI_ORG || '';
+  const rawProj = process.env.OPENAI_PROJECT || '';
 
-  openaiClient = new OpenAI({
-    apiKey,
-    ...(organization ? { organization } : {}),
-    ...(project ? { project } : {}),
-  });
+  const opts = { apiKey };
+  if (rawOrg && /^org_[a-zA-Z0-9]+$/.test(rawOrg)) opts.organization = rawOrg;
+  if (rawProj && /^proj_[a-zA-Z0-9]+$/.test(rawProj)) opts.project = rawProj;
 
-  // Log único para confirmar qué org/proyecto está usando el server
-  console.log('[AI] OpenAI init → org:', organization || '—', 'project:', project || '—');
+  openaiClient = new OpenAI(opts);
+
+  console.log(
+    '[AI] OpenAI init → org:',
+    opts.organization ? opts.organization : 'auto',
+    'project:',
+    opts.project ? opts.project : 'auto'
+  );
 
   return openaiClient;
 }
