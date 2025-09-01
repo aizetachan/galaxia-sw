@@ -134,7 +134,6 @@ export async function deleteUserCascade(id){
   }
   await sql(`DELETE FROM chat_messages WHERE user_id=$1`,[userId]);
   await sql(`DELETE FROM events WHERE user_id=$1`,[userId]);
-  await sql(`DELETE FROM dice_rolls WHERE user_id=$1`,[userId]);
   await sql(`DELETE FROM dice_rolls WHERE character_id IN (SELECT id FROM characters WHERE owner_user_id=$1)`,[userId]);
   await sql(`DELETE FROM characters WHERE owner_user_id=$1`,[userId]);
   await sql(`DELETE FROM sessions WHERE user_id=$1`,[userId]);
