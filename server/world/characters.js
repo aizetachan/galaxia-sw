@@ -7,7 +7,6 @@ import {
   ensureInt,
   pick,
   rollFormula,
-  outcomeFromDC,
   applyStatePatch,
   s,
 } from './utils.js';
@@ -440,17 +439,14 @@ router.post('/hooks/:id/decline', async (req, res) => {
 // ===========================================================
 router.post('/rolls', async (req, res) => {
   try {
-    const { character_id, user_id, skill = null, formula, target_dc = null } = req.body || {};
-    const cid = ensureInt(character_id);
-    const uid = ensureInt(user_id);
-    if (!cid || !formula) return res.status(400).json({ ok: false, error: 'character_id y formula requeridos' });
-    const detail = rollFormula(formula);
-    const outcome = outcomeFromDC(detail.total, ensureInt(target_dc));
+    const { character_id, context_type = 'generic', formula } = req.body || {};
+    if (!character_id || !formula) return res.status(400).json({ ok: false, error: 'character_id y formula requeridos' });
+    const result = rollFormula(formula);
     const { rows } = await q(
-      `INSERT INTO dice_rolls(character_id,user_id,skill,formula,target_dc,roll_detail,outcome)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+      `INSERT INTO dice_rolls(character_id, context_type, formula, result)
+       VALUES ($1::uuid, $2::text, $3::text, $4::jsonb)
        RETURNING *`,
-      [cid, uid, skill, formula, ensureInt(target_dc), JSON.stringify(detail), outcome]
+      [character_id, context_type, formula, JSON.stringify(result)]
     );
     res.json({ ok: true, roll: rows[0] });
   } catch (e) {
@@ -513,7 +509,7 @@ router.post('/events', async (req, res) => {
 // ===========================================================
 router.get('/characters/:id/timeline', async (req, res) => {
   try {
-    const id = ensureInt(req.params.id);
+    const id = req.params.id;
     const limit = Math.min(ensureInt(req.query.limit, 100) || 100, 300);
     const [a, b, c, d] = await Promise.all([
       q(
@@ -542,10 +538,10 @@ router.get('/characters/:id/timeline', async (req, res) => {
         [id, limit]
       ),
       q(
-        `SELECT r.*, 'roll' AS kind
+        `SELECT r.id, r.context_type, r.formula, r.result, r.created_at AS ts, 'roll' AS kind
            FROM dice_rolls r
           WHERE r.character_id = $1
-          ORDER BY r.ts DESC
+          ORDER BY r.created_at DESC
           LIMIT $2`,
         [id, limit]
       )

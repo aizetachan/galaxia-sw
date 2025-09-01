@@ -3,9 +3,10 @@ import express from 'express';
 import cors from 'cors';
 
 import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world/index.js';   // /world/..., /characters/...
+import worldRouter from './world/index.js';   // /world/..., /characters/... 
 import chatRouter from './chat.js';
 import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascade, updateUser } from './auth.js';
+import adminRouter from './routes/admin.js';
 
 const app = express();
 const api = express.Router();
@@ -133,6 +134,8 @@ api.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   await deleteUserCascade(id);
   return res.json({ ok: true });
 });
+
+api.use('/admin', requireAuth, requireAdmin, adminRouter);
 
 /* ====== DM y World ====== */
 // DM queda exactamente igual (expectativa del front: /api/dm/respond)
