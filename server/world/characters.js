@@ -11,8 +11,77 @@ import {
   applyStatePatch,
   s,
 } from './utils.js';
+import { planSuggestions } from './planner.js';
 
 const router = Router();
+
+// Helper: gather full character state with narrative context
+async function getCharacterState(id) {
+  const [attr, resources, location, inventory, qp, wsv, csv, threads, hooks, affordances, discoveries] = await Promise.all([
+    q('SELECT attr, value FROM character_attributes WHERE character_id=$1', [id]),
+    q('SELECT hp, energy, morale, hunger, credits FROM character_resources WHERE character_id=$1', [id]),
+    q(`SELECT l.id, l.name, l.type, l.parent_id, l.props, cl.last_seen_at
+         FROM character_location cl
+         JOIN locations l ON l.id = cl.location_id
+        WHERE cl.character_id=$1`, [id]),
+    q(`SELECT ci.qty, ci.equipped_slot, ii.id as "itemInstanceId", idf.code, idf.name, idf.type
+         FROM character_inventory ci
+         JOIN item_instances ii ON ci.item_instance_id = ii.id
+         JOIN item_defs idf ON idf.id = ii.item_def_id
+        WHERE ci.character_id=$1`, [id]),
+    q(`SELECT qp.state, qp.updated_at, qp.objective_id, q.id as "questId", q.code, q.title, q.description
+         FROM quest_progress qp
+         JOIN quests q ON q.id = qp.quest_id
+        WHERE qp.character_id=$1`, [id]),
+    q(`SELECT key, value FROM story_variables WHERE scope_type='world'`),
+    q(`SELECT key, value FROM story_variables WHERE scope_type='character' AND scope_id=$1`, [id]),
+    q(`SELECT t.id, t.title, t.kind, t.priority, t.state,
+              jsonb_agg(jsonb_build_object('id', b.id, 'idx', b.idx, 'title', b.title, 'state', b.state)) AS beats
+         FROM story_threads t
+         LEFT JOIN story_beats b ON b.thread_id = t.id
+        WHERE (t.scope='world' AND t.scope_id IS NULL) OR (t.scope='character' AND t.scope_id=$1)
+        GROUP BY t.id`, [id]),
+    q(`SELECT h.id, h.scope, h.scope_id, h.label, h.offer, h.weight, h.expires_at
+         FROM story_hooks h
+        WHERE ((h.scope='world' AND h.scope_id IS NULL)
+           OR (h.scope='character' AND h.scope_id=$1)
+           OR (h.scope='location' AND h.scope_id=(SELECT location_id FROM character_location WHERE character_id=$1)))
+          AND (h.expires_at IS NULL OR h.expires_at > now())`, [id]),
+    q(`SELECT a.id, a.action, a.params, a.weight
+         FROM affordances a
+        WHERE a.enabled = TRUE
+          AND a.location_id = (SELECT location_id FROM character_location WHERE character_id=$1)`, [id]),
+    q('SELECT entity_type, entity_id, key FROM discoveries WHERE character_id=$1', [id])
+  ]);
+
+  const quests = {
+    active: qp.rows.filter(r => r.state !== 'completed' && r.state !== 'failed'),
+    completed: qp.rows.filter(r => r.state === 'completed')
+  };
+
+  const threadsRows = threads.rows.map(t => ({
+    id: t.id,
+    title: t.title,
+    kind: t.kind,
+    priority: t.priority,
+    state: t.state,
+    beats: (t.beats || []).filter(b => b.id)
+  }));
+
+  return {
+    attributes: attr.rows,
+    resources: resources.rows[0] || null,
+    location: location.rows[0] || null,
+    inventory: inventory.rows,
+    quests,
+    storyVars: { world: wsv.rows, character: csv.rows },
+    threads: threadsRows,
+    hooks: hooks.rows,
+    affordances: affordances.rows,
+    discoveries: discoveries.rows,
+    suggestions: planSuggestions(threadsRows, hooks.rows, affordances.rows)
+  };
+}
 
 // ===========================================================
 //    Perfil del personaje del usuario logueado (GET /me)
@@ -113,42 +182,8 @@ router.get('/characters/:id/state', async (req, res) => {
     const { rows: charRows } = await q('SELECT id FROM characters WHERE id=$1', [id]);
     if (!charRows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
 
-    const [attr, resources, location, inventory, qp, wsv, csv] = await Promise.all([
-      q('SELECT attr, value FROM character_attributes WHERE character_id=$1', [id]),
-      q('SELECT hp, energy, morale, hunger, credits FROM character_resources WHERE character_id=$1', [id]),
-      q(`SELECT l.id, l.name, l.type, l.parent_id, l.props, cl.last_seen_at
-           FROM character_location cl
-           JOIN locations l ON l.id = cl.location_id
-          WHERE cl.character_id=$1`, [id]),
-      q(`SELECT ci.qty, ci.equipped_slot, ii.id as "itemInstanceId", idf.code, idf.name, idf.type
-           FROM character_inventory ci
-           JOIN item_instances ii ON ci.item_instance_id = ii.id
-           JOIN item_defs idf ON idf.id = ii.item_def_id
-          WHERE ci.character_id=$1`, [id]),
-      q(`SELECT qp.state, qp.updated_at, qp.objective_id, q.id as "questId", q.code, q.title, q.description
-           FROM quest_progress qp
-           JOIN quests q ON q.id = qp.quest_id
-          WHERE qp.character_id=$1`, [id]),
-      q(`SELECT key, value FROM story_variables WHERE scope_type='world'`),
-      q(`SELECT key, value FROM story_variables WHERE scope_type='character' AND scope_id=$1`, [id])
-    ]);
-
-    const quests = {
-      active: qp.rows.filter(r => r.state !== 'completed' && r.state !== 'failed'),
-      completed: qp.rows.filter(r => r.state === 'completed')
-    };
-
-    res.json({
-      ok: true,
-      state: {
-        attributes: attr.rows,
-        resources: resources.rows[0] || null,
-        location: location.rows[0] || null,
-        inventory: inventory.rows,
-        quests,
-        storyVars: { world: wsv.rows, character: csv.rows }
-      }
-    });
+    const state = await getCharacterState(id);
+    res.json({ ok: true, state });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -349,6 +384,54 @@ router.get('/characters/:id/quests', async (req, res) => {
     return res.json({ ok: true, quests: rows });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Narrative actions
+// ===========================================================
+router.post('/characters/:id/act', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { affordance_id = null, free_text = null } = req.body || {};
+
+    if (affordance_id) {
+      // simple validation of affordance in current location
+      const { rows } = await q(
+        `SELECT id FROM affordances
+          WHERE id=$1 AND enabled=TRUE
+            AND location_id = (SELECT location_id FROM character_location WHERE character_id=$2)`,
+        [affordance_id, id]
+      );
+      if (!rows.length) return res.status(400).json({ ok: false, error: 'affordance inválida' });
+      // could apply actions/effects here
+    }
+    // free_text is ignored for now but accepted
+
+    const state = await getCharacterState(id);
+    res.json({ ok: true, state });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/threads/:threadId/snooze', async (req, res) => {
+  try {
+    const threadId = req.params.threadId;
+    await q('UPDATE story_threads SET state=\'paused\' WHERE id=$1', [threadId]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/hooks/:id/decline', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await q('UPDATE story_hooks SET expires_at=now() WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
