@@ -210,7 +210,6 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
     languagePolicy,
     dicePolicy,
     tagProtocol,
-    onboarding,
     isIntroStart ? introPolicy : '',
     worldBlock,
     historyBlock,
@@ -251,6 +250,34 @@ function ensureJsonHeader(text){
   // Fallback mínimo para que el frontend siempre tenga estructura
   return `{"ui":{"narration":"","choices":[]},"control":{"state":"","rolls":[],"memos":[],"confirms":[]}}\n` + s;
 }
+/* ========= Formatear respuesta solo-UI (sin lógica) ========= */
+function makeUiOnlyText(llmText) {
+  const s = String(llmText || '');
+  const nl = s.indexOf('\n');
+  const header = (nl >= 0 ? s.slice(0, nl) : s).trim();
+  const body   = (nl >= 0 ? s.slice(nl + 1) : '');
+
+  let ui = null;
+  try {
+    const h = JSON.parse(header);
+    ui = h?.ui || null;
+  } catch {}
+
+  const stripTags = (t) => String(t).replace(/<<[^>]+>>/g, '').trim();
+
+  if (ui && typeof ui === 'object') {
+    const narration = stripTags(ui.narration || '');
+    const choices = Array.isArray(ui.choices) ? ui.choices : [];
+    const bullets = choices.length
+      ? '\n\n' + choices.map(c => '• ' + (c?.label ?? '')).join('\n')
+      : '';
+    return (narration + bullets).trim() || '…';
+  }
+
+  // Fallback: si no hubo cabecera JSON válida, devuelve el texto completo limpiando etiquetas
+  return stripTags(s || body);
+}
+
 
 /* ========= OpenAI call ========= */
 function isGpt5(model) { return /^gpt-5/i.test(model || ''); }
@@ -432,33 +459,39 @@ async function handleDM(req, res) {
       return res.status(200).json({ ok: true, text: t, meta: { ai_ok: false, model, mode } });
     }
 
-    // Asegurar JSON en primera línea
-    let safeText = ensureJsonHeader(outText);
+       // Asegurar JSON en primera línea
+       let safeText = ensureJsonHeader(outText);
 
-    // Extraer y guardar memo del encabezado JSON como “light notes”
-    try {
-      const nl = safeText.indexOf('\n');
-      const first = (nl >= 0 ? safeText.slice(0, nl) : safeText).trim();
-      const head = JSON.parse(first);
-      const memos = head?.control?.memos;
-      if (Array.isArray(memos) && memos.length) {
-        const current = getNotes(userId);
-        setNotes(userId, [...current, ...memos]);
-      }
-    } catch {}
-
-    await saveMsg(userId, 'dm', safeText);
-
-    try {
-      await maybeUpdateSummary({
-        userId,
-        historyLines: history.lines,
-      });
-    } catch (e) {
-      console.warn('[DM] maybeUpdateSummary error:', e?.message || e);
-    }
-
-    return res.status(200).json({ ok: true, text: safeText, meta: { ai_ok: true, model, mode } });
+       // Extraer y guardar memo del encabezado JSON como “light notes”
+       try {
+         const nl = safeText.indexOf('\n');
+         const first = (nl >= 0 ? safeText.slice(0, nl) : safeText).trim();
+         const head = JSON.parse(first);
+         const memos = head?.control?.memos;
+         if (Array.isArray(memos) && memos.length) {
+           const current = getNotes(userId);
+           setNotes(userId, [...current, ...memos]);
+         }
+       } catch {}
+   
+       // Construye el texto visible para la UI (sin lógica)
+       const uiText = makeUiOnlyText(safeText);
+   
+       // Guarda en histórico lo mismo que verá el jugador
+       await saveMsg(userId, 'dm', uiText);
+   
+       try {
+         await maybeUpdateSummary({
+           userId,
+           historyLines: history.lines,
+         });
+       } catch (e) {
+         console.warn('[DM] maybeUpdateSummary error:', e?.message || e);
+       }
+   
+       // Devuelve solo lo visible
+       return res.status(200).json({ ok: true, text: uiText, meta: { ai_ok: true, model, mode } });
+   
 
   } catch (e) {
     console.error('[DM] fatal:', e?.message || e);
