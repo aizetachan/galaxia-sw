@@ -311,6 +311,8 @@ html.ready body { visibility: visible; }
 .scene-image-slot img {
   display: block;
   width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
   max-height: 320px;
   object-fit: cover;
 }

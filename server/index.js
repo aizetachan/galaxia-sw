@@ -225,6 +225,60 @@ api.post('/scene-image', requireAuth, async (req, res) => {
     if (!masterText || typeof masterText !== 'string') {
       return res.status(400).json({ error: 'masterText_required' });
     }
+
+    // 👇 ESTA LÍNEA SE QUEDA IGUAL
+    const openai = await getOpenAI();
+
+    const prompt = buildSceneImagePrompt({ masterText, scene });
+
+    const t0 = Date.now();
+    // 👇 ESTA ES LA PARTE QUE CAMBIA (size válido + sin quality de momento)
+    const out = await openai.images.generate({
+      model: 'gpt-image-1',
+      size: '1792x1024',       // válidos: '1024x1024', '1792x1024', '1024x1792'
+      prompt,
+      response_format: 'b64_json',
+      // quality: 'high',      // opcional, aumenta latencia/coste
+      // seed: 4242,           // opcional para consistencia
+    });
+
+    const b64 = out?.data?.[0]?.b64_json;
+    if (!b64) return res.status(502).json({ error: 'no_image_returned' });
+
+    return res.json({
+      ok: true,
+      ms: Date.now() - t0,
+      dataUrl: `data:image/png;base64,${b64}`
+    });
+  } catch (e) {
+    // 👇 REEMPLAZA TU catch POR ESTE
+    const status = e?.status || 500;
+    const msg    = e?.error?.message || e?.message || 'image_generation_failed';
+
+    // Log detallado del cuerpo si existe
+    try {
+      if (e?.response) {
+        const txt = await e.response.text();
+        console.error('[scene-image]', status, msg, txt.slice(0, 600));
+      } else {
+        console.error('[scene-image]', status, msg);
+      }
+    } catch(_) {}
+
+    return res.status(status < 500 ? status : 500).json({
+      error: msg,
+      status,
+    });
+  }
+});
+
+
+api.post('/scene-image', requireAuth, async (req, res) => {
+  try {
+    const { masterText, scene } = req.body || {};
+    if (!masterText || typeof masterText !== 'string') {
+      return res.status(400).json({ error: 'masterText_required' });
+    }
     const openai = await getOpenAI();
     const prompt = buildSceneImagePrompt({ masterText, scene });
 
