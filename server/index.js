@@ -235,7 +235,7 @@ api.post('/scene-image', requireAuth, async (req, res) => {
     // 👇 ESTA ES LA PARTE QUE CAMBIA (size válido + sin quality de momento)
     const out = await openai.images.generate({
       model: 'gpt-image-1',
-      size: '1792x1024',       // válidos: '1024x1024', '1792x1024', '1024x1792'
+      size: '1024x1024',       // válidos: '1024x1024', '1792x1024', '1024x1792'
       prompt,
       response_format: 'b64_json',
       // quality: 'high',      // opcional, aumenta latencia/coste
