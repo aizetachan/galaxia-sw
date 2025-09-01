@@ -9,8 +9,8 @@ export async function getOpenAI() {
   const mod = await import('openai');
   const OpenAI = mod.default || mod.OpenAI || mod;
 
-  const organization = process.env.org-CiL3m6iYi8Q1GadANmoOArjj || undefined;     // ej: org_abc123
-  const project      = process.env.proj_17S47UrDoCVg73Z5xOth0WD7|| undefined;  // ej: proj_xyz789
+  const organization = process.env.OPENAI_ORG || undefined;     // ej: org_abc123
+  const project      = process.env.OPENAI_PROJECT || undefined;  // ej: proj_xyz789
 
   openaiClient = new OpenAI({
     apiKey,
