@@ -16,7 +16,33 @@ export function dgroup(label, fn) {
 }
 
 export const API_STORE_KEY = 'sw:api_base';
-export const DEFAULT_API_BASE = 'https://galaxia-sw.vercel.app/api';
+
+function getMeta(name) {
+  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
+}
+function getQuery(name) {
+  try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
+}
+
+function resolveApiBase() {
+  // 1) ?api=... en la URL → guarda en localStorage
+  const q = getQuery('api');
+  if (q) { localStorage.setItem(API_STORE_KEY, q); return q; }
+
+  // 2) localStorage (si ya quedó guardado antes)
+  const s = localStorage.getItem(API_STORE_KEY);
+  if (s) return s;
+
+  // 3) <meta name="api_base" content="...">
+  const m = getMeta('api_base');
+  if (m) return m;
+
+  // 4) fallback a producción
+  return 'https://galaxia-sw.vercel.app/api';
+}
+
+export const DEFAULT_API_BASE = resolveApiBase();
+
 
 export function getMeta(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }

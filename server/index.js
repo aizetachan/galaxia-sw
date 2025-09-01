@@ -9,6 +9,13 @@ import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascad
 import adminRouter from './routes/admin.js';
 
 const app = express();
+// CORS y JSON
+
+// Healthcheck (para validar que el server está vivo)
+app.get('/health', (_req, res) => {
+  res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
 const api = express.Router();
 
 /* ====== Logging ====== */
