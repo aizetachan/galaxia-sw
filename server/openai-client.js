@@ -1,13 +1,26 @@
+// server/openai-client.js
 let openaiClient = null;
 
 export async function getOpenAI() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY missing');
-  }
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY missing');
   if (openaiClient) return openaiClient;
+
   const mod = await import('openai');
   const OpenAI = mod.default || mod.OpenAI || mod;
-  openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+  const organization = process.env.org-CiL3m6iYi8Q1GadANmoOArjj || undefined;     // ej: org_abc123
+  const project      = process.env.proj_17S47UrDoCVg73Z5xOth0WD7|| undefined;  // ej: proj_xyz789
+
+  openaiClient = new OpenAI({
+    apiKey,
+    ...(organization ? { organization } : {}),
+    ...(project ? { project } : {}),
+  });
+
+  // Log único para confirmar qué org/proyecto está usando el server
+  console.log('[AI] OpenAI init → org:', organization || '—', 'project:', project || '—');
+
   return openaiClient;
 }
 
