@@ -64,7 +64,8 @@ async function handleLogin() {
 
 async function loadUsers() {
   await ensureApiBase();
-  const tbody = document.querySelector('#users-table tbody');
+  const tbody = panelEl ? panelEl.querySelector('#users-table tbody')
+                        : document.querySelector('#users-table tbody');
   if (!tbody) return;
   tbody.innerHTML = '';
   try {
@@ -137,7 +138,7 @@ document.addEventListener('admin-open', async () => {
 
 // Si cambia el estado de auth mientras el panel está abierto, sincroniza
 listenAuthChanges(async () => {
-  const open = !!document.getElementById('admin-user');
+  const open = !!panelEl?.isConnected;
   if (!open) return;
   const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
   if (isAdmin) {
