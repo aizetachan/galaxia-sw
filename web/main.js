@@ -1164,62 +1164,7 @@ function injectSceneImage(slot, src) {
 
   img.src = src;
 }
-// Convierte dataURL -> blob: URL (fallback cuando CSP bloquea data:)
-function dataUrlToBlobUrl(dataUrl) {
-  try {
-    const [head, b64] = dataUrl.split(',');
-    const mime = (head.match(/data:(.*?);base64/) || [,'image/png'])[1];
-    const bin = atob(b64);
-    const len = bin.length;
-    const u8  = new Uint8Array(len);
-    for (let i = 0; i < len; i++) u8[i] = bin.charCodeAt(i);
-    const blob = new Blob([u8], { type: mime });
-    return URL.createObjectURL(blob);
-  } catch (e) {
-    console.warn('[IMG] dataUrlToBlobUrl failed:', e);
-    return null;
-  }
-}
 
-// Inyecta la imagen en el slot con fallback y logs
-function injectSceneImage(slot, src) {
-  const img = new Image();
-  img.alt = 'Escena generada';
-  img.decoding = 'async';
-  img.loading = 'lazy';
-  img.style.display = 'block';
-  img.style.width = '100%';
-
-  console.log('[IMG] render src type =', src?.slice(0, 30));
-
-  img.onload = () => {
-    slot.hidden = false;
-    slot.innerHTML = '';
-    slot.appendChild(img);
-    console.log('[IMG] loaded, size:', img.naturalWidth, 'x', img.naturalHeight);
-  };
-
-  img.onerror = () => {
-    if (src && src.startsWith('data:image/')) {
-      const blobUrl = dataUrlToBlobUrl(src);
-      if (blobUrl) {
-        console.warn('[IMG] data: blocked? retrying as blob:');
-        img.onerror = () => {
-          console.error('[IMG] blob fallback also failed');
-          slot.hidden = true;
-          slot.innerHTML = '';
-        };
-        img.src = blobUrl;
-        return;
-      }
-    }
-    console.error('[IMG] image load error');
-    slot.hidden = true;
-    slot.innerHTML = '';
-  };
-
-  img.src = src;
-}
 
 
 // Delegación global de clicks
