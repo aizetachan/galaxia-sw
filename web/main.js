@@ -965,37 +965,40 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js').catch(e => dlog('SW registration failed', e));
   });
 }
-/// ============================================================
-//          Scene image (🖌️) — decorate DM bubbles
+// ============================================================
+//          Scene image (🖌️) — decorate DM bubbles (Máster)
 // ============================================================
 function decorateDMs() {
   const root = document.getElementById('chat');
   if (!root) return;
 
-  // Soportamos varias estructuras de DOM:
-  const selector = '.msg.dm, .msg[data-kind="dm"], [data-role="dm"]';
-  const dmMsgs = root.querySelectorAll(selector);
+  // Ampliamos el selector: .msg.dm, data-kind="dm" o .msg cuyo header diga "Máster"
+  const candidates = root.querySelectorAll('.msg');
 
   let count = 0;
-  dmMsgs.forEach((box) => {
+  candidates.forEach((box) => {
     if (box.dataset.enhanced === '1') return;
 
-    // 1) Localiza contenedores
-    // meta/header: donde pondremos el botón
-    const meta = box.querySelector('.meta') || box.querySelector('.header') || box.querySelector('.name') || box;
-    // texto: lo usaremos para construir el prompt
-    const txt = box.querySelector('.text') || box;
+    const meta = box.querySelector('.meta, .header, .name') || box;
+    const txt  = box.querySelector('.text') || null;
 
-    if (!meta || !txt) return;
+    // ¿Es del Máster?
+    const isDM =
+      box.classList.contains('dm') ||
+      box.getAttribute('data-kind') === 'dm' ||
+      /máster|master/i.test((meta?.textContent || ''));
 
-    // 2) Slot de imagen antes del texto
+    if (!isDM || !meta || !txt) return;
+
+    // --- Slot de imagen: lo insertamos ANTES del texto, sin necesidad de padre común
     const slot = document.createElement('div');
     slot.className = 'scene-image-slot';
     slot.hidden = true;
     slot.style.minHeight = '1px'; // evita colapsos por CSS heredado
-    box.insertBefore(slot, txt);
+    // 👇 Clave: no usamos box.insertBefore(..., txt) (txt no es hijo directo de box).
+    txt.insertAdjacentElement('beforebegin', slot);
 
-    // 3) Botón pincel junto al nombre del Máster
+    // --- Botón pincel junto al nombre del Máster
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'brush-btn';
@@ -1010,17 +1013,23 @@ function decorateDMs() {
   console.log('[IMG] decorateDMs → añadidos', count, 'botones');
 }
 
+
 function getMasterTextFromBox(box){
-  // 1) Preferimos .text
+  // 1) Texto principal
   let t = (box.querySelector('.text')?.textContent || '').trim();
   // 2) Si está vacío, probamos dataset/raw
   if (!t) t = (box.querySelector('.text')?.dataset?.raw || '').trim();
   // 3) Último recurso: nodos de texto directos
   if (!t) {
-    t = [...box.childNodes].map(n => n.nodeType === 3 ? n.textContent : '').join(' ').replace(/\s+/g,' ').trim();
+    t = [...box.childNodes]
+      .map(n => n.nodeType === 3 ? n.textContent : '')
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
   return t;
 }
+
 
 
 async function handleBrushClick(btn) {
@@ -1092,6 +1101,7 @@ async function handleBrushClick(btn) {
 
     // Inyecta imagen (con fallback a blob: si CSP bloquea data:)
     injectSceneImage(slot, src);
+
 
 
 
