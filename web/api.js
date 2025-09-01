@@ -1,8 +1,4 @@
 // === DEBUG helpers ===
-// Use Vite's runtime env flags instead of Node's `process.env` which is
-// undefined in the browser. If `import.meta.env.PROD` is true we are running a
-// production build; otherwise enable debug logs. Falling back to `true`
-// mirrors the previous behaviour when the env flag is missing.
 const DEBUG = !(
   typeof import.meta !== 'undefined' &&
   import.meta.env &&
@@ -17,57 +13,44 @@ export function dgroup(label, fn) {
 
 export const API_STORE_KEY = 'sw:api_base';
 
-function getMeta(name) {
+// Helpers seguros (sin duplicados)
+function getMetaSafe(name) {
   try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
 }
-function getQuery(name) {
-  try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
+function getQuerySafe(name) {
+  try { return new URL(location.href).searchParams.get(name) || ''; } catch { return ''; }
 }
-
-function resolveApiBase() {
-  // 1) ?api=... en la URL → guarda en localStorage
-  const q = getQuery('api');
-  if (q) { localStorage.setItem(API_STORE_KEY, q); return q; }
-
-  // 2) localStorage (si ya quedó guardado antes)
-  const s = localStorage.getItem(API_STORE_KEY);
-  if (s) return s;
-
-  // 3) <meta name="api_base" content="...">
-  const m = getMeta('api_base');
-  if (m) return m;
-
-  // 4) fallback a producción
-  return 'https://galaxia-sw.vercel.app/api';
-}
-
-export const DEFAULT_API_BASE = resolveApiBase();
-
-
-export function getMeta(name) {
-  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
-}
-
-export function getQuery(name) {
-  try { const u = new URL(location.href); return u.searchParams.get(name) || ''; } catch { return ''; }
-}
-
 export function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
 
-export let API_BASE =
-  (typeof window !== 'undefined' && window.API_BASE) ||
-  getMeta('api-base') ||
-  (typeof location !== 'undefined' ? (location.origin + '/api') : '') ||
-  DEFAULT_API_BASE;
+// Resolución de API base (orden: ?api → localStorage → window.API_BASE → <meta api_base> → fallback)
+export function resolveApiBase() {
+  const q = getQuerySafe('api');
+  if (q) { try { localStorage.setItem(API_STORE_KEY, q); } catch {} return q; }
 
+  const cached = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
+  if (cached) return cached;
+
+  const win = (typeof window !== 'undefined' && window.API_BASE) ? String(window.API_BASE) : '';
+  if (win) return win;
+
+  const meta = getMetaSafe('api_base'); // <-- usa api_base (con guión bajo)
+  if (meta) return meta;
+
+  // Fallback a prod
+  return 'https://galaxia-sw.vercel.app/api';
+}
+
+export let API_BASE = resolveApiBase();
+
+// UI: pinta estado del server en la badgita
 export function setServerStatus(ok, msg) {
   const el = document.getElementById('server-status');
   if (!el) return;
-  const mode = typeof window !== 'undefined' && typeof window.getDmMode === 'function'
+  const mode = (typeof window !== 'undefined' && typeof window.getDmMode === 'function')
     ? window.getDmMode()
     : 'rich';
   const label = ok ? (msg || `Server: OK — M: ${mode}`) : (msg || 'Server: FAIL');
@@ -84,7 +67,6 @@ export async function probeHealth(base) {
     const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
     const ct = r.headers.get('content-type') || '';
     const txt = await r.text();
-    dlog('probe', { base, status: r.status, ct });
     if (!r.ok) return { ok: false, reason: `HTTP ${r.status}`, text: txt };
     if (!ct.includes('application/json')) return { ok: false, reason: 'not-json', text: txt };
     try {
@@ -97,17 +79,19 @@ export async function probeHealth(base) {
   } finally { clearTimeout(timer); }
 }
 
+// Establece API_BASE probando varios candidatos y pinta el estado
 export async function ensureApiBase() {
-  const override = getQuery('api');
+  const override = getQuerySafe('api');
   const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
   const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
-  const metaTag  = getMeta('api-base') || '';
-  const cached   = localStorage.getItem(API_STORE_KEY) || '';
+  const metaTag  = getMetaSafe('api_base') || '';
+  const cached   = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
 
-  const candidates = [override, winSet, origin, metaTag, DEFAULT_API_BASE, cached]
+  const candidates = [override, cached, winSet, metaTag, origin, 'https://galaxia-sw.vercel.app/api']
     .filter(Boolean)
     .map(s => String(s).replace(/\/+$/, ''));
 
+  // quitar duplicados manteniendo orden
   const seen = new Set();
   const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
 
@@ -121,10 +105,11 @@ export async function ensureApiBase() {
       try { localStorage.setItem(API_STORE_KEY, API_BASE); } catch {}
       if (typeof window !== 'undefined') window.API_BASE = API_BASE;
       dlog('Using API_BASE =', API_BASE);
-      setServerStatus(true, `Server: OK — M: ${typeof window !== 'undefined' && typeof window.getDmMode === 'function' ? window.getDmMode() : 'rich'}`);
-      return;
+      setServerStatus(true, `Server: OK — M: ${(typeof window !== 'undefined' && typeof window.getDmMode === 'function') ? window.getDmMode() : 'rich'}`);
+      return API_BASE;
     }
   }
   console.warn('[API] No healthy base found. Using initial:', API_BASE || '(empty)');
   setServerStatus(false, 'Server: FAIL (no health)');
+  return API_BASE;
 }

@@ -1,26 +1,50 @@
 // server/index.js
 import express from 'express';
 import cors from 'cors';
+import pg from 'pg';
 
 import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world/index.js';   // /world/..., /characters/... 
+import worldRouter from './world/index.js';   // /world/..., /characters/...
 import chatRouter from './chat.js';
-import { register, login, requireAuth, requireAdmin, listUsers, deleteUserCascade, updateUser } from './auth.js';
+import {
+  register,
+  login,
+  requireAuth,
+  requireAdmin,
+  listUsers,
+  deleteUserCascade,
+  updateUser,
+} from './auth.js';
 import adminRouter from './routes/admin.js';
 
 const app = express();
-// CORS y JSON
-
-// Healthcheck (para validar que el server está vivo)
-app.get('/health', (_req, res) => {
-  res.status(200).json({ ok: true, time: new Date().toISOString() });
-});
-
 const api = express.Router();
 
-/* ====== Logging ====== */
+/* ====== DB helper para auto-provisión de personaje ====== */
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Neon / Vercel
+});
+async function ensureCharacter(username) {
+  if (!username) return;
+  try {
+    await pool.query('SELECT public.ensure_active_character($1)', [username]);
+  } catch (e) {
+    console.warn('[ensureCharacter] warning:', e?.message || e);
+  }
+}
+
+/* ====== Logging básico ====== */
 app.use((req, _res, next) => {
-  console.log('[REQ]', req.method, req.url, 'Origin=', req.headers.origin || '-', 'UA=', req.headers['user-agent'] || '-');
+  console.log(
+    '[REQ]',
+    req.method,
+    req.url,
+    'Origin=',
+    req.headers.origin || '-',
+    'UA=',
+    req.headers['user-agent'] || '-'
+  );
   next();
 });
 
@@ -38,7 +62,7 @@ if (morganMW) app.use(morganMW('tiny'));
 /* ====== Parsing ====== */
 app.use(express.json({ limit: '1mb' }));
 
-/* ====== CORS ====== */
+/* ====== CORS (único bloque) ====== */
 const ALLOWED = (process.env.ALLOWED_ORIGIN || '')
   .split(',')
   .map(s => s.trim())
@@ -57,7 +81,6 @@ const corsOpts = {
   credentials: true,
   optionsSuccessStatus: 200,
 };
-
 app.use(cors(corsOpts));
 app.options('*', cors(corsOpts)); // preflight
 
@@ -80,10 +103,9 @@ api.post('/auth/register', async (req, res) => {
   console.log('[AUTH/register] body=', req.body);
   try {
     const { username, pin } = req.body || {};
-    // Crea el usuario
-    await register(username, pin);
-    // Auto-login para devolver el mismo payload que /login
-    const payload = await login(username, pin); // -> { token, user }
+    await register(username, pin);                 // crea usuario
+    const payload = await login(username, pin);    // auto-login -> { token, user }
+    await ensureCharacter(username);               // auto-provisión personaje + seed
     return res.json(payload);
   } catch (e) {
     console.error('[AUTH/register] error', e);
@@ -96,6 +118,7 @@ api.post('/auth/login', async (req, res) => {
   try {
     const { username, pin } = req.body || {};
     const r = await login(username, pin);
+    await ensureCharacter(username);               // garantiza personaje activo + seed
     return res.json(r);
   } catch (e) {
     console.error('[AUTH/login] error', e);
@@ -145,12 +168,10 @@ api.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
 api.use('/admin', requireAuth, requireAdmin, adminRouter);
 
 /* ====== DM y World ====== */
-// DM queda exactamente igual (expectativa del front: /api/dm/respond)
+// DM (front espera /api/dm/respond)
 api.use('/dm', dmRouter);
 
-// 🔧 IMPORTANTE: montamos worldRouter en /api (no en /api/world)
-// Porque dentro del router usamos prefijos /world/... y /characters/...
-// Resultado final: /api/world/..., /api/characters/:id/state, etc.
+// Montamos worldRouter directamente: crea /api/world/... y /api/characters/...
 api.use(worldRouter);
 api.use('/chat', chatRouter);
 
@@ -164,6 +185,7 @@ api.post('/roll', async (req, res) => {
   return res.json({ ok: true, roll: n, outcome, text });
 });
 
+/* ====== Montaje de routers ====== */
 app.use('/api', api);
 app.use('/api/v1', api);
 

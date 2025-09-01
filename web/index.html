@@ -2,30 +2,34 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-    <meta name="api_base" content="https://galaxia-sw.vercel.app/api">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
+    />
+    <!-- <meta name="api_base"> apunta a tu API en Vercel -->
+    <meta name="api_base" content="https://galaxia-sw.vercel.app/api" />
 
     <title>GALACTIC</title>
-        <!-- CSS crítico mínimo para evitar parpadeos durante la carga -->
-        <style>
-          html.preload body { visibility: hidden; }
-          html.ready body { visibility: visible; }
-        </style>
-        <link rel="stylesheet" href="./styles.css" />
+
+    <!-- CSS crítico mínimo para evitar parpadeos durante la carga -->
+    <style>
+      html.preload body { visibility: hidden; }
+      html.ready body { visibility: visible; }
+    </style>
     <link rel="stylesheet" href="./styles.css" />
   </head>
+
   <body>
     <header class="app-header">
       <h1>GALACTIC</h1>
       <p class="muted">
-        Un universo compartido. Cada decisión deja huella y cambia el destino de
-        la galaxia.
+        Un universo compartido. Cada decisión deja huella y cambia el destino de la galaxia.
       </p>
       <span id="server-status" class="badge muted">Server: …</span>
     </header>
 
-    <!-- Tarjeta de bienvenida para invitados (mismo marco que el chat) -->
     <main class="chat-wrap">
+      <!-- Tarjeta de bienvenida / auth -->
       <section id="guest-card" class="chat" hidden>
         <div class="guest-info">
           <h3 class="guest-title">MASTER:</h3>
@@ -36,35 +40,21 @@
           </p>
         </div>
 
-        <!-- Reutilizamos tus mismos IDs/clases para no romper nada -->
         <div class="auth-row" style="margin-top:16px">
-          <input
-            id="auth-username"
-            placeholder="Usuario"
-            autocomplete="username"
-            autocapitalize="none"
-            spellcheck="false"
-          />
-          <input
-            id="auth-pin"
-            placeholder="PIN (4 dígitos)"
-            maxlength="4"
-            inputmode="numeric"
-            pattern="[0-9]{4}"
-            autocomplete="one-time-code"
-          />
+          <input id="auth-username" placeholder="Usuario" autocomplete="username" autocapitalize="none" spellcheck="false" />
+          <input id="auth-pin" placeholder="PIN (4 dígitos)" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="one-time-code" />
           <button id="auth-login">Entrar</button>
           <button id="auth-register" class="outline">Crear</button>
           <span id="auth-status" class="muted"></span>
         </div>
       </section>
 
-      <!-- Viewport principal; por ahora solo contiene el chat -->
+      <!-- Viewport principal -->
       <div id="main-viewport" class="chat">
         <section id="chat"></section>
       </div>
 
-      <!-- CTA de tirada -->
+      <!-- CTA tirada -->
       <section id="roll-cta" class="roll-cta hidden" aria-live="polite">
         <div class="roll-cta__text">
           <strong id="roll-title">Tirada:</strong>
@@ -77,7 +67,7 @@
         </div>
       </section>
 
-      <!-- CTA de confirmación (onboarding) -->
+      <!-- CTA confirmación -->
       <section id="confirm-cta" class="roll-cta hidden" aria-live="polite">
         <div class="roll-cta__text">
           <strong id="confirm-title">Confirmación:</strong>
@@ -100,38 +90,12 @@
       </section>
     </main>
 
-    <!-- Ocultamos el footer por que de momento no lo necesititamos
-    <footer class="app-footer">
-      <span class="muted">
-        /privado o /publico para tu perfil. (texto para indicaciones técnicas)
-      </span>
-    </footer> -->
-
-    <!-- API base: detect origin automatically -->
-    <script>
-      window.API_BASE = location.origin + "/api";
+    <!-- Inicializa la base de la API ANTES de cargar main.js -->
+    <script type="module">
+      import { ensureApiBase } from './api.js';
+      // espera a resolver la API y pintar el estado del server
+      await ensureApiBase();
     </script>
-
-    <!-- Ping de salud (pinta "Server: OK/FAIL" arriba) -->
-    <script>
-      (async () => {
-        const el = document.getElementById("server-status");
-        const trimSlash = (s) => (s || "").replace(/\/+$/, "");
-        const base = trimSlash(window.API_BASE) || trimSlash(location.origin);
-        const healthUrl = base + "/health";
-        try {
-          const r = await fetch(healthUrl, { method: "GET" });
-          el.textContent = r.ok ? "Server: OK" : "Server: ?";
-          el.title = healthUrl;
-        } catch {
-          el.textContent = "Server: FAIL";
-          el.title = healthUrl;
-        }
-      })();
-    </script>
-
-    <!-- Módulo de administración -->
-    <!-- <script type="module" src="./admin.js"></script> -->
 
     <!-- App principal -->
     <script type="module" src="./main.js"></script>
