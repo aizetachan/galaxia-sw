@@ -11,8 +11,77 @@ import {
   applyStatePatch,
   s,
 } from './utils.js';
+import { planSuggestions } from './planner.js';
 
 const router = Router();
+
+// Helper: gather full character state with narrative context
+async function getCharacterState(id) {
+  const [attr, resources, location, inventory, qp, wsv, csv, threads, hooks, affordances, discoveries] = await Promise.all([
+    q('SELECT attr, value FROM character_attributes WHERE character_id=$1', [id]),
+    q('SELECT hp, energy, morale, hunger, credits FROM character_resources WHERE character_id=$1', [id]),
+    q(`SELECT l.id, l.name, l.type, l.parent_id, l.props, cl.last_seen_at
+         FROM character_location cl
+         JOIN locations l ON l.id = cl.location_id
+        WHERE cl.character_id=$1`, [id]),
+    q(`SELECT ci.qty, ci.equipped_slot, ii.id as "itemInstanceId", idf.code, idf.name, idf.type
+         FROM character_inventory ci
+         JOIN item_instances ii ON ci.item_instance_id = ii.id
+         JOIN item_defs idf ON idf.id = ii.item_def_id
+        WHERE ci.character_id=$1`, [id]),
+    q(`SELECT qp.state, qp.updated_at, qp.objective_id, q.id as "questId", q.code, q.title, q.description
+         FROM quest_progress qp
+         JOIN quests q ON q.id = qp.quest_id
+        WHERE qp.character_id=$1`, [id]),
+    q(`SELECT key, value FROM story_variables WHERE scope_type='world'`),
+    q(`SELECT key, value FROM story_variables WHERE scope_type='character' AND scope_id=$1`, [id]),
+    q(`SELECT t.id, t.title, t.kind, t.priority, t.state,
+              jsonb_agg(jsonb_build_object('id', b.id, 'idx', b.idx, 'title', b.title, 'state', b.state)) AS beats
+         FROM story_threads t
+         LEFT JOIN story_beats b ON b.thread_id = t.id
+        WHERE (t.scope='world' AND t.scope_id IS NULL) OR (t.scope='character' AND t.scope_id=$1)
+        GROUP BY t.id`, [id]),
+    q(`SELECT h.id, h.scope, h.scope_id, h.label, h.offer, h.weight, h.expires_at
+         FROM story_hooks h
+        WHERE ((h.scope='world' AND h.scope_id IS NULL)
+           OR (h.scope='character' AND h.scope_id=$1)
+           OR (h.scope='location' AND h.scope_id=(SELECT location_id FROM character_location WHERE character_id=$1)))
+          AND (h.expires_at IS NULL OR h.expires_at > now())`, [id]),
+    q(`SELECT a.id, a.action, a.params, a.weight
+         FROM affordances a
+        WHERE a.enabled = TRUE
+          AND a.location_id = (SELECT location_id FROM character_location WHERE character_id=$1)`, [id]),
+    q('SELECT entity_type, entity_id, key FROM discoveries WHERE character_id=$1', [id])
+  ]);
+
+  const quests = {
+    active: qp.rows.filter(r => r.state !== 'completed' && r.state !== 'failed'),
+    completed: qp.rows.filter(r => r.state === 'completed')
+  };
+
+  const threadsRows = threads.rows.map(t => ({
+    id: t.id,
+    title: t.title,
+    kind: t.kind,
+    priority: t.priority,
+    state: t.state,
+    beats: (t.beats || []).filter(b => b.id)
+  }));
+
+  return {
+    attributes: attr.rows,
+    resources: resources.rows[0] || null,
+    location: location.rows[0] || null,
+    inventory: inventory.rows,
+    quests,
+    storyVars: { world: wsv.rows, character: csv.rows },
+    threads: threadsRows,
+    hooks: hooks.rows,
+    affordances: affordances.rows,
+    discoveries: discoveries.rows,
+    suggestions: planSuggestions(threadsRows, hooks.rows, affordances.rows)
+  };
+}
 
 // ===========================================================
 //    Perfil del personaje del usuario logueado (GET /me)
@@ -108,16 +177,13 @@ router.post('/world/characters', optionalAuth, async (req, res) => {
 // ===========================================================
 router.get('/characters/:id/state', async (req, res) => {
   try {
-    const id = ensureInt(req.params.id);
-    const { rows } = await q(
-      `SELECT c.*, cs.attrs, cs.inventory, cs.tags
-         FROM characters c
-         LEFT JOIN character_state cs ON cs.character_id = c.id
-        WHERE c.id = $1`,
-      [id]
-    );
-    if (!rows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
-    res.json({ ok: true, character: rows[0] });
+    const id = req.params.id;
+
+    const { rows: charRows } = await q('SELECT id FROM characters WHERE id=$1', [id]);
+    if (!charRows.length) return res.status(404).json({ ok: false, error: 'Personaje no encontrado' });
+
+    const state = await getCharacterState(id);
+    res.json({ ok: true, state });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -125,7 +191,7 @@ router.get('/characters/:id/state', async (req, res) => {
 
 router.patch('/characters/:id/state', async (req, res) => {
   try {
-    const id = ensureInt(req.params.id);
+    const id = req.params.id;
     const { patch = {}, note = null, event_id = null } = req.body || {};
     const { rows: curRows } = await q(
       `SELECT COALESCE(cs.attrs,'{}'::jsonb) AS attrs,
@@ -155,6 +221,215 @@ router.patch('/characters/:id/state', async (req, res) => {
     );
 
     res.json({ ok: true, state: merged });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Movement
+// ===========================================================
+router.post('/characters/:id/move', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const to = req.body?.to_location_id;
+    if (!to) return res.status(400).json({ ok: false, error: 'to_location_id requerido' });
+
+    const { rows: curRows } = await q('SELECT location_id FROM character_location WHERE character_id=$1', [id]);
+    if (!curRows.length) return res.status(404).json({ ok: false, error: 'character_location no encontrado' });
+    const cur = curRows[0].location_id;
+    const { rows: linkRows } = await q('SELECT 1 FROM location_links WHERE from_id=$1 AND to_id=$2', [cur, to]);
+    if (!linkRows.length) return res.status(400).json({ ok: false, error: 'movimiento no permitido' });
+
+    await q('UPDATE character_location SET location_id=$2, last_seen_at=now() WHERE character_id=$1', [id, to]);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Inventory
+// ===========================================================
+router.post('/characters/:id/inventory/give', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { item_def_code, qty } = req.body || {};
+    const quantity = Number(qty) || 1;
+    const { rows: defRows } = await q('SELECT id, stackable FROM item_defs WHERE code=$1', [item_def_code]);
+    if (!defRows.length) return res.status(400).json({ ok: false, error: 'item_def no encontrado' });
+    const def = defRows[0];
+    const added = [];
+    if (def.stackable) {
+      const { rows: instRows } = await q('INSERT INTO item_instances(item_def_id) VALUES ($1) RETURNING id', [def.id]);
+      const instId = instRows[0].id;
+      await q(`INSERT INTO character_inventory(character_id, item_instance_id, qty)
+               VALUES ($1,$2,$3)
+               ON CONFLICT (character_id, item_instance_id) DO UPDATE SET qty = character_inventory.qty + EXCLUDED.qty`,
+               [id, instId, quantity]);
+      added.push({ itemInstanceId: instId, qty: quantity });
+    } else {
+      for (let i = 0; i < quantity; i++) {
+        const { rows: instRows } = await q('INSERT INTO item_instances(item_def_id) VALUES ($1) RETURNING id', [def.id]);
+        const instId = instRows[0].id;
+        await q('INSERT INTO character_inventory(character_id, item_instance_id, qty) VALUES ($1,$2,1)', [id, instId]);
+        added.push({ itemInstanceId: instId, qty: 1 });
+      }
+    }
+    return res.json({ ok: true, items: added });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/characters/:id/inventory/use', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { item_instance_id } = req.body || {};
+    if (!item_instance_id) return res.status(400).json({ ok: false, error: 'item_instance_id requerido' });
+    const { rows } = await q(
+      `SELECT ci.qty, idf.use_effect
+         FROM character_inventory ci
+         JOIN item_instances ii ON ii.id = ci.item_instance_id
+         JOIN item_defs idf ON idf.id = ii.item_def_id
+        WHERE ci.character_id=$1 AND ci.item_instance_id=$2`,
+      [id, item_instance_id]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'item no encontrado' });
+    const { qty, use_effect } = rows[0];
+    if (use_effect?.heal) {
+      await q('UPDATE character_resources SET hp = LEAST(100, hp + $2), updated_at=now() WHERE character_id=$1', [id, use_effect.heal]);
+    }
+    const { rows: upRows } = await q('UPDATE character_inventory SET qty = qty - 1 WHERE character_id=$1 AND item_instance_id=$2 RETURNING qty', [id, item_instance_id]);
+    if (upRows[0].qty <= 0) {
+      await q('DELETE FROM character_inventory WHERE character_id=$1 AND item_instance_id=$2', [id, item_instance_id]);
+      await q('DELETE FROM item_instances WHERE id=$1', [item_instance_id]);
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Resources
+// ===========================================================
+router.patch('/characters/:id/resources', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const allowed = ['hp', 'energy', 'morale', 'hunger', 'credits'];
+    const fields = [];
+    const values = [id];
+    allowed.forEach((k) => {
+      if (req.body && req.body[k] !== undefined) {
+        let v = Number(req.body[k]);
+        if (k !== 'credits') {
+          if (k === 'hp' || k === 'energy') v = Math.max(0, Math.min(100, v));
+          if (k === 'morale') v = Math.max(0, Math.min(100, v));
+          if (k === 'hunger') v = Math.max(0, Math.min(100, v));
+        }
+        values.push(v);
+        fields.push(`${k}=$${values.length}`);
+      }
+    });
+    if (!fields.length) return res.status(400).json({ ok: false, error: 'sin cambios' });
+    const { rows } = await q(`UPDATE character_resources SET ${fields.join(', ')}, updated_at=now() WHERE character_id=$1 RETURNING hp, energy, morale, hunger, credits`, values);
+    return res.json({ ok: true, resources: rows[0] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Quests
+// ===========================================================
+router.post('/characters/:id/quests/accept', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { code } = req.body || {};
+    const { rows: qRows } = await q('SELECT id FROM quests WHERE code=$1', [code]);
+    if (!qRows.length) return res.status(404).json({ ok: false, error: 'quest no encontrada' });
+    const questId = qRows[0].id;
+    const { rows: objRows } = await q('SELECT id FROM quest_objectives WHERE quest_id=$1 ORDER BY idx LIMIT 1', [questId]);
+    const objectiveId = objRows[0]?.id || null;
+    await q(`INSERT INTO quest_progress(character_id, quest_id, objective_id, state)
+             VALUES ($1,$2,$3,'active')
+             ON CONFLICT DO NOTHING`, [id, questId, objectiveId]);
+    return res.json({ ok: true, questId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/characters/:id/quests/:questId/progress', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const questId = req.params.questId;
+    const { objective_id, state } = req.body || {};
+    await q(`UPDATE quest_progress SET state=$1, updated_at=now()
+             WHERE character_id=$2 AND quest_id=$3 AND objective_id=$4`, [state, id, questId, objective_id]);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/characters/:id/quests', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { rows } = await q(`SELECT qp.state, qp.updated_at, qp.objective_id, q.id as "questId", q.code, q.title, q.description
+                               FROM quest_progress qp
+                               JOIN quests q ON q.id = qp.quest_id
+                              WHERE qp.character_id=$1`, [id]);
+    return res.json({ ok: true, quests: rows });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ===========================================================
+//                    Narrative actions
+// ===========================================================
+router.post('/characters/:id/act', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { affordance_id = null, free_text = null } = req.body || {};
+
+    if (affordance_id) {
+      // simple validation of affordance in current location
+      const { rows } = await q(
+        `SELECT id FROM affordances
+          WHERE id=$1 AND enabled=TRUE
+            AND location_id = (SELECT location_id FROM character_location WHERE character_id=$2)`,
+        [affordance_id, id]
+      );
+      if (!rows.length) return res.status(400).json({ ok: false, error: 'affordance inválida' });
+      // could apply actions/effects here
+    }
+    // free_text is ignored for now but accepted
+
+    const state = await getCharacterState(id);
+    res.json({ ok: true, state });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/threads/:threadId/snooze', async (req, res) => {
+  try {
+    const threadId = req.params.threadId;
+    await q('UPDATE story_threads SET state=\'paused\' WHERE id=$1', [threadId]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/hooks/:id/decline', async (req, res) => {
+  try {
+    const id = req.params.id;
+    await q('UPDATE story_hooks SET expires_at=now() WHERE id=$1', [id]);
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
