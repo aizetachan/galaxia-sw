@@ -307,6 +307,7 @@ html.ready body { visibility: visible; }
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 6px 18px rgba(0,0,0,.25);
+  display: block; 
 }
 .scene-image-slot img {
   display: block;
@@ -314,7 +315,6 @@ html.ready body { visibility: visible; }
   aspect-ratio: 16/9;
   object-fit: cover;
   max-height: 320px;
-  object-fit: cover;
 }
 
 /* shimmer mientras genera (NO mostramos imagen parcial) */

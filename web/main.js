@@ -1137,6 +1137,14 @@ function dataUrlToBlobUrl(dataUrl) {
 
 // Inyecta la imagen en el slot con fallback y logs
 function injectSceneImage(slot, src) {
+  // 1) Si es data: -> conviértelo SIEMPRE a blob: (evita CSP silenciosas)
+  let finalSrc = src;
+  if (src && src.startsWith('data:image/')) {
+    const blobUrl = dataUrlToBlobUrl(src);
+    if (blobUrl) finalSrc = blobUrl;
+  }
+
+  // 2) Crea <img>, muéstralo y ANEXA antes de cargar (no dependemos de onload)
   const img = new Image();
   img.alt = 'Escena generada';
   img.decoding = 'async';
@@ -1144,36 +1152,35 @@ function injectSceneImage(slot, src) {
   img.style.display = 'block';
   img.style.width = '100%';
 
-  console.log('[IMG] render src type =', src?.slice(0, 30));
+  // Mostrar el slot ya
+  slot.hidden = false;
+  slot.innerHTML = '';
+  slot.appendChild(img);
 
+  // Logs para confirmar evento de carga
   img.onload = () => {
-    slot.hidden = false;
-    slot.innerHTML = '';
-    slot.appendChild(img);
     console.log('[IMG] loaded, size:', img.naturalWidth, 'x', img.naturalHeight);
   };
-
   img.onerror = () => {
-    if (src && src.startsWith('data:image/')) {
+    console.error('[IMG] image load error, src starts with:', String(finalSrc).slice(0, 16));
+    // último intento: si finalSrc no es blob, intenta blob
+    if (src && src.startsWith('data:image/') && !String(finalSrc).startsWith('blob:')) {
       const blobUrl = dataUrlToBlobUrl(src);
       if (blobUrl) {
-        console.warn('[IMG] data: blocked? retrying as blob:');
-        img.onerror = () => {
-          console.error('[IMG] blob fallback also failed');
-          slot.hidden = true;
-          slot.innerHTML = '';
-        };
+        console.warn('[IMG] retrying as blob: url');
         img.src = blobUrl;
         return;
       }
     }
-    console.error('[IMG] image load error');
+    // fallback visual si nada funciona
     slot.hidden = true;
     slot.innerHTML = '';
   };
 
-  img.src = src;
+  console.log('[IMG] will render src =', String(finalSrc).slice(0, 30));
+  img.src = finalSrc;
 }
+
 
 
 
