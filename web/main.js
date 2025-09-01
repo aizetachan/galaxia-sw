@@ -1039,14 +1039,13 @@ async function handleBrushClick(btn) {
 
   const txtEl = box.querySelector('.text');
   const slot  = box.querySelector('.scene-image-slot');
-
   if (!txtEl || !slot) return;
 
-  // Estado loading (no inyectamos imagen hasta tenerla completa)
+  // Estado loading visual (el chat puede seguir)
   btn.disabled = true;
   btn.classList.add('loading');
 
-  // Shimmer temporal (separado del slot final)
+  // Shimmer temporal
   let shimmer = document.createElement('div');
   shimmer.className = 'scene-image-loading';
   box.insertBefore(shimmer, txtEl);
@@ -1064,47 +1063,79 @@ async function handleBrushClick(btn) {
 
     const text = getMasterTextFromBox(box);
 
-    const r = await fetch(joinUrl(API_BASE, '/scene-image'), {
+    // 1) START → devuelve jobId inmediatamente
+    const rStart = await fetch(joinUrl(API_BASE, '/scene-image/start'), {
       method: 'POST',
       headers,
       body: JSON.stringify({ masterText: (text || '').trim(), scene }),
     });
 
-    console.log('[IMG] HTTP status:', r.status);
-
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      console.error('[IMG] /scene-image failed:', r.status, errText);
+    if (!rStart.ok) {
+      const t = await rStart.text().catch(()=> '');
+      console.error('[IMG] start failed:', rStart.status, t);
       shimmer.remove();
       const err = document.createElement('div');
       err.className = 'scene-image-error';
-      err.textContent = 'No se pudo generar la imagen.';
+      err.textContent = 'No se pudo iniciar la generación.';
       box.insertBefore(err, txtEl);
       setTimeout(() => err.remove(), 4000);
       return;
     }
 
-    const data = await r.json();
-    shimmer.remove();
+    const { jobId } = await rStart.json();
+    console.log('[IMG] job started →', jobId);
 
-    const src = data?.dataUrl || data?.url || '';
-    console.log('[IMG] payload keys:', Object.keys(data || {}), 'src length:', src?.length || 0);
+    // 2) STATUS polling (no bloquea la UI)
+    let tries = 0;
+    const maxTries = 120; // ~3-4 min si interval=2s
+    const intervalMs = 2000;
 
-    if (!src) {
-      const err = document.createElement('div');
-      err.className = 'scene-image-error';
-      err.textContent = 'Imagen vacía.';
-      box.insertBefore(err, txtEl);
-      setTimeout(() => err.remove(), 4000);
-      return;
-    }
+    await new Promise((resolve) => {
+      const iv = setInterval(async () => {
+        tries++;
+        try {
+          const url = new URL(joinUrl(API_BASE, '/scene-image/status'));
+          url.searchParams.set('jobId', jobId);
+          const rs = await fetch(url, { headers });
+          if (!rs.ok) throw new Error('status_http_' + rs.status);
+          const st = await rs.json();
 
-    // Inyecta imagen (con fallback a blob: si CSP bloquea data:)
-    injectSceneImage(slot, src);
+          if (st.status === 'done' && st.dataUrl) {
+            console.log('[IMG] job done');
+            try { shimmer.remove(); } catch {}
+            injectSceneImage(slot, st.dataUrl);
+            clearInterval(iv);
+            resolve();
+          } else if (st.status === 'error') {
+            console.warn('[IMG] job error:', st.error);
+            try { shimmer.remove(); } catch {}
+            const err = document.createElement('div');
+            err.className = 'scene-image-error';
+            err.textContent = 'No se pudo generar la imagen.';
+            box.insertBefore(err, txtEl);
+            setTimeout(() => err.remove(), 4000);
+            clearInterval(iv);
+            resolve();
+          } else {
+            if (tries % 10 === 0) console.log('[IMG] still', st.status);
+          }
+        } catch (e) {
+          console.warn('[IMG] status poll error:', e.message);
+        }
 
-
-
-
+        if (tries >= maxTries) {
+          console.warn('[IMG] job timeout');
+          try { shimmer.remove(); } catch {}
+          const err = document.createElement('div');
+          err.className = 'scene-image-error';
+          err.textContent = 'La generación tardó demasiado.';
+          box.insertBefore(err, txtEl);
+          setTimeout(() => err.remove(), 4000);
+          clearInterval(iv);
+          resolve();
+        }
+      }, intervalMs);
+    });
   } catch (e) {
     try { shimmer.remove(); } catch {}
     const err = document.createElement('div');
@@ -1113,10 +1144,12 @@ async function handleBrushClick(btn) {
     box.insertBefore(err, txtEl);
     setTimeout(() => err.remove(), 4000);
   } finally {
+    // Rehabilitamos el botón para permitir nuevas generaciones
     btn.disabled = false;
     btn.classList.remove('loading');
   }
 }
+
 
 // Convierte dataURL -> blob: URL (fallback cuando CSP bloquea data:)
 function dataUrlToBlobUrl(dataUrl) {

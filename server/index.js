@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import { randomUUID } from 'crypto';
 
 import dmRouter from './dm.js';               // /respond, etc.
 import worldRouter from './world/index.js';   // /world/..., /characters/...
@@ -78,7 +79,7 @@ const corsOpts = {
     return cb(null, false);
   },
   methods: ['GET', 'POST', 'OPTIONS', 'PATCH', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Internal-Token'],
   credentials: true,
   optionsSuccessStatus: 200,
 };
@@ -218,80 +219,129 @@ function buildSceneImagePrompt({ masterText = '', scene = {} }) {
   ].join('\n');
 }
 
-api.post('/scene-image', requireAuth, async (req, res) => {
+/* =======================================================================
+   JOBS para generación de imagen (start → worker → status)
+   ======================================================================= */
+
+// Almacen simple en memoria (para prod usar KV/Redis)
+globalThis.SCENE_JOBS = globalThis.SCENE_JOBS || new Map();
+const JOBS = globalThis.SCENE_JOBS;
+
+function gcJobs() {
+  const now = Date.now();
+  for (const [id, j] of JOBS.entries()) {
+    if ((now - j.createdAt) > 30 * 60 * 1000) JOBS.delete(id); // 30 min
+  }
+}
+function newJob({ masterText, scene }) {
+  const id = randomUUID();
+  const rec = {
+    id,
+    status: 'queued', // queued | processing | done | error
+    createdAt: Date.now(),
+    masterText,
+    scene: scene || null,
+    dataUrl: null,
+    error: null,
+  };
+  JOBS.set(id, rec);
+  gcJobs();
+  return rec;
+}
+const getJob = (id) => JOBS.get(id) || null;
+const setJobDone  = (id, dataUrl) => { const j = JOBS.get(id); if (j) { j.status='done'; j.dataUrl=dataUrl; j.error=null; } };
+const setJobError = (id, msg)     => { const j = JOBS.get(id); if (j) { j.status='error'; j.error=(msg||'unknown'); } };
+
+/** 1) START: crea el job y dispara el worker asíncrono */
+api.post('/scene-image/start', requireAuth, async (req, res) => {
   try {
-    let { masterText, scene } = req.body || {};
-    if (typeof masterText !== 'string') masterText = '';
-    const text = masterText.trim();
-    if (!text) {
-      return res.status(400).json({ error: 'masterText_required' });
-    }
+    const { masterText, scene } = req.body || {};
+    const text = (typeof masterText === 'string' ? masterText.trim() : '');
+    if (!text) return res.status(400).json({ error: 'masterText_required' });
+
+    const job = newJob({ masterText: text, scene });
+
+    // Construye URL absoluta y llama al worker SIN esperar
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const host  = req.headers['x-forwarded-host'] || req.headers.host;
+    const base  = `${proto}://${host}`;
+    const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
+
+    fetch(`${base}/api/scene-image/worker`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(INTERNAL_TOKEN ? { 'X-Internal-Token': INTERNAL_TOKEN } : {}),
+      },
+      body: JSON.stringify({ jobId: job.id }),
+    }).catch(() => {});
+
+    // Devolvemos jobId inmediatamente
+    return res.status(202).json({ ok: true, jobId: job.id });
+  } catch (e) {
+    console.error('[scene-image/start]', e);
+    return res.status(500).json({ error: 'start_failed' });
+  }
+});
+
+/** 2) WORKER: genera la imagen (solo invocable internamente) */
+api.post('/scene-image/worker', async (req, res) => {
+  const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
+  if (INTERNAL_TOKEN && req.headers['x-internal-token'] !== INTERNAL_TOKEN) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+
+  try {
+    const { jobId } = req.body || {};
+    const job = getJob(jobId);
+    if (!job) return res.status(404).json({ error: 'job_not_found' });
+
+    if (job.status === 'done') return res.json({ ok: true, status: 'done' });
+    if (job.status === 'processing') return res.json({ ok: true, status: 'processing' });
+    job.status = 'processing';
 
     const openai = await getOpenAI();
-    const prompt = buildSceneImagePrompt({ masterText: text, scene });
-
-    const t0 = Date.now();
+    const prompt = buildSceneImagePrompt({ masterText: job.masterText, scene: job.scene });
 
     const out = await openai.images.generate({
       model: 'gpt-image-1',
-      size: '1024x1024',   // estable y rápido
-      prompt
-      // seed: 4242,        // opcional para consistencia
+      size: '1024x1024',
+      prompt,
     });
 
     const d   = out?.data?.[0] || null;
     const b64 = d?.b64_json || null;
     const url = d?.url || null;
-
     const src = b64 ? `data:image/png;base64,${b64}` : url;
-    if (!src) return res.status(502).json({ error: 'no_image_payload' });
 
-    return res.json({ ok: true, ms: Date.now() - t0, dataUrl: src });
-  } catch (e) {
-    const status = e?.status || 500;
-    const msg    = e?.error?.message || e?.message || 'image_generation_failed';
-    console.error('[scene-image]', status, msg);
-    if (e?.stack) console.error('[scene-image stack]', e.stack.slice(0, 800));
-    return res.status(status < 500 ? status : 500).json({ error: msg, status });
-  }
-});
-
-
-
-
-api.post('/scene-image', requireAuth, async (req, res) => {
-  try {
-    const { masterText, scene } = req.body || {};
-    if (!masterText || typeof masterText !== 'string') {
-      return res.status(400).json({ error: 'masterText_required' });
+    if (!src) {
+      setJobError(jobId, 'no_image_payload');
+      return res.status(502).json({ error: 'no_image_payload' });
     }
-    const openai = await getOpenAI();
-    const prompt = buildSceneImagePrompt({ masterText, scene });
 
-    const t0 = Date.now();
-    const out = await openai.images.generate({
-      model: 'gpt-image-1',
-      prompt,
-      size: '1024x576',           // 16:9; encaja bien en el chat
-      response_format: 'b64_json' // inline como data URL (puedes subir a Blob/S3 más adelante)
-      // quality: 'high',          // descomenta si prefieres más calidad (más coste)
-      // seed: 4242,               // descomenta si quieres consistencia por escena/capítulo
-    });
-
-    const b64 = out?.data?.[0]?.b64_json;
-    if (!b64) return res.status(502).json({ error: 'no_image_returned' });
-
-    return res.json({
-      ok: true,
-      ms: Date.now() - t0,
-      dataUrl: `data:image/png;base64,${b64}`
-    });
+    setJobDone(jobId, src);
+    return res.json({ ok: true, status: 'done' });
   } catch (e) {
-    console.error('[scene-image]', e?.status || '', e?.code || '', e?.message || e);
-    return res.status(500).json({ error: 'image_generation_failed' });
+    console.error('[scene-image/worker]', e?.status || '', e?.message || e);
+    const { jobId } = req.body || {};
+    if (jobId) setJobError(jobId, e?.message || 'worker_failed');
+    return res.status(500).json({ error: 'worker_failed' });
   }
 });
 
+/** 3) STATUS: consulta del estado desde el front (polling) */
+api.get('/scene-image/status', requireAuth, async (req, res) => {
+  const jobId = String(req.query.jobId || '');
+  const job = getJob(jobId);
+  if (!job) return res.status(404).json({ error: 'job_not_found' });
+
+  return res.json({
+    ok: true,
+    status: job.status,                 // 'queued' | 'processing' | 'done' | 'error'
+    dataUrl: job.status === 'done' ? job.dataUrl : null,
+    error: job.status === 'error' ? job.error : null,
+  });
+});
 
 /* ====== 404 en /api/* ====== */
 app.use(['/api', '/api/v1'], (req, res) => {
