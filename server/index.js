@@ -16,6 +16,7 @@ import {
   updateUser,
 } from './auth.js';
 import adminRouter from './routes/admin.js';
+import { getOpenAI } from './openai-client.js';
 
 const app = express();
 const api = express.Router();
@@ -191,6 +192,66 @@ app.use('/api/v1', api);
 
 /* ====== Raíz opcional ====== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
+
+/* ====== Scene Image (text-to-image) ====== */
+// Simple prompt builder to keep control server-side
+function buildSceneImagePrompt({ masterText = '', scene = {} }) {
+  const location   = scene?.location   || 'sci-fi spaceport interior';
+  const mood       = scene?.mood       || 'tense, cinematic';
+  const action     = scene?.action     || 'two figures negotiating by a holographic console';
+  const props      = scene?.props      || 'holographic panels, worn metal, vapor, distant ships';
+  const characters = scene?.characters || 'two original humanoids with distinct silhouettes (no IP)';
+
+  return [
+    'You are a scene concept artist for a sci-fi chat-RPG.',
+    'Create ONE original still image. No text overlays, watermarks or copyrighted characters/styles.',
+    'Cinematic, realistic lighting, clean composition, readable silhouettes.',
+    '',
+    'Scene:',
+    `- Location: ${location}`,
+    `- Mood: ${mood}`,
+    `- Action: ${action}`,
+    `- Key props: ${props}`,
+    `- Characters (original, no IP): ${characters}`,
+    '',
+    'Inspiration from the following description of what is happening:',
+    JSON.stringify(String(masterText || '').slice(0, 1200))
+  ].join('\n');
+}
+
+api.post('/scene-image', requireAuth, async (req, res) => {
+  try {
+    const { masterText, scene } = req.body || {};
+    if (!masterText || typeof masterText !== 'string') {
+      return res.status(400).json({ error: 'masterText_required' });
+    }
+    const openai = await getOpenAI();
+    const prompt = buildSceneImagePrompt({ masterText, scene });
+
+    const t0 = Date.now();
+    const out = await openai.images.generate({
+      model: 'gpt-image-1',
+      prompt,
+      size: '1024x576',           // 16:9; encaja bien en el chat
+      response_format: 'b64_json' // inline como data URL (puedes subir a Blob/S3 más adelante)
+      // quality: 'high',          // descomenta si prefieres más calidad (más coste)
+      // seed: 4242,               // descomenta si quieres consistencia por escena/capítulo
+    });
+
+    const b64 = out?.data?.[0]?.b64_json;
+    if (!b64) return res.status(502).json({ error: 'no_image_returned' });
+
+    return res.json({
+      ok: true,
+      ms: Date.now() - t0,
+      dataUrl: `data:image/png;base64,${b64}`
+    });
+  } catch (e) {
+    console.error('[scene-image]', e?.status || '', e?.code || '', e?.message || e);
+    return res.status(500).json({ error: 'image_generation_failed' });
+  }
+});
+
 
 /* ====== 404 en /api/* ====== */
 app.use(['/api', '/api/v1'], (req, res) => {

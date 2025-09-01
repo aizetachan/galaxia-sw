@@ -359,6 +359,7 @@ function render() {
   requestAnimationFrame(() => {
     if (chatEl) {
       chatEl.innerHTML = html;
+      decorateDMs();
       chatEl.scrollTop = chatEl.scrollHeight;
     }
     updateIdentityFromState();
@@ -964,3 +965,106 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js').catch(e => dlog('SW registration failed', e));
   });
 }
+// ============================================================
+//          Scene image (🖌️) — decorate DM bubbles
+// ============================================================
+function decorateDMs() {
+  const root = document.getElementById('chat');
+  if (!root) return;
+
+  // Para cada mensaje del Máster (kind=dm) con texto, inyecta botón + slot imagen
+  const dmMsgs = root.querySelectorAll('.msg.dm');
+  dmMsgs.forEach((box) => {
+    if (box.dataset.enhanced === '1') return;
+
+    const txt = box.querySelector('.text');
+    const meta = box.querySelector('.meta');
+    if (!txt || !meta) return; // salta los "msg dm" de hora (no tienen .text)
+
+    // Slot de imagen antes del texto
+    const slot = document.createElement('div');
+    slot.className = 'scene-image-slot';
+    slot.hidden = true;
+    box.insertBefore(slot, txt);
+
+    // Botón pincel junto a la etiqueta del Máster
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'brush-btn';
+    btn.title = 'Ilustrar escena';
+    btn.textContent = '🖌️';
+    meta.appendChild(btn);
+
+    box.dataset.enhanced = '1';
+  });
+}
+
+async function handleBrushClick(btn) {
+  const box = btn.closest('.msg.dm');
+  if (!box) return;
+  if (btn.disabled) return;
+
+  const txtEl = box.querySelector('.text');
+  const slot  = box.querySelector('.scene-image-slot');
+
+  if (!txtEl || !slot) return;
+
+  // Estado loading (no inyectamos imagen hasta tenerla completa)
+  btn.disabled = true;
+  btn.classList.add('loading');
+
+  // Shimmer temporal (separado del slot final)
+  let shimmer = document.createElement('div');
+  shimmer.className = 'scene-image-loading';
+  box.insertBefore(shimmer, txtEl);
+
+  try {
+    // Escena opcional desde memo (si existe)
+    let sceneMemo = [];
+    try { sceneMemo = load('sw:scene_memo', []); } catch {}
+    const scene = (Array.isArray(sceneMemo) && sceneMemo.length)
+      ? { memo: sceneMemo.slice(-6) }
+      : null;
+
+    const headers = { 'Content-Type': 'application/json' };
+    if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
+
+    const r = await fetch(joinUrl(API_BASE, '/scene-image'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ masterText: txtEl.textContent || '', scene }),
+    });
+    const data = await r.json();
+
+    shimmer.remove();
+    if (!data?.ok || !data?.dataUrl) {
+      throw new Error(data?.error || 'fail');
+    }
+
+    // Cargar e inyectar la imagen SOLO cuando esté lista
+    const img = new Image();
+    img.alt = 'Escena generada';
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.onload = () => { slot.hidden = false; slot.innerHTML = ''; slot.appendChild(img); };
+    img.onerror = () => { slot.hidden = true; slot.innerHTML = ''; };
+    img.src = data.dataUrl;
+  } catch (e) {
+    try { shimmer.remove(); } catch {}
+    const err = document.createElement('div');
+    err.className = 'scene-image-error';
+    err.textContent = 'No se pudo generar la imagen.';
+    box.insertBefore(err, txtEl);
+    setTimeout(() => err.remove(), 4000);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+  }
+}
+
+// Delegación global de clicks
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.brush-btn');
+  if (btn) handleBrushClick(btn);
+});
+
