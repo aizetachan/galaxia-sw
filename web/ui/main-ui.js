@@ -2,13 +2,13 @@ import { handleLogout, isLogged } from "../auth/session.js";
 import { prepareAdminPanel, setupAdminDom } from "../admin.js";
 
 // Identity bar setup
-const chatEl = document.getElementById('chat');
+const viewportEl = document.getElementById('main-viewport');
 const chatWrap = document.querySelector('.chat-wrap');
 const composerEl = document.querySelector('.composer');
 const rollCtaEl = document.getElementById('roll-cta');
 const confirmCtaEl = document.getElementById('confirm-cta');
 const prevState = { composer: false, roll: false, confirm: false };
-let savedChatNodes = null;
+let savedViewNodes = null;
 let panelOpen = false;
 
 let identityEl = document.getElementById('identity-bar');
@@ -16,7 +16,7 @@ if (!identityEl) {
   identityEl = document.createElement('section');
   identityEl.id = 'identity-bar';
   identityEl.className = 'identity-bar hidden';
-  chatWrap?.insertBefore(identityEl, chatEl);
+  chatWrap?.insertBefore(identityEl, viewportEl);
 }
 
 
@@ -24,9 +24,10 @@ if (!identityEl) {
 export function setIdentityBar(userName, characterName){
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
+  const isAdmin = u === 'admin';
 
-  // Si NO es settings, cierra cualquier panel abierto
-  if (u && u !== 'settings') closePanel();
+  // Si NO es admin, cierra cualquier panel abierto
+  if (u && !isAdmin) closePanel();
 
   if (!u || isGuest){
     identityEl.classList.add('hidden');
@@ -41,7 +42,7 @@ export function setIdentityBar(userName, characterName){
       <div class="id-user">${escapeHtml(u)}</div>
       ${ c ? `<div class="id-char muted">— ${escapeHtml(c)}</div>` : '' }
     </div>
-    ${ u === 'settings' ? `<button id="settings-btn" class="settings-btn" title="Ajustes" aria-label="Ajustes">⚙</button>` : '' }
+    ${ isAdmin ? `<button id="settings-btn" class="settings-btn" title="Ajustes" aria-label="Ajustes">⚙</button>` : '' }
     <button id="logout-btn" class="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">⎋</button>
   </div>
 `;
@@ -91,12 +92,12 @@ async function openPanel(options){
   prevState.composer = !!composerEl?.hidden;
   prevState.roll = !!rollCtaEl?.hidden;
   prevState.confirm = !!confirmCtaEl?.hidden;
-  savedChatNodes = Array.from(chatEl.childNodes);
+  savedViewNodes = Array.from(viewportEl.childNodes);
 
-  chatEl.classList.add('settings-panel');
-  chatEl.replaceChildren(options.markup());
-  options.setup?.(chatEl);
-  const closeBtn = chatEl.querySelector(options.closeSelector || '#panel-close');
+  viewportEl.classList.add('settings-panel');
+  viewportEl.replaceChildren(options.markup());
+  options.setup?.(viewportEl);
+  const closeBtn = viewportEl.querySelector(options.closeSelector || '#panel-close');
   if (closeBtn) closeBtn.onclick = () => closePanel();
 
   try { await options.prepare?.(); } catch {}
@@ -112,8 +113,8 @@ function closePanel(){
   if (!panelOpen) return;
   panelOpen = false;
 
-  if (savedChatNodes) chatEl.replaceChildren(...savedChatNodes);
-  chatEl.classList.remove('settings-panel');
+  if (savedViewNodes) viewportEl.replaceChildren(...savedViewNodes);
+  viewportEl.classList.remove('settings-panel');
 
   if (composerEl) { composerEl.hidden = prevState.composer; composerEl.classList.toggle('hidden', prevState.composer); }
   if (rollCtaEl) { rollCtaEl.hidden = prevState.roll; }

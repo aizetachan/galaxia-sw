@@ -91,7 +91,8 @@ body::before{
 }
 
 /* Un único estilo para el contenedor de conversación y el de settings */
-#chat{
+#main-viewport,
+#guest-card{
   flex:1 1 auto;
   min-height:0;
   overflow-y:auto;                 /* único scroll de la app */
@@ -106,7 +107,7 @@ body::before{
   box-shadow:var(--shadow);
 }
 
-#chat.settings-panel{
+#main-viewport.settings-panel{
   height:auto;
   min-height:0;
 }
@@ -212,7 +213,7 @@ body::before{
 .auth-row button.outline{ background:transparent }
 
 body.is-guest #guest-card { display:block }
-body.is-guest #chat,
+body.is-guest #main-viewport,
 body.is-guest .composer,
 body.is-guest #roll-cta,
 body.is-guest #confirm-cta { display:none }
@@ -271,7 +272,7 @@ button.loading::after{
 /* -------- 11) RESPONSIVE -------- */
 @media (max-width:768px){
   .chat-wrap{ padding-left:8px; padding-right:8px; min-height:var(--vh) }
-  #chat{ height:auto; min-height:0 }
+  #main-viewport{ height:auto; min-height:0 }
   .composer{ padding-bottom:max(0px, env(safe-area-inset-bottom)) }
   #send{ flex:0 0 auto; width:auto !important; min-width:0 !important; padding:8px 14px; font-size:14px }
   .app-header h1, .app-header .muted{ display:none }
