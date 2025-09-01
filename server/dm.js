@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { hasDb, sql } from './db.js';
 import { optionalAuth } from './auth.js';
-import { getPrompt } from './prompts.js';
+import { getPrompt, getPromptSection } from './prompts.js';
 import { getOpenAI } from './openai-client.js';
 import {
   getNotes,
@@ -150,8 +150,16 @@ const introPolicy = [
 
 /* ========= PIN & SYSTEM ========= */
 function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) {
-  const core = getPrompt('prompt-master.md');
+  // === Secciones del prompt maestro (solo lo necesario por fase)
+  const output = getPromptSection('prompt-master.md', 'OUTPUT_CONTRACT');
+  const style  = getPromptSection('prompt-master.md', 'STYLE');
+  const phase  = (stage && stage !== 'done')
+    ? getPromptSection('prompt-master.md', 'ONBOARDING')
+    : getPromptSection('prompt-master.md', 'PLAY');
+
   const game = getPrompt('game-rules.md');
+  const dice = (stage === 'done') ? getPrompt('dice-rules.md') : '';
+
   // --- PIN (memoria activa, 3 líneas) ---
   const pinCanon = 'CANON: Space-opera PG-13; la reputación tiene consecuencias; la violencia pública atrae a la ley.';
   
@@ -165,50 +173,40 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
     const role = clientState?.role || '—';
     pinPj = `PJ: ${clientState.name} (${spec}/${role})`;
   }
-  
-  // ESCENA: toma la última línea del Máster del historial
-  let pinEscena = '';
-  if (Array.isArray(historyLines) && historyLines.length) {
-    const lastMaster = historyLines.slice().reverse().find(l => /^Máster:/i.test(l));
-    if (lastMaster) {
-      const s = lastMaster.replace(/^Máster:\s*/i, '').replace(/<<[\s\S]*?>>/g, '').trim().slice(0, 160);
-      pinEscena = 'ESCENA: ' + s;
-    }
-  }
 
-  const pinBlock = [pinCanon, pinPj, pinEscena].filter(Boolean).join('\n');
+  const pinStage =
+    (stage && stage !== 'done')
+      ? `STAGE=${stage}`
+      : 'STAGE=done';
 
-  const historyBlock = (historyLines?.length
-    ? ('\nHistorial reciente (resumen cronológico corto):\n' + historyLines.slice(-20).join('\n'))
-    : '');
+  const pinClock = 'RITMO: narración breve (2–5 frases) y decisiones con impacto.';
 
-  const onboarding = [
-    'REGLAS DE ONBOARDING (no revelar al jugador):',
-    `- STAGE actual: ${stage || 'name'} (no lo menciones).`,
-    '- STAGE=name → Mensaje de bienvenida breve: "¡Bienvenido/a a la galaxia!" y pregunta: "¿Cómo se va a llamar tu personaje?".',
-    '  • Si el jugador proporciona un nombre, confírmalo al final con: <<CONFIRM NAME="<Nombre>">>.',
-    '- STAGE=build → Pregunta: "Cuéntame qué tipo de aventura quieres vivir en la galaxia".',
-    '  • Propón 2–3 combinaciones coherentes (species + role) en viñetas cortas.',
-    '  • Elige UNA propuesta principal y al final emite: <<CONFIRM SPECIES="<Especie>" ROLE="<Rol>">>.',
-    '- STAGE=done → Continúa la narración normal; NO emitas confirmaciones.',
-    '- Si recibes <<CONFIRM_ACK TYPE="name|build" DECISION="no">>, propone nuevas opciones y vuelve a emitir la etiqueta correspondiente.',
-    '- Si recibes <<CONFIRM_ACK ... DECISION="yes">>, avanza de fase.',
-  ].join('\n');
+  const pinBlock = [pinCanon, pinPj, pinStage, pinClock].filter(Boolean).join('\n');
 
+  // Mundo cercano (DB) y resumen reciente
   const worldBlock = brief ? ('\nContexto del mundo:\n' + brief) : '';
+  const historyBlock = (historyLines && historyLines.length)
+    ? ('\nLíneas recientes:\n' + historyLines.map(s => '- ' + s).join('\n'))
+    : '';
 
-  // Nota clave para cabecera JSON y “observación pasiva”:
+  // Contrato mínimo para cabecera JSON (refuerzo)
   const metaContract = [
-    'CONTRATO DE META:',
-    '- La PRIMERA LÍNEA de cada respuesta DEBE ser JSON válido con forma: {"roll": "habilidad:DC" | null, "memo": ["..."], "options": ["..."]}',
-    '- No pidas tirada en observación pasiva salvo peligro/oposición claros.',
+    'CONTRATO DE SALIDA:',
+    '- La PRIMERA LÍNEA debe ser JSON válido con exactamente esta forma:',
+    '  {"ui":{"narration":"...","choices":[{"id":"...","label":"...","requires":[],"hint":""}]},"control":{"state":"...","rolls":[],"memos":[],"confirms":[]}}',
+    '- Todo lo interno (state, rolls, memos, confirms) va SOLO en "control".',
+    '- "ui" es lo único que verá el jugador. No incluyas etiquetas <<...>> en "ui".',
+    '- Máximo 3 opciones relevantes y divergentes.',
   ].join('\n');
 
   return [
     pinBlock,
     metaContract,
-    (core || 'Eres el Máster de un juego de rol en una galaxia compartida.'),
+    output,
+    style,
+    phase,
     game,
+    dice ? ('POLÍTICA DE DADOS (resumen):\n' + dice) : '',
     languagePolicy,
     dicePolicy,
     tagProtocol,
@@ -216,9 +214,9 @@ function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) 
     isIntroStart ? introPolicy : '',
     worldBlock,
     historyBlock,
-    'ESTILO: conciso (2–6 frases), orientado a acción/consecuencia, sin listas salvo en STAGE=build.',
   ].filter(Boolean).join('\n\n');
 }
+
 
 /* ========= selector de MODO (fast/rich/auto) ========= */
 const PASSIVE_RE = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i;
@@ -245,9 +243,13 @@ function ensureJsonHeader(text){
   const nl = s.indexOf('\n');
   const first = (nl >= 0 ? s.slice(0, nl) : s).trim();
   let ok = false;
-  try { const j = JSON.parse(first); ok = (j && typeof j === 'object' && ('roll' in j || 'memo' in j || 'options' in j)); } catch {}
+  try {
+    const j = JSON.parse(first);
+    ok = !!(j && typeof j === 'object' && j.ui && j.control && 'narration' in j.ui && Array.isArray(j.ui.choices));
+  } catch {}
   if (ok) return s;
-  return `{"roll": null, "memo": [], "options": []}\n` + s;
+  // Fallback mínimo para que el frontend siempre tenga estructura
+  return `{"ui":{"narration":"","choices":[]},"control":{"state":"","rolls":[],"memos":[],"confirms":[]}}\n` + s;
 }
 
 /* ========= OpenAI call ========= */
@@ -438,9 +440,10 @@ async function handleDM(req, res) {
       const nl = safeText.indexOf('\n');
       const first = (nl >= 0 ? safeText.slice(0, nl) : safeText).trim();
       const head = JSON.parse(first);
-      if (Array.isArray(head.memo) && head.memo.length) {
+      const memos = head?.control?.memos;
+      if (Array.isArray(memos) && memos.length) {
         const current = getNotes(userId);
-        setNotes(userId, [...current, ...head.memo]);
+        setNotes(userId, [...current, ...memos]);
       }
     } catch {}
 
