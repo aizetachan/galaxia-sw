@@ -52,7 +52,7 @@ async function handleLogin() {
     });
     setAuth({ token, user });
     try { localStorage.setItem('sw:auth', JSON.stringify({ token, user })); } catch {}
-    if (user?.username === 'settings') {
+    if (user?.username === 'admin') {
       loginSectionEl.hidden = true;
       panelEl.hidden = false;
       showTab('users');
@@ -126,10 +126,10 @@ async function editUser(u) {
   await loadUsers();
 }
 
-// Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'settings'
+// Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'admin'
 document.addEventListener('admin-open', async () => {
   await ensureApiBase();
-  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'admin';
   if (!isAdmin) return;
   loginSectionEl.hidden = true;
   panelEl.hidden = false;
@@ -140,7 +140,7 @@ document.addEventListener('admin-open', async () => {
 listenAuthChanges(async () => {
   const open = !!panelEl?.isConnected;
   if (!open) return;
-  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'admin';
   if (isAdmin) {
     loginSectionEl.hidden = true;
     panelEl.hidden = false;
@@ -164,7 +164,7 @@ function escapeHtml(s='') {
 // === Preload helper para evitar flicker en Settings ===
 export async function prepareAdminPanel() {
   try { await ensureApiBase(); } catch {}
-  const isAdmin = AUTH?.token && AUTH?.user?.username === 'settings';
+  const isAdmin = AUTH?.token && AUTH?.user?.username === 'admin';
   if (isAdmin) {
     // Asegura estado del panel aunque esté oculto
     if (loginSectionEl) loginSectionEl.hidden = true;
