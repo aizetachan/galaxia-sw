@@ -527,17 +527,30 @@ async function showResumeIfAny(){
     }
   }catch(e){ dlog('resume fail', e?.data||e); }
 }
-async function loadHistoryIfEmpty(){
-  if (!isLogged() || msgs.length>0) return;
-  try{
+// Carga historial desde el servidor. Si force=true, reemplaza siempre.
+async function loadHistory({ force = false } = {}) {
+  if (!isLogged()) return;
+  if (!force && msgs.length > 0) return;
+
+  try {
     const r = await apiGet('/chat/history');
     const rows = r?.messages;
-    if (Array.isArray(rows) && rows.length){
-      const mapped = rows.map(m=>({ user: m.role==='user' ? (character?.name||'Tú') : 'Máster', text:m.text, kind: m.role==='user'?'user':'dm', ts: m.ts ? new Date(m.ts).getTime() : Date.now() }));
-      setMsgs(mapped); save(KEY_MSGS, msgs);
+
+    if (Array.isArray(rows)) {
+      const mapped = rows.map((m) => ({
+        user: m.role === 'user' ? (character?.name || 'Tú') : 'Máster',
+        text: m.text,
+        kind: m.role === 'user' ? 'user' : 'dm',
+        ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+      }));
+      setMsgs(mapped);
+      save(KEY_MSGS, msgs);
     }
-  }catch(e){ dlog('history load fail', e?.data||e); }
+  } catch (e) {
+    dlog('history load fail', e?.data || e);
+  }
 }
+
 
 /* ============================================================
  *                     Auth (arreglos clave)
