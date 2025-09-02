@@ -26,22 +26,34 @@ export function joinUrl(base, path) {
   return `${b}/${p}`;
 }
 
-// Resolución de API base (orden: ?api → localStorage → window.API_BASE → <meta api_base> → fallback)
+// Resolución de API base (orden: ?api → <meta api_base> → localStorage si coincide host → window.API_BASE → fallback same-origin)
 export function resolveApiBase() {
   const q = getQuerySafe('api');
   if (q) { try { localStorage.setItem(API_STORE_KEY, q); } catch {} return q; }
 
+  const meta = getMetaSafe('api_base');
+  if (meta) return meta; // ← ahora el <meta> manda
+
+  // Si había un valor cacheado, solo úsalo si coincide de host con la página actual
   const cached = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
-  if (cached) return cached;
+  try {
+    if (cached) {
+      const loc = new URL(window.location.href);
+      const api = new URL(cached, loc);
+      if (api.origin === loc.origin) return api.toString(); // mismo host → ok
+    }
+  } catch {} // si falla el parseo, seguimos
 
   const win = (typeof window !== 'undefined' && window.API_BASE) ? String(window.API_BASE) : '';
   if (win) return win;
 
-  const meta = getMetaSafe('api_base'); // <-- usa api_base (con guión bajo)
-  if (meta) return meta;
-
-  // Fallback a prod
-  return 'https://galaxia-sw.vercel.app/api';
+  // Fallback: misma origin + /api
+  try {
+    const loc = new URL(window.location.href);
+    return new URL('/api', loc).toString();
+  } catch {
+    return '/api';
+  }
 }
 
 export let API_BASE = resolveApiBase();
