@@ -18,6 +18,16 @@ const UI = {
   authKind: null,
   confirmLoading: false,
 };
+// ===== Scene image jobs (estado en front para sobrevivir re-render) =====
+const SCENE_JOBS = load('sw:scene_jobs', {}) || {};   // { [msgKey]: { status, jobId, dataUrl } }
+const POLLERS = {};                                   // { [jobId]: intervalId }
+function persistJobs(){ try { save('sw:scene_jobs', SCENE_JOBS); } catch {} }
+function authHeaders() {
+  const h = {};
+  if (AUTH?.token) h['Authorization'] = `Bearer ${AUTH.token}`;
+  return h;
+}
+
 setRenderCallback(render);
 
 // ============================================================
@@ -305,28 +315,33 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
 function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
-  let html = msgs.map(m => {
-    const isUser    = (m.kind === 'user');
+  let html = msgs.map((m, i) => {
+    // Endurecer: valores por defecto
+    const kind = (m && m.kind) === 'user' ? 'user' : 'dm';
+    const tsSafe = Number(m?.ts) || (Date.now() + i);
+    const isUser = (kind === 'user');
     const metaAlign = isUser ? 'text-right' : '';
-    const label     = escapeHtml(m.user) + ':';
+    const labelUser = m?.user ? escapeHtml(m.user) : (isUser ? escapeHtml(character?.name || 'Tú') : 'Máster');
+    const label = labelUser + ':';
+  
     const msgBoxStyle = isUser
       ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
       : 'width:fit-content; max-width:min(72ch, 92%);';
     const textStyle = isUser ? 'text-align:left; width:100%;' : '';
     const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
-    const timeBoxStyle = isUser
-      ? timeBoxBase + 'width:fit-content; margin-left:auto;'
-      : timeBoxBase + 'width:fit-content;';
+    const timeBoxStyle = isUser ? timeBoxBase + 'width:fit-content; margin-left:auto;' : timeBoxBase + 'width:fit-content;';
+  
     return `
-      <div class="msg ${m.kind}" style="${msgBoxStyle}">
+      <div class="msg ${kind}" data-key="${tsSafe}" style="${msgBoxStyle}">
         <div class="meta ${metaAlign}">${label}</div>
-        <div class="text" style="${textStyle}">${formatMarkdown(m.text)}</div>
+        <div class="text" style="${textStyle}">${formatMarkdown(m?.text || '')}</div>
       </div>
-      <div class="msg ${m.kind}" style="${timeBoxStyle}">
-        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(m.ts)}</div>
+      <div class="msg ${kind}" style="${timeBoxStyle}">
+        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(tsSafe)}</div>
       </div>
     `;
   }).join('');
+  
 
   if (pendingConfirm) {
     const summary = (pendingConfirm.type === 'name')
@@ -360,6 +375,7 @@ function render() {
     if (chatEl) {
       chatEl.innerHTML = html;
       decorateDMs();
+      hydrateSceneJobs();
       chatEl.scrollTop = chatEl.scrollHeight;
     }
     updateIdentityFromState();
@@ -972,46 +988,144 @@ function decorateDMs() {
   const root = document.getElementById('chat');
   if (!root) return;
 
-  // Ampliamos el selector: .msg.dm, data-kind="dm" o .msg cuyo header diga "Máster"
-  const candidates = root.querySelectorAll('.msg');
+  const candidates = root.querySelectorAll('.msg.dm');
 
-  let count = 0;
   candidates.forEach((box) => {
     if (box.dataset.enhanced === '1') return;
 
     const meta = box.querySelector('.meta, .header, .name') || box;
     const txt  = box.querySelector('.text') || null;
+    const key  = box.getAttribute('data-key') || '';
 
-    // ¿Es del Máster?
-    const isDM =
-      box.classList.contains('dm') ||
-      box.getAttribute('data-kind') === 'dm' ||
-      /máster|master/i.test((meta?.textContent || ''));
+    if (!meta || !txt) return;
 
-    if (!isDM || !meta || !txt) return;
+    // Slot antes del texto
+    if (!box.querySelector('.scene-image-slot')) {
+      const slot = document.createElement('div');
+      slot.className = 'scene-image-slot';
+      slot.hidden = true;
+      slot.style.minHeight = '1px';
+      txt.insertAdjacentElement('beforebegin', slot);
+    }
 
-    // --- Slot de imagen: lo insertamos ANTES del texto, sin necesidad de padre común
-    const slot = document.createElement('div');
-    slot.className = 'scene-image-slot';
-    slot.hidden = true;
-    slot.style.minHeight = '1px'; // evita colapsos por CSS heredado
-    // 👇 Clave: no usamos box.insertBefore(..., txt) (txt no es hijo directo de box).
-    txt.insertAdjacentElement('beforebegin', slot);
-
-    // --- Botón pincel junto al nombre del Máster
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'brush-btn';
-    btn.title = 'Ilustrar escena';
-    btn.textContent = '🖌️';
-    meta.appendChild(btn);
+    // Botón pincel
+    if (!box.querySelector('.brush-btn')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'brush-btn';
+      btn.title = 'Ilustrar escena';
+      btn.textContent = '🖌️';
+      meta.appendChild(btn);
+    }
 
     box.dataset.enhanced = '1';
-    count++;
-  });
 
-  console.log('[IMG] decorateDMs → añadidos', count, 'botones');
+    // Rehidratar si ya había job hecho/en curso
+    const job = SCENE_JOBS[key];
+    if (job?.status === 'done' && job?.dataUrl) {
+      const slot = box.querySelector('.scene-image-slot');
+      injectSceneImage(slot, job.dataUrl);
+    } else if (job && (job.status === 'queued' || job.status === 'processing')) {
+      paintShimmerForKey(key);
+      ensurePollingForJob(key);
+    }
+  });
 }
+
+function getBoxKey(box){ return box?.getAttribute('data-key') || ''; }
+
+function findBoxByKey(key){
+  try {
+    const sel = `.msg.dm[data-key="${key}"]`;
+    return document.querySelector(sel);
+  } catch {
+    return null;
+  }
+}
+
+function paintShimmerForKey(key){
+  const box = findBoxByKey(key);
+  if (!box) return;
+  const txtEl = box.querySelector('.text');
+  if (!txtEl) return;
+  if (box.querySelector('.scene-image-loading')) return;
+  const shim = document.createElement('div');
+  shim.className = 'scene-image-loading';
+  box.insertBefore(shim, txtEl);
+}
+
+function removeShimmerForKey(key){
+  const box = findBoxByKey(key);
+  if (!box) return;
+  const shim = box.querySelector('.scene-image-loading');
+  if (shim) shim.remove();
+}
+
+function injectSceneImageForKey(key, src){
+  const box = findBoxByKey(key);
+  if (!box) return;
+  const slot = box.querySelector('.scene-image-slot');
+  if (!slot) return;
+  injectSceneImage(slot, src);
+}
+
+function hydrateSceneJobs(){
+  try {
+    Object.entries(SCENE_JOBS).forEach(([key, job]) => {
+      if (job.status === 'done' && job.dataUrl) {
+        injectSceneImageForKey(key, job.dataUrl);
+      } else if (job.status === 'queued' || job.status === 'processing') {
+        paintShimmerForKey(key);
+        ensurePollingForJob(key);
+      }
+    });
+  } catch (e) {
+    console.warn('[IMG] hydrateSceneJobs error:', e);
+  }
+}
+
+function ensurePollingForJob(key){
+  const job = SCENE_JOBS[key];
+  if (!job?.jobId) return;
+  if (POLLERS[job.jobId]) return;
+
+  let tries = 0;
+  const maxTries = 120;
+  const intervalMs = 2000;
+
+  POLLERS[job.jobId] = setInterval(async () => {
+    tries++;
+    try {
+      const url = new URL(joinUrl(API_BASE, '/scene-image/status'));
+      url.searchParams.set('jobId', job.jobId);
+      const rs = await fetch(url, { headers: authHeaders() });
+      if (!rs.ok) throw new Error('status_http_' + rs.status);
+      const st = await rs.json();
+
+      if (st.status === 'done' && st.dataUrl) {
+        SCENE_JOBS[key] = { ...SCENE_JOBS[key], status: 'done', dataUrl: st.dataUrl };
+        persistJobs();
+        removeShimmerForKey(key);
+        injectSceneImageForKey(key, st.dataUrl);
+        clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId];
+      } else if (st.status === 'error') {
+        SCENE_JOBS[key] = { ...SCENE_JOBS[key], status: 'error' };
+        persistJobs();
+        removeShimmerForKey(key);
+        clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId];
+      }
+      // queued/processing -> seguimos
+    } catch (e) {
+      console.warn('[IMG] status poll error:', e.message);
+    }
+    if (tries >= maxTries) {
+      console.warn('[IMG] job timeout key=', key);
+      removeShimmerForKey(key);
+      clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId];
+    }
+  }, intervalMs);
+}
+
 
 
 function getMasterTextFromBox(box){

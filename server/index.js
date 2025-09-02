@@ -4,8 +4,8 @@ import cors from 'cors';
 import pg from 'pg';
 import { randomUUID } from 'crypto';
 
-import dmRouter from './dm.js';               // /respond, etc.
-import worldRouter from './world/index.js';   // /world/..., /characters/...
+import dmRouter from './dm.js';
+import worldRouter from './world/index.js';
 import chatRouter from './chat.js';
 import {
   register,
@@ -22,10 +22,10 @@ import { getOpenAI } from './openai-client.js';
 const app = express();
 const api = express.Router();
 
-/* ====== DB helper para auto-provisión de personaje ====== */
+/* ====== DB helper ====== */
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Neon / Vercel
+  ssl: { rejectUnauthorized: false },
 });
 async function ensureCharacter(username) {
   if (!username) return;
@@ -36,17 +36,9 @@ async function ensureCharacter(username) {
   }
 }
 
-/* ====== Logging básico ====== */
+/* ====== Logging ====== */
 app.use((req, _res, next) => {
-  console.log(
-    '[REQ]',
-    req.method,
-    req.url,
-    'Origin=',
-    req.headers.origin || '-',
-    'UA=',
-    req.headers['user-agent'] || '-'
-  );
+  console.log('[REQ]', req.method, req.url, 'Origin=', req.headers.origin || '-', 'UA=', req.headers['user-agent'] || '-');
   next();
 });
 
@@ -57,14 +49,14 @@ try {
   morganMW = m.default || m;
   console.log('[BOOT] morgan loaded');
 } catch (e) {
-  console.warn('[BOOT] morgan not available, using fallback logger. Reason:', e?.message);
+  console.warn('[BOOT] morgan not available:', e?.message);
 }
 if (morganMW) app.use(morganMW('tiny'));
 
 /* ====== Parsing ====== */
 app.use(express.json({ limit: '1mb' }));
 
-/* ====== CORS (único bloque) ====== */
+/* ====== CORS ====== */
 const ALLOWED = (process.env.ALLOWED_ORIGIN || '')
   .split(',')
   .map(s => s.trim())
@@ -72,7 +64,6 @@ const ALLOWED = (process.env.ALLOWED_ORIGIN || '')
 
 const corsOpts = {
   origin(origin, cb) {
-    // Permite same-origin (sin header Origin) y, si no hay lista, abre para dev
     if (!origin) return cb(null, true);
     if (!ALLOWED.length || ALLOWED.includes(origin)) return cb(null, true);
     console.warn('[CORS] blocked:', origin, 'Allowed=', ALLOWED);
@@ -84,30 +75,25 @@ const corsOpts = {
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOpts));
-app.options('*', cors(corsOpts)); // preflight
+app.options('*', cors(corsOpts));
 
-/* ====== Salud (en /health y /api/health) ====== */
+/* ====== Health ====== */
 function healthPayload() {
-  return {
-    ok: true,
-    ts: Date.now(),
-    env: process.env.NODE_ENV || 'production',
-    api: { routes: 'mounted' },
-  };
+  return { ok: true, ts: Date.now(), env: process.env.NODE_ENV || 'production', api: { routes: 'mounted' } };
 }
 app.get('/health', (_req, res) => res.json(healthPayload()));
 app.head('/health', (_req, res) => res.status(200).end());
 api.get('/health', (_req, res) => res.json(healthPayload()));
 api.head('/health', (_req, res) => res.status(200).end());
 
-/* ====== Auth (todas bajo /api/auth/*) ====== */
+/* ====== Auth ====== */
 api.post('/auth/register', async (req, res) => {
   console.log('[AUTH/register] body=', req.body);
   try {
     const { username, pin } = req.body || {};
-    await register(username, pin);                 // crea usuario
-    const payload = await login(username, pin);    // auto-login -> { token, user }
-    await ensureCharacter(username);               // auto-provisión personaje + seed
+    await register(username, pin);
+    const payload = await login(username, pin);
+    await ensureCharacter(username);
     return res.json(payload);
   } catch (e) {
     console.error('[AUTH/register] error', e);
@@ -120,7 +106,7 @@ api.post('/auth/login', async (req, res) => {
   try {
     const { username, pin } = req.body || {};
     const r = await login(username, pin);
-    await ensureCharacter(username);               // garantiza personaje activo + seed
+    await ensureCharacter(username);
     return res.json(r);
   } catch (e) {
     console.error('[AUTH/login] error', e);
@@ -134,46 +120,31 @@ api.get('/auth/me', requireAuth, async (req, res) => {
 });
 
 api.post('/auth/logout', requireAuth, async (_req, res) => {
-  try {
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error('[AUTH/logout] error', e);
-    return res.status(500).json({ error: 'logout_failed' });
-  }
+  try { return res.json({ ok: true }); }
+  catch (e) { console.error('[AUTH/logout] error', e); return res.status(500).json({ error: 'logout_failed' }); }
 });
 
 /* ====== Admin ====== */
 api.get('/admin/users', requireAuth, requireAdmin, async (_req, res) => {
-  try {
-    const users = await listUsers();
-    return res.json({ users });
-  } catch (e) {
-    console.error('[ADMIN/users] error', e);
-    return res.status(500).json({ error: e?.message || 'error' });
-  }
+  try { const users = await listUsers(); return res.json({ users }); }
+  catch (e) { console.error('[ADMIN/users] error', e); return res.status(500).json({ error: e?.message || 'error' }); }
 });
 
 api.put('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  const { username, pin } = req.body || {};
-  await updateUser(id, { username, pin });
-  return res.json({ ok: true });
+  const { id } = req.params; const { username, pin } = req.body || {};
+  await updateUser(id, { username, pin }); return res.json({ ok: true });
 });
 
 api.delete('/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const { id } = req.params;
   if (Number(id) === req.auth.userId) return res.status(400).json({ error: 'cannot_delete_self' });
-  await deleteUserCascade(id);
-  return res.json({ ok: true });
+  await deleteUserCascade(id); return res.json({ ok: true });
 });
 
 api.use('/admin', requireAuth, requireAdmin, adminRouter);
 
 /* ====== DM y World ====== */
-// DM (front espera /api/dm/respond)
 api.use('/dm', dmRouter);
-
-// Montamos worldRouter directamente: crea /api/world/... y /api/characters/...
 api.use(worldRouter);
 api.use('/chat', chatRouter);
 
@@ -191,10 +162,10 @@ api.post('/roll', async (req, res) => {
 app.use('/api', api);
 app.use('/api/v1', api);
 
-/* ====== Raíz opcional ====== */
+/* ====== Raíz ====== */
 app.get('/', (_req, res) => res.type('text/plain').send('OK'));
 
-/* ====== Scene Image (text-to-image) ====== */
+/* ====== Prompt builder ====== */
 function buildSceneImagePrompt({ masterText = '', scene = {} }) {
   const location   = scene?.location   || 'sci-fi spaceport interior';
   const mood       = scene?.mood       || 'tense, cinematic';
@@ -220,39 +191,27 @@ function buildSceneImagePrompt({ masterText = '', scene = {} }) {
 }
 
 /* =======================================================================
-   JOBS para generación de imagen (start → worker → status)
+   JOBS (start → worker → status)
    ======================================================================= */
-
-// Almacen simple en memoria (para prod usar KV/Redis)
 globalThis.SCENE_JOBS = globalThis.SCENE_JOBS || new Map();
 const JOBS = globalThis.SCENE_JOBS;
 
 function gcJobs() {
   const now = Date.now();
   for (const [id, j] of JOBS.entries()) {
-    if ((now - j.createdAt) > 30 * 60 * 1000) JOBS.delete(id); // 30 min
+    if ((now - j.createdAt) > 30 * 60 * 1000) JOBS.delete(id);
   }
 }
 function newJob({ masterText, scene }) {
   const id = randomUUID();
-  const rec = {
-    id,
-    status: 'queued', // queued | processing | done | error
-    createdAt: Date.now(),
-    masterText,
-    scene: scene || null,
-    dataUrl: null,
-    error: null,
-  };
-  JOBS.set(id, rec);
-  gcJobs();
-  return rec;
+  const rec = { id, status: 'queued', createdAt: Date.now(), masterText, scene: scene || null, dataUrl: null, error: null };
+  JOBS.set(id, rec); gcJobs(); return rec;
 }
 const getJob = (id) => JOBS.get(id) || null;
 const setJobDone  = (id, dataUrl) => { const j = JOBS.get(id); if (j) { j.status='done'; j.dataUrl=dataUrl; j.error=null; } };
 const setJobError = (id, msg)     => { const j = JOBS.get(id); if (j) { j.status='error'; j.error=(msg||'unknown'); } };
 
-/** 1) START: crea el job y dispara el worker asíncrono */
+/** 1) START */
 api.post('/scene-image/start', requireAuth, async (req, res) => {
   try {
     const { masterText, scene } = req.body || {};
@@ -261,7 +220,6 @@ api.post('/scene-image/start', requireAuth, async (req, res) => {
 
     const job = newJob({ masterText: text, scene });
 
-    // Construye URL absoluta y llama al worker SIN esperar
     const proto = req.headers['x-forwarded-proto'] || 'https';
     const host  = req.headers['x-forwarded-host'] || req.headers.host;
     const base  = `${proto}://${host}`;
@@ -269,14 +227,10 @@ api.post('/scene-image/start', requireAuth, async (req, res) => {
 
     fetch(`${base}/api/scene-image/worker`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(INTERNAL_TOKEN ? { 'X-Internal-Token': INTERNAL_TOKEN } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', ...(INTERNAL_TOKEN ? { 'X-Internal-Token': INTERNAL_TOKEN } : {}) },
       body: JSON.stringify({ jobId: job.id }),
     }).catch(() => {});
 
-    // Devolvemos jobId inmediatamente
     return res.status(202).json({ ok: true, jobId: job.id });
   } catch (e) {
     console.error('[scene-image/start]', e);
@@ -284,31 +238,25 @@ api.post('/scene-image/start', requireAuth, async (req, res) => {
   }
 });
 
-/** 2) WORKER: genera la imagen (solo invocable internamente) */
+/** 2) WORKER */
 api.post('/scene-image/worker', async (req, res) => {
   const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
   if (INTERNAL_TOKEN && req.headers['x-internal-token'] !== INTERNAL_TOKEN) {
     return res.status(403).json({ error: 'forbidden' });
   }
-
   try {
     const { jobId } = req.body || {};
     const job = getJob(jobId);
     if (!job) return res.status(404).json({ error: 'job_not_found' });
 
-    if (job.status === 'done') return res.json({ ok: true, status: 'done' });
+    if (job.status === 'done')       return res.json({ ok: true, status: 'done' });
     if (job.status === 'processing') return res.json({ ok: true, status: 'processing' });
     job.status = 'processing';
 
     const openai = await getOpenAI();
     const prompt = buildSceneImagePrompt({ masterText: job.masterText, scene: job.scene });
 
-    const out = await openai.images.generate({
-      model: 'gpt-image-1',
-      size: '1024x1024',
-      prompt,
-    });
-
+    const out = await openai.images.generate({ model: 'gpt-image-1', size: '1024x1024', prompt });
     const d   = out?.data?.[0] || null;
     const b64 = d?.b64_json || null;
     const url = d?.url || null;
@@ -329,7 +277,7 @@ api.post('/scene-image/worker', async (req, res) => {
   }
 });
 
-/** 3) STATUS: consulta del estado desde el front (polling) */
+/** 3) STATUS */
 api.get('/scene-image/status', requireAuth, async (req, res) => {
   const jobId = String(req.query.jobId || '');
   const job = getJob(jobId);
@@ -337,19 +285,19 @@ api.get('/scene-image/status', requireAuth, async (req, res) => {
 
   return res.json({
     ok: true,
-    status: job.status,                 // 'queued' | 'processing' | 'done' | 'error'
+    status: job.status,
     dataUrl: job.status === 'done' ? job.dataUrl : null,
     error: job.status === 'error' ? job.error : null,
   });
 });
 
-/* ====== 404 en /api/* ====== */
+/* ====== 404 ====== */
 app.use(['/api', '/api/v1'], (req, res) => {
   console.warn('[API 404]', req.method, req.originalUrl);
   return res.status(404).json({ error: 'not_found', path: req.originalUrl });
 });
 
-/* ====== Manejador global de errores ====== */
+/* ====== Error handler ====== */
 app.use((err, req, res, _next) => {
   console.error('[API ERROR]', err?.stack || err?.message || err);
   return res.status(500).json({ error: 'internal_server_error' });
