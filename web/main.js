@@ -498,7 +498,7 @@ async function doAuth(kind) {
     render();
 
     // Lanzamos el kickoff real; si falla, queda el fallback local
-    await startOnboardingKickoff();
+    await startOnboarding({ hard: false }); // pinta bienvenida local + intenta kickoff
 
   } catch (e) {
     dlog('doAuth error:', e?.data || e);

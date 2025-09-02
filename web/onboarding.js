@@ -41,16 +41,32 @@ export async function dmSay(message){
 export async function startOnboardingKickoff(){
   try{
     const kick = await api('/dm/respond', {
-      message: '',
+      message: '<<CLIENT_HELLO>>',
       history: [],
       character_id: Number(character?.id) || null,
       stage: mapStageForDM(step),
       clientState: getClientState(),
       config: { mode: getDmMode() }
     });
-    if (kick?.text) handleIncomingDMText(kick.text);
+
+    if (kick?.text && String(kick.text).trim()) {
+      handleIncomingDMText(kick.text);
+    } else {
+      // ✅ Fallback si el Máster devolvió vacío
+      pushDM(
+        'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
+        'Vamos a registrar tu identidad para entrar en la historia.\n' +
+        '**Primero:** ¿cómo se va a llamar tu personaje?'
+      );
+    }
   } catch (e) {
+    // ✅ Fallback si el Máster falló (red/servidor)
     dlog('kickoff fail (fallback visible)', e?.data || e);
+    pushDM(
+      'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
+      'Vamos a registrar tu identidad para entrar en la historia.\n' +
+      '**Primero:** ¿cómo se va a llamar tu personaje?'
+    );
   }
 }
 
