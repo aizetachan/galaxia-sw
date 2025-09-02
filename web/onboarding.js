@@ -54,8 +54,8 @@ export async function startOnboardingKickoff(){
     } else {
       // ✅ Fallback si el Máster devolvió vacío
       pushDM(
-        'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
-        'Vamos a registrar tu identidad para entrar en la historia.\n' +
+        'Bienvenid@ a **Realverse**. Soy tu **Máster**.\n\n' +
+        'Vamos a registrar tu personaje para comenzar la historia.\n' +
         '**Primero:** ¿cómo se va a llamar tu personaje?'
       );
     }
@@ -105,7 +105,7 @@ export async function handleConfirmDecision(decision){
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('upsert name fail', e?.data||e); }
         setStep('species');
 
-        pushDM(`Perfecto, **${character.name}**. Ahora elige **especie** (Humano, Twi'lek, Wookiee, Zabrak, Droide)…`);
+        ushDM(`Perfecto, **${character.name}**. Ahora indica **especie** y **rol** de tu personaje.`);
         ui.render?.();
         dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`)
           .catch(()=>{});

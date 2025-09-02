@@ -1,543 +1,490 @@
 // server/dm.js
 import { Router } from 'express';
 import { hasDb, sql } from './db.js';
-import { optionalAuth } from './auth.js';
-import { getPrompt, getPromptSection } from './prompts.js';
+import { optionalAuth, requireAuth } from './auth.js';
+import { getPromptSection } from './prompts.js';
 import { getOpenAI } from './openai-client.js';
-import {
-  getNotes,
-  setNotes,
-  getSummary,
-  setSummary,
-  bumpTurns,
-  SUMMARY_EVERY_TURNS,
-  SUMMARY_HISTORY_TRIGGER,
-  userLightNotes,
-  userThreadSummary,
-  userTurnCount,
-} from './memory.js';
 
 const router = Router();
+
+/* =========================
+ * Utilidades y helpers
+ * ========================= */
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
-/* ========= helpers ========= */
-function extractUserText(body) {
-  if (typeof body === 'string') return body.trim();
-  if (body && typeof body === 'object') {
-    const direct = body.text ?? body.message ?? body.prompt ?? body.content ?? body.input?.text;
-    if (typeof direct === 'string' && direct.trim()) return direct.trim();
-    if (Array.isArray(body.messages)) {
-      for (let i = body.messages.length - 1; i >= 0; i--) {
-        const m = body.messages[i];
-        if (m?.role === 'user' && typeof m?.content === 'string' && m.content.trim()) {
-          return m.content.trim();
-        }
-      }
-    }
-  }
-  return '';
+function firstLine(str = '') {
+  const i = String(str || '').indexOf('\n');
+  return i === -1 ? String(str || '') : String(str || '').slice(0, i);
 }
-
-async function saveMsg(userId, role, text) {
-  if (!hasDb) return;
+function restAfterFirstLine(str = '') {
+  const i = String(str || '').indexOf('\n');
+  return i === -1 ? '' : String(str || '').slice(i + 1);
+}
+function parseHeadJSON(text = '') {
   try {
-    const uid = toInt(userId);
-    await sql(
-      `INSERT INTO chat_messages(user_id, role, kind, text, ts)
-       VALUES ($1,$2,$2,$3, now())`,
-      [uid, role, text]
-    );
-  } catch (e) { console.warn('[DM] saveMsg error', e?.message || e); }
-}
-
-async function getNumericCharacterId({ body, userId }) {
-  const cidFromBody = toInt(body?.character_id);
-  if (cidFromBody) return cidFromBody;
-
-  if (body?.character?.id && !toInt(body.character.id)) {
-    console.log('[DM] Ignoring non-numeric character.id from body (guest UUID)');
+    const head = firstLine(text).trim();
+    const j = JSON.parse(head);
+    if (!j || typeof j !== 'object' || !j.ui || !j.control) return null;
+    return j;
+  } catch {
+    return null;
   }
-
-  if (hasDb && toInt(userId)) {
-    try {
-      const { rows } = await sql(
-        `SELECT id FROM characters WHERE owner_user_id = $1 LIMIT 1`,
-        [toInt(userId)]
-      );
-      if (rows?.[0]?.id) return rows[0].id;
-    } catch (e) { console.warn('[DM] lookup character by user_id error:', e?.message || e); }
-  }
-  return null;
 }
 
-async function worldBrief(characterId) {
-  try {
-    if (!hasDb || !toInt(characterId)) return '';
-    const cid = toInt(characterId);
-    const [{ rows: cRows }, { rows: eNear }, { rows: eFaction }, { rows: eMine }] = await Promise.all([
-      sql(`SELECT id,name,species,role,last_location FROM characters WHERE id=$1`, [cid]),
-      sql(`SELECT e.ts,e.summary,e.location,e.kind FROM events e
-           WHERE e.visibility='public' AND e.location IS NOT NULL
-             AND e.location=(SELECT last_location FROM characters WHERE id=$1)
-           ORDER BY e.ts DESC LIMIT 8`, [cid]),
-      sql(`SELECT e.ts,e.summary,e.kind FROM faction_memberships fm
-           JOIN events e ON e.visibility='faction' AND e.faction_id=fm.faction_id
-           WHERE fm.character_id=$1 ORDER BY e.ts DESC LIMIT 6`, [cid]),
-      sql(`SELECT e.ts,e.summary,e.kind FROM events e
-           WHERE e.actor_character_id=$1 ORDER BY e.ts DESC LIMIT 4`, [cid]),
-    ]);
-    const c = cRows[0]; if (!c) return '';
-    const L = [`PJ: ${c.name} (${c.species || '—'}/${c.role || '—'}) en ${c.last_location || 'desconocido'}.`];
-    if (eMine?.length)   { L.push('Actos propios:');  eMine.forEach(e => L.push(`- [${e.kind || 'evento'}] ${e.summary}`)); }
-    if (eNear?.length)   { L.push('Cerca (público):'); eNear.forEach(e => L.push(`- ${e.summary} @ ${e.location}`)); }
-    if (eFaction?.length){ L.push('De tu facción:');  eFaction.forEach(e => L.push(`- ${e.summary}`)); }
-    return L.join('\n');
-  } catch (e) { console.warn('[DM] worldBrief error:', e?.message || e); return ''; }
+// Pequeño normalizador de entrada del usuario
+function wantsSuggestion(userMsg = '') {
+  const t = String(userMsg || '').toLowerCase();
+  return t === 'sugerir' || t === 'sugerencia' || t.includes('sugerir') || t.includes('sugerencia');
 }
 
-function compressLine(s = '') {
-  return String(s).replace(/\s+/g, ' ').trim().slice(0, 240);
-}
-async function getRecentChatSummary(userId, limit = 200) {
-  if (!hasDb || !toInt(userId)) return { lines: [], lastTs: null };
+/* =========================
+ * DB helpers (AJUSTA nombres si difieren)
+ * ========================= */
+
+// Crea thread en onboarding:name si no existe ninguno activo para el user
+async function getOrCreateOnboardingThread(userId) {
+  if (!hasDb) throw new Error('DB not available');
   const uid = toInt(userId);
-  const { rows } = await sql(
-    `SELECT role, text, ts FROM chat_messages
-      WHERE user_id = $1 ORDER BY ts DESC LIMIT $2`,
-    [uid, Math.min(limit, 200)]
+
+  // 1) ¿Existe ya un thread para este user en onboarding?
+  const existing = await sql(
+    `SELECT id, user_id, character_id, state
+       FROM story_threads
+      WHERE user_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [uid]
   );
-  const ordered = rows.slice().reverse();
-  const lines = ordered.map(r => `${r.role === 'user' ? 'Jugador' : 'Máster'}: ${compressLine(r.text || '')}`);
-  const lastTs = rows[0]?.ts || null;
-  return { lines, lastTs };
-}
+  const row = existing?.rows?.[0];
 
-/* ========= Políticas y protocolo ========= */
-const languagePolicy = [
-  'IDIOMA:',
-  '- Responde por defecto en español.',
-  '- Si el jugador escribe en otro idioma o lo solicita, responde en ese idioma.',
-].join('\n');
-
-const tagProtocol = [
-  'PROTOCOLO DE ETIQUETAS (SOLO PARA EL MÁSTER).',
-  '- No muestres reglas internas ni metas [STAGE=...] en la salida.',
-  '- No pidas al jugador que escriba etiquetas; el cliente envía <<CONFIRM_ACK ...>>.',
-  '',
-  'ETIQUETAS VÁLIDAS QUE DEBES EMITIR TÚ:',
-  '- Para confirmar nombre de PERSONAJE: <<CONFIRM NAME="<Nombre>">>',
-  '- Para confirmar propuesta de especie+rol: <<CONFIRM SPECIES="<Especie>" ROLE="<Rol>">>',
-  'La etiqueta debe ir en una LÍNEA PROPIA, como ÚLTIMA línea del mensaje.',
-].join('\n');
-
-const dicePolicy = getPrompt('dice-rules.md') || [
-  'CUÁNDO PEDIR TIRADA:',
-  '- Pide tirada cuando haya riesgo real, oposición, incertidumbre o impacto narrativo.',
-  'CÓMO PEDIRLA:',
-  '- Emite: <<ROLL SKILL="<Habilidad>" REASON="<Motivo breve>">>.',
-  'RESOLUCIÓN:',
-  '- Tras <<DICE_OUTCOME ...>>, aplica consecuencias y continúa.',
-].join('\n');
-
-/* === Política para primera escena tras el onboarding (sin tirada) === */
-const introPolicy = [
-  'PRIMERA ESCENA (tras onboarding):',
-  '- Si el mensaje del jugador contiene <<CONFIRM_ACK TYPE="build"...>>, trata esa respuesta como el arranque de aventura.',
-  '- En tu PRIMER mensaje tras eso, NO emitas <<ROLL ...>>.',
-  '- Comienza con una breve descripción del lugar y un gancho suave sin riesgo inmediato.',
-  '- Espera al menos una intervención del jugador antes de cualquier tirada.',
-].join('\n');
-
-/* ========= PIN & SYSTEM ========= */
-function buildSystem({ stage, brief, historyLines, isIntroStart, clientState }) {
-  // === Secciones del prompt maestro (solo lo necesario por fase)
-  const output = getPromptSection('prompt-master.md', 'OUTPUT_CONTRACT');
-  const style  = getPromptSection('prompt-master.md', 'STYLE');
-  const phase  = (stage && stage !== 'done')
-    ? getPromptSection('prompt-master.md', 'ONBOARDING')
-    : getPromptSection('prompt-master.md', 'PLAY');
-
-  const game = getPrompt('game-rules.md');
-  const dice = (stage === 'done') ? getPrompt('dice-rules.md') : '';
-
-  // --- PIN (memoria activa, 3 líneas) ---
-  const pinCanon = 'CANON: Space-opera PG-13; la reputación tiene consecuencias; la violencia pública atrae a la ley.';
-  
-  // PJ: intenta sacarlo del brief (DB) o cae al clientState (guest)
-  let pinPj = '';
-  const mPj = /PJ:\s*([^\n]+)/i.exec(brief || '');
-  if (mPj) {
-    pinPj = 'PJ: ' + mPj[1].trim();
-  } else if (clientState?.name) {
-    const spec = clientState?.species || '—';
-    const role = clientState?.role || '—';
-    pinPj = `PJ: ${clientState.name} (${spec}/${role})`;
+  if (row && row.state && row.state.startsWith('onboarding')) {
+    return row;
   }
 
-  const pinStage =
-    (stage && stage !== 'done')
-      ? `STAGE=${stage}`
-      : 'STAGE=done';
-
-  const pinClock = 'RITMO: narración breve (2–5 frases) y decisiones con impacto.';
-
-  const pinBlock = [pinCanon, pinPj, pinStage, pinClock].filter(Boolean).join('\n');
-
-  // Mundo cercano (DB) y resumen reciente
-  const worldBlock = brief ? ('\nContexto del mundo:\n' + brief) : '';
-  const historyBlock = (historyLines && historyLines.length)
-    ? ('\nLíneas recientes:\n' + historyLines.map(s => '- ' + s).join('\n'))
-    : '';
-
-  // Contrato mínimo para cabecera JSON (refuerzo)
-  const metaContract = [
-    'CONTRATO DE SALIDA:',
-    '- La PRIMERA LÍNEA debe ser JSON válido con exactamente esta forma:',
-    '  {"ui":{"narration":"...","choices":[{"id":"...","label":"...","requires":[],"hint":""}]},"control":{"state":"...","rolls":[],"memos":[],"confirms":[]}}',
-    '- Todo lo interno (state, rolls, memos, confirms) va SOLO en "control".',
-    '- "ui" es lo único que verá el jugador. No incluyas etiquetas <<...>> en "ui".',
-    '- Máximo 3 opciones relevantes y divergentes.',
-  ].join('\n');
-
-  return [
-    pinBlock,
-    metaContract,
-    output,
-    style,
-    phase,
-    game,
-    dice ? ('POLÍTICA DE DADOS (resumen):\n' + dice) : '',
-    languagePolicy,
-    dicePolicy,
-    tagProtocol,
-    isIntroStart ? introPolicy : '',
-    worldBlock,
-    historyBlock,
-  ].filter(Boolean).join('\n\n');
+  // Si hay thread pero ya no está en onboarding, para el caso "usuario nuevo" volvemos a crear uno limpio
+  const ins = await sql(
+    `INSERT INTO story_threads (user_id, state, updated_at)
+     VALUES ($1, 'onboarding:name', now())
+     RETURNING id, user_id, character_id, state`,
+    [uid]
+  );
+  return ins.rows[0];
 }
 
+async function getOrCreateCharacterForUser(userId) {
+  const uid = toInt(userId);
+  const q1 = await sql(
+    `SELECT id, user_id, name, species, role
+       FROM characters
+      WHERE user_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [uid]
+  );
+  if (q1.rows[0]) return q1.rows[0];
 
-/* ========= selector de MODO (fast/rich/auto) ========= */
-const PASSIVE_RE = /\b(miro|observo|echo un vistazo|escucho|me quedo quiet[oa]|esperar|esperando|contemplo|analizo|reviso|vigilo)\b/i;
+  const ins = await sql(
+    `INSERT INTO characters (user_id, updated_at)
+     VALUES ($1, now())
+     RETURNING id, user_id, name, species, role`,
+    [uid]
+  );
 
-function pickMode({ body, query, lastUser }) {
-  // 👇 ahora soporta body.config.mode (desde el frontend)
-  const override = (body?.config?.mode || body?.mode || query?.mode || process.env.DM_MODE || '').toLowerCase();
-
-
-  if (['fast', 'rich', 'auto'].includes(override)) return override || 'auto';
-  if (PASSIVE_RE.test(lastUser || '')) return 'fast';
-  if (/"[^"]+"/.test(lastUser || '') || /\b(corro|ataco|disparo|hackeo|negocio|amenazo|huyo|persuado)\b/i.test(lastUser || '')) return 'rich';
-  return 'fast';
-}
-function paramsFor(mode) {
-  return (mode === 'rich')
-    ? { temperature: 0.8, top_p: 0.95, max_tokens: 520 }
-    : { temperature: 0.6, top_p: 0.90, max_tokens: 280 };
-}
-
-/* ========= Asegurar cabecera JSON ========= */
-function ensureJsonHeader(text){
-  const s = String(text || '');
-  const nl = s.indexOf('\n');
-  const first = (nl >= 0 ? s.slice(0, nl) : s).trim();
-  let ok = false;
+  // Relación tabla puente si existe
   try {
-    const j = JSON.parse(first);
-    ok = !!(j && typeof j === 'object' && j.ui && j.control && 'narration' in j.ui && Array.isArray(j.ui.choices));
-  } catch {}
-  if (ok) return s;
-  // Fallback mínimo para que el frontend siempre tenga estructura
-  return `{"ui":{"narration":"","choices":[]},"control":{"state":"","rolls":[],"memos":[],"confirms":[]}}\n` + s;
-}
-/* ========= Formatear respuesta solo-UI (sin lógica) ========= */
-function makeUiOnlyText(llmText) {
-  const s = String(llmText || '');
-  const nl = s.indexOf('\n');
-  const header = (nl >= 0 ? s.slice(0, nl) : s).trim();
-  const body   = (nl >= 0 ? s.slice(nl + 1) : '');
-
-  let ui = null;
-  try {
-    const h = JSON.parse(header);
-    ui = h?.ui || null;
-  } catch {}
-
-  const stripTags = (t) => String(t).replace(/<<[^>]+>>/g, '').trim();
-
-  if (ui && typeof ui === 'object') {
-    const narration = stripTags(ui.narration || '');
-    const choices = Array.isArray(ui.choices) ? ui.choices : [];
-    const bullets = choices.length
-      ? '\n\n' + choices.map(c => '• ' + (c?.label ?? '')).join('\n')
-      : '';
-    return (narration + bullets).trim() || '…';
-  }
-
-  // Fallback: si no hubo cabecera JSON válida, devuelve el texto completo limpiando etiquetas
-  return stripTags(s || body);
-}
-
-
-/* ========= OpenAI call ========= */
-function isGpt5(model) { return /^gpt-5/i.test(model || ''); }
-
-async function callOpenAI({ client, model, messages, params }) {
-  // Chat Completions primero
-  try {
-    const payload = { model, messages };
-    if (!isGpt5(model)) {
-      const t = Number.isFinite(params?.temperature) ? params.temperature : Number(process.env.DM_TEMPERATURE ?? '0.9');
-      if (Number.isFinite(t)) payload.temperature = t;
-      if (Number.isFinite(params?.top_p)) payload.top_p = params.top_p;
-      if (Number.isFinite(params?.max_tokens)) payload.max_tokens = params.max_tokens;
-    }
-    const resp = await client.chat.completions.create(payload);
-    const out = resp.choices?.[0]?.message?.content?.trim() || null;
-    if (out) return out;
-  } catch (e) {
-    const status = e?.status || e?.response?.status;
-    if (![400, 422].includes(status)) throw e;
-  }
-
-  // Responses API fallback
-  const r2 = await client.responses.create({
-    model,
-    input: messages,
-    temperature: params?.temperature,
-    top_p: params?.top_p,
-    max_output_tokens: params?.max_tokens,
-  });
-  const out = r2.output_text || r2?.content?.[0]?.text || r2?.choices?.[0]?.message?.content || null;
-  return (typeof out === 'string' && out.trim()) ? out.trim() : null;
-}
-
-/* ========= Resumen comprimido ========= */
-async function summarizeTurn({ client, model, prevSummary, recentLines }) {
-  const summarizerModel =
-    process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-5-mini';
-  const sys = [
-    'Eres un asistente que resume partidas de rol en español.',
-    'Objetivo: producir un RESUMEN COMPRIMIDO (4–8 viñetas, máximo ~700 caracteres).',
-    'Incluye: situación actual, objetivo inmediato, pistas/objetos clave, amenazas activas, cambios de estado del PJ.',
-    'No inventes datos. No incluyas etiquetas <<...>>. Prioriza lo reciente.',
-  ].join('\n');
-
-  const user = [
-    prevSummary ? `Resumen previo:\n${prevSummary}\n` : '',
-    'Nuevas líneas recientes (en orden cronológico):',
-    recentLines.map(l => '- ' + l).join('\n'),
-    '',
-    'Devuelve solo viñetas (•) en texto plano, 4–8 líneas.'
-  ].join('\n');
-
-  const messages = [
-    { role: 'system', content: sys },
-    { role: 'user', content: user }
-  ];
-
-  const out = await callOpenAI({
-    client,
-    model: summarizerModel,
-    messages,
-    params: { temperature: 0.3, top_p: 0.9, max_tokens: 380 },
-  });
-
-  return String(out || '')
-    .replace(/<<[\s\S]*?>>/g, '')
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .slice(0, 10)
-    .join('\n')
-    .slice(0, 900);
-}
-
-async function maybeUpdateSummary({ userId, historyLines }) {
-  const turns = bumpTurns(userId);
-  const needs = (turns % SUMMARY_EVERY_TURNS === 0) || (historyLines.length >= SUMMARY_HISTORY_TRIGGER);
-  if (!needs) return;
-
-  try {
-    const client = await getOpenAI();
-    const prev = getSummary(userId);
-    const recent = historyLines.slice(-24);
-    const newSummary = await summarizeTurn({
-      client,
-      model:
-        process.env.LLM_MODEL ||
-        process.env.OPENAI_MODEL ||
-        'gpt-5-mini',
-      prevSummary: prev,
-      recentLines: recent,
-    });
-    if (newSummary && newSummary.length > 0) {
-      setSummary(userId, newSummary);
-      console.log('[DM] summary updated (chars=', newSummary.length, ')');
-    }
-  } catch (e) {
-    console.warn('[DM] summary update skipped:', e?.message || e);
-  }
-}
-
-/* ========= handler principal ========= */
-async function handleDM(req, res) {
-  const url = req.originalUrl || req.url;
-  const userId = req.auth?.userId || null;
-  const text = extractUserText(req.body);
-  const isIntroStart = /<<\s*CONFIRM_ACK[^>]*\bTYPE\s*=\s*"build"/i.test(text || '');
-  const stage = String(req.body?.stage || 'name');
-
-  console.log('[DM] incoming {',
-    '\n  url:', JSON.stringify(url),
-    '\n  userId:', JSON.stringify(userId),
-    '\n  stage:', JSON.stringify(stage),
-    '\n  isIntroStart:', isIntroStart,
-    '\n  textSample:', JSON.stringify(text?.slice?.(0, 60) || ''),
-    '\n}');
-
-  try {
-    if (!text && stage === 'done') {
-      const t = '¿Puedes repetir la acción o pregunta?';
-      await saveMsg(userId, 'dm', t);
-      return res.status(200).json({ ok: true, text: t });
-    }
-
-    const characterId = await getNumericCharacterId({ body: req.body, userId });
-    await saveMsg(userId, 'user', text || '(kickoff)');
-
-    const [brief, history] = await Promise.all([
-      worldBrief(characterId),
-      getRecentChatSummary(userId, 80),
-    ]);
-
-    const sceneMemo = Array.isArray(req.body?.clientState?.sceneMemo) ? req.body.clientState.sceneMemo : [];
-    const lightNotes = getNotes(userId);
-    const mergedMemo = [...new Set([...lightNotes, ...sceneMemo])].slice(-10);
-
-    const summaryText = getSummary(userId);
-
-    const memoBlock = mergedMemo.length
-      ? `\n[RECORDATORIOS — NO narrar; solo tener en cuenta]\n- ${mergedMemo.join('\n- ')}\n`
-      : '';
-    const summaryBlock = summaryText ? `\n[RESUMEN BREVE DE SESIÓN]\n${summaryText}\n` : '';
-
-    const model =
-      process.env.LLM_MODEL ||
-      process.env.OPENAI_MODEL ||
-      'gpt-5-mini';
-    const system = buildSystem({
-      stage,
-      brief,
-      historyLines: history.lines,
-      isIntroStart,
-      clientState: req.body?.clientState || null,
-    });
-
-    // historia reciente del FRONT
-    const clientHistory = Array.isArray(req.body?.history) ? req.body.history : [];
-    const lastUserFromClient = clientHistory.slice().reverse().find(m => m.kind === 'user')?.text || text || '';
-
-    const mode = pickMode({ body: req.body, query: req.query, lastUser: lastUserFromClient });
-    const llmParams = paramsFor(mode);
-
-    const messages = [
-      { role: 'system', content: system },
-      ...(summaryBlock ? [{ role: 'assistant', content: summaryBlock }] : []),
-      ...(memoBlock ? [{ role: 'assistant', content: memoBlock }] : []),
-      ...clientHistory.slice(-8).map(m => ({
-        role: m.kind === 'user' ? 'user' : 'assistant',
-        content: `${m.user}: ${m.text}`
-      })),
-      { role: 'user', content: text || '<<CLIENT_HELLO>>' },
-    ];
-
-    let outText = null;
-    try {
-      const client = await getOpenAI();
-      outText = await callOpenAI({ client, model, messages, params: llmParams });
-    } catch (e) {
-      console.error('[DM] OpenAI fatal:', e?.status, e?.code, e?.message);
-    }
-
-    if (!outText) {
-      const t = 'Interferencia en la HoloNet. El Máster no responde ahora mismo; repite la acción más tarde.';
-      await saveMsg(userId, 'dm', t);
-      return res.status(200).json({ ok: true, text: t, meta: { ai_ok: false, model, mode } });
-    }
-
-       // Asegurar JSON en primera línea
-       let safeText = ensureJsonHeader(outText);
-
-       // Extraer y guardar memo del encabezado JSON como “light notes”
-       try {
-         const nl = safeText.indexOf('\n');
-         const first = (nl >= 0 ? safeText.slice(0, nl) : safeText).trim();
-         const head = JSON.parse(first);
-         const memos = head?.control?.memos;
-         if (Array.isArray(memos) && memos.length) {
-           const current = getNotes(userId);
-           setNotes(userId, [...current, ...memos]);
-         }
-       } catch {}
-   
-       // Construye el texto visible para la UI (sin lógica)
-       const uiText = makeUiOnlyText(safeText);
-   
-       // Guarda en histórico lo mismo que verá el jugador
-       await saveMsg(userId, 'dm', uiText);
-   
-       try {
-         await maybeUpdateSummary({
-           userId,
-           historyLines: history.lines,
-         });
-       } catch (e) {
-         console.warn('[DM] maybeUpdateSummary error:', e?.message || e);
-       }
-   
-       // Devuelve solo lo visible
-       return res.status(200).json({ ok: true, text: uiText, meta: { ai_ok: true, model, mode } });
-   
-
-  } catch (e) {
-    console.error('[DM] fatal:', e?.message || e);
-    const t = 'Fallo temporal del servidor. Repite la acción en un momento.';
-    return res.status(200).json({ ok: true, text: t });
-  }
-}
-
-/* ========= /api/dm/resume ========= */
-router.get('/resume', optionalAuth, async (req, res) => {
-  try {
-    const userId = toInt(req.auth?.userId);
-    if (!userId || !hasDb) return res.json({ ok: true, text: null, empty: true });
-
-    const { rows: cRows } = await sql(
-      `SELECT id, name, last_location FROM characters WHERE owner_user_id = $1 LIMIT 1`,
-      [userId]
+    await sql(
+      `INSERT INTO user_characters (user_id, character_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [uid, ins.rows[0].id]
     );
-    const char = cRows?.[0] || null;
+  } catch (_) {
+    // ignora si no existe la tabla o constraint
+  }
 
-    const { lines } = await getRecentChatSummary(userId, 40);
-    if (!lines.length) return res.json({ ok: true, text: null, empty: true });
+  return ins.rows[0];
+}
 
-    const short = lines.slice(-10).join(' · ');
-    const helloName = char?.name ? `, **${char.name}**` : '';
-    const loc = char?.last_location ? ` en **${char.last_location}**` : '';
-    const text =
-      `Salud de nuevo${helloName}${loc}. Resumen anterior: ${short}. ` +
-      `¿Cómo deseas continuar?`;
-
-    return res.json({ ok: true, text, character: char || null, empty: false });
+async function linkThreadCharacter(threadId, characterId) {
+  try {
+    await sql(
+      `UPDATE story_threads
+          SET character_id = $2,
+              updated_at = now()
+        WHERE id = $1`,
+      [toInt(threadId), toInt(characterId)]
+    );
   } catch (e) {
-    console.error('[DM/resume] error:', e?.message || e);
-    return res.json({ ok: true, text: null, empty: true });
+    console.warn('[DM] linkThreadCharacter error:', e?.message || e);
+  }
+}
+
+async function setThreadState(threadId, state) {
+  await sql(
+    `UPDATE story_threads
+        SET state = $2,
+            updated_at = now()
+      WHERE id = $1`,
+    [toInt(threadId), String(state)]
+  );
+}
+
+async function saveChat(userId, threadId, role, text) {
+  await sql(
+    `INSERT INTO chat_messages (user_id, thread_id, role, text, ts)
+     VALUES ($1, $2, $3, $4, now())`,
+    [toInt(userId), toInt(threadId), role, text]
+  );
+}
+
+/* =========================
+ * Prompts
+ * ========================= */
+
+function buildSystemFor(state, { characterBrief = '' } = {}) {
+  // Usamos secciones de tu prompt-master.md
+  // OUTPUT_CONTRACT debe describir: primera línea JSON {ui,control} + narración desde la segunda línea
+  const contract = getPromptSection('prompt-master.md', 'OUTPUT_CONTRACT');
+  const style = getPromptSection('prompt-master.md', 'STYLE');
+  const onboarding = getPromptSection('prompt-master.md', 'ONBOARDING');
+  const play = getPromptSection('prompt-master.md', 'PLAY');
+
+  let body = contract + '\n\n' + style + '\n\n';
+
+  if (state === 'onboarding:name' || state === 'onboarding:build') {
+    body += onboarding + '\n';
+  } else {
+    body += play + '\n';
+  }
+
+  if (characterBrief) {
+    body += `\n[CONTEXTO]\n${characterBrief}\n`;
+  }
+
+  return body;
+}
+
+function buildMessages({ state, historyMsgs = [], userText = '', suggestMode = false }) {
+  const sys = buildSystemFor(state);
+  const messages = [{ role: 'system', content: sys }];
+
+  // Reglas específicas por fase (refuerzo)
+  if (state === 'onboarding:name') {
+    messages.push({
+      role: 'system',
+      content:
+        'Fase actual: onboarding:name. Pide únicamente el NOMBRE. No menciones especie ni rol. ' +
+        'Si el usuario ya escribió un nombre, repítelo y emite confirmación en control.confirms=[{type:"name",name:"..."}]. ' +
+        'No avances de fase hasta confirmación positiva. Nada de bloques de código ni ` ``` `.'
+    });
+  }
+  if (state === 'onboarding:build') {
+    messages.push({
+      role: 'system',
+      content:
+        'Fase actual: onboarding:build. Pide únicamente ESPECIE y ROL. No vuelvas a tratar el nombre. ' +
+        'Si el usuario ya escribió especie y rol, repítelos y emite confirmación en control.confirms=[{type:"build",species:"...",role:"..."}]. ' +
+        'No avances de fase hasta confirmación positiva. Nada de bloques de código ni ` ``` `.'
+    });
+  }
+
+  if (suggestMode) {
+    messages.push({
+      role: 'system',
+      content:
+        'El usuario ha pedido sugerencias. Ofrécelas de forma SUTIL: máximo 2 posibilidades, sin listas largas, sin bullets. ' +
+        'Mantén el foco en la fase actual.'
+    });
+  }
+
+  // Histórico (breve; para onboarding basta poco)
+  const trimmed = (historyMsgs || []).slice(-8);
+  for (const m of trimmed) {
+    messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.text || '').slice(0, 2000) });
+  }
+
+  if (userText && String(userText).trim()) {
+    messages.push({ role: 'user', content: String(userText).trim() });
+  }
+
+  return messages;
+}
+
+async function callOpenAI({ state, userText, historyMsgs, suggestMode }) {
+  const openai = await getOpenAI();
+  const model = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
+  const messages = buildMessages({ state, userText, historyMsgs, suggestMode });
+
+  const t0 = Date.now();
+  const resp = await openai.chat.completions.create({
+    model,
+    messages,
+    temperature: state === 'onboarding:name' ? 0.5 : state === 'onboarding:build' ? 0.6 : 0.9,
+    max_tokens: 700
+  });
+  const t1 = Date.now();
+
+  const text = resp?.choices?.[0]?.message?.content || '';
+  const rid = resp?.id || '(no-id)';
+
+  console.log('[DM][OpenAI]', { model, latency_ms: t1 - t0, openai_id: rid, head: firstLine(text).slice(0, 160) });
+
+  return text;
+}
+
+/* =========================
+ * Rutas (solo NUEVO usuario)
+ * ========================= */
+
+/**
+ * Arranque de onboarding para usuario NUEVO
+ * Crea thread en 'onboarding:name' y devuelve el primer mensaje del Máster (pedir nombre).
+ */
+router.post('/kickoff', requireAuth, async (req, res) => {
+  try {
+    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+    const userId = toInt(req.auth.userId);
+
+    const thread = await getOrCreateOnboardingThread(userId);
+    const character = await getOrCreateCharacterForUser(userId);
+    if (!thread.character_id) await linkThreadCharacter(thread.id, character.id);
+
+    // Carga un histórico MUY corto (si existiera)
+    const hist = await sql(
+      `SELECT role, text
+         FROM chat_messages
+        WHERE user_id = $1 AND thread_id = $2
+        ORDER BY ts ASC
+        LIMIT 8`,
+      [userId, toInt(thread.id)]
+    );
+
+    const suggestMode = false;
+    const modelText = await callOpenAI({
+      state: 'onboarding:name',
+      userText: 'Inicia la conversación de bienvenida y pide ÚNICAMENTE el nombre del personaje.',
+      historyMsgs: hist.rows || [],
+      suggestMode
+    });
+
+    const head = parseHeadJSON(modelText);
+    if (!head) {
+      console.warn('[DM/kickoff] HEAD JSON parse FAIL');
+      return res.status(422).json({ ok: false, error: 'invalid_model_output' });
+    }
+
+    // Persistimos mensaje del Máster
+    await saveChat(userId, thread.id, 'assistant', modelText);
+
+    return res.json({ ok: true, text: modelText, state: 'onboarding:name', thread_id: thread.id, character_id: character.id });
+  } catch (e) {
+    console.error('[DM/kickoff] error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'kickoff_failed' });
   }
 });
 
-/* ========= rutas ========= */
-router.post('/', optionalAuth, handleDM);
-router.post('/respond', optionalAuth, handleDM);
+/**
+ * Mensajes del usuario durante el onboarding (NUEVO usuario).
+ * - Respeta el estado del thread (name/build)
+ * - Entiende "sugerir/sugerencia" para activar sugerencias sutiles
+ * - No avanza de fase (eso lo hace /confirm)
+ */
+router.post('/respond', requireAuth, async (req, res) => {
+  try {
+    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
 
+    const userId = toInt(req.auth.userId);
+    const { message = '' } = req.body || {};
+
+    // Thread + state actual
+    const th = await getOrCreateOnboardingThread(userId);
+    const state = th.state || 'onboarding:name';
+
+    // Guardamos turno del usuario
+    if (String(message || '').trim()) {
+      await saveChat(userId, th.id, 'user', String(message).trim());
+    }
+
+    // Histórico breve
+    const hist = await sql(
+      `SELECT role, text
+         FROM chat_messages
+        WHERE user_id = $1 AND thread_id = $2
+        ORDER BY ts ASC
+        LIMIT 8`,
+      [userId, toInt(th.id)]
+    );
+
+    const suggestMode = wantsSuggestion(message);
+    const modelText = await callOpenAI({
+      state,
+      userText: message,
+      historyMsgs: hist.rows || [],
+      suggestMode
+    });
+
+    const head = parseHeadJSON(modelText);
+    if (!head) {
+      console.warn('[DM/respond] HEAD JSON parse FAIL');
+      return res.status(422).json({ ok: false, error: 'invalid_model_output' });
+    }
+
+    await saveChat(userId, th.id, 'assistant', modelText);
+
+    return res.json({ ok: true, text: modelText, state, thread_id: th.id });
+  } catch (e) {
+    console.error('[DM/respond] error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'respond_failed' });
+  }
+});
+
+/**
+ * Confirmaciones de onboarding (botón "Sí" / "No").
+ * El frontend debe llamar aquí cuando el usuario pulsa un botón de confirmación.
+ *
+ * Payload esperado:
+ * {
+ *   "thread_id": 123,
+ *   "confirm": { "type":"name", "name":"Kara Voss" }    // Fase 1
+ *   // o
+ *   "confirm": { "type":"build", "species":"Humana", "role":"Contrabandista" }  // Fase 2
+ *   "accept": true | false   // true = "Sí", false = "No"
+ * }
+ */
+router.post('/confirm', requireAuth, async (req, res) => {
+  try {
+    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+
+    const userId = toInt(req.auth.userId);
+    const { thread_id, confirm, accept } = req.body || {};
+    if (!thread_id || !confirm || typeof accept !== 'boolean') {
+      return res.status(400).json({ ok: false, error: 'bad_request' });
+    }
+
+    // Cargamos thread + personaje
+    const thQ = await sql(
+      `SELECT id, user_id, character_id, state
+         FROM story_threads
+        WHERE id = $1 AND user_id = $2
+        LIMIT 1`,
+      [toInt(thread_id), userId]
+    );
+    const th = thQ.rows[0];
+    if (!th) return res.status(404).json({ ok: false, error: 'thread_not_found' });
+
+    const ch = await getOrCreateCharacterForUser(userId);
+    if (!th.character_id) await linkThreadCharacter(th.id, ch.id);
+
+    const state = th.state || 'onboarding:name';
+
+    // Si el usuario dice "No": no persistimos, no cambiamos de fase.
+    if (!accept) {
+      await saveChat(userId, th.id, 'user', '<<CONFIRM:NO>>');
+      // Re-preguntar en la MISMA fase:
+      const hist = await sql(
+        `SELECT role, text
+           FROM chat_messages
+          WHERE user_id = $1 AND thread_id = $2
+          ORDER BY ts ASC
+          LIMIT 8`,
+        [userId, toInt(th.id)]
+      );
+
+      const modelText = await callOpenAI({
+        state,
+        userText: 'El usuario ha rechazado. Reformula brevemente y vuelve a pedir la información de esta fase (sin avanzar).',
+        historyMsgs: hist.rows || [],
+        suggestMode: false
+      });
+      const head = parseHeadJSON(modelText);
+      if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
+
+      await saveChat(userId, th.id, 'assistant', modelText);
+      return res.json({ ok: true, text: modelText, state, thread_id: th.id, character_id: ch.id });
+    }
+
+    // Si "Sí": persistimos y avanzamos de fase cuando corresponda
+    await saveChat(userId, th.id, 'user', '<<CONFIRM:YES>>');
+
+    if (state === 'onboarding:name') {
+      if (confirm.type !== 'name' || !confirm.name || !String(confirm.name).trim()) {
+        return res.status(422).json({ ok: false, error: 'invalid_confirm_payload' });
+      }
+
+      await sql(
+        `UPDATE characters
+            SET name = $2,
+                updated_at = now()
+          WHERE id = $1`,
+        [toInt(ch.id), String(confirm.name).trim()]
+      );
+
+      await setThreadState(th.id, 'onboarding:build');
+
+      // Preguntar ESPECIE+ROL
+      const hist = await sql(
+        `SELECT role, text
+           FROM chat_messages
+          WHERE user_id = $1 AND thread_id = $2
+          ORDER BY ts ASC
+          LIMIT 8`,
+        [userId, toInt(th.id)]
+      );
+
+      const modelText = await callOpenAI({
+        state: 'onboarding:build',
+        userText: 'Nombre confirmado. Pide ÚNICAMENTE especie y rol. Repite lo que el usuario diga y pide confirmación.',
+        historyMsgs: hist.rows || [],
+        suggestMode: false
+      });
+      const head = parseHeadJSON(modelText);
+      if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
+
+      await saveChat(userId, th.id, 'assistant', modelText);
+
+      return res.json({
+        ok: true,
+        text: modelText,
+        state: 'onboarding:build',
+        thread_id: th.id,
+        character_id: ch.id
+      });
+    }
+
+    if (state === 'onboarding:build') {
+      if (confirm.type !== 'build' || !confirm.species || !confirm.role) {
+        return res.status(422).json({ ok: false, error: 'invalid_confirm_payload' });
+      }
+
+      await sql(
+        `UPDATE characters
+            SET species = $2,
+                role = $3,
+                updated_at = now()
+          WHERE id = $1`,
+        [toInt(ch.id), String(confirm.species).trim(), String(confirm.role).trim()]
+      );
+
+      // Aquí podríamos pasar a 'play' y generar el primer mensaje del juego.
+      // Como pediste centrarnos en "usuario nuevo", devolvemos el OK con el state ya listo para usar en el siguiente paso del flujo.
+      await setThreadState(th.id, 'play');
+
+      return res.json({
+        ok: true,
+        state: 'play',
+        thread_id: th.id,
+        character_id: ch.id,
+        message: 'Onboarding completado. Personaje listo para empezar la historia.'
+      });
+    }
+
+    // Si llega aquí en otro estado, devolvemos error controlado
+    return res.status(409).json({ ok: false, error: 'invalid_state' });
+  } catch (e) {
+    console.error('[DM/confirm] error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'confirm_failed' });
+  }
+});
+
+/* Exporta router */
 export default router;
