@@ -315,7 +315,7 @@ async function callOpenAI({ client, model, messages, params }) {
 /* ========= Resumen comprimido ========= */
 async function summarizeTurn({ client, model, prevSummary, recentLines }) {
   const summarizerModel =
-    process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-4o-mini';
+    process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-5-mini';
   const sys = [
     'Eres un asistente que resume partidas de rol en español.',
     'Objetivo: producir un RESUMEN COMPRIMIDO (4–8 viñetas, máximo ~700 caracteres).',
