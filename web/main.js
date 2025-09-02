@@ -147,14 +147,29 @@ async function dmSay(message){
     if (r?.text) handleIncomingDMText(r.text);
   } catch(e){ dlog('dmSay fail', e?.data||e); }
 }
+
 async function startOnboarding({ hard=false } = {}){
   try{ document.getElementById('guest-card')?.setAttribute('hidden','hidden'); }catch{}
+
   if (hard) resetMsgs();
-  character = null; save(KEY_CHAR, character);
-  step = 'name';    save(KEY_STEP, step);
-  pendingConfirm = null; save(KEY_CONFIRM, null);
-  await dmSay('<<ONBOARD START STEP="name">>');
+
+  // Estado base de onboarding
+  character = null;            save(KEY_CHAR, character);
+  step = 'name';               save(KEY_STEP, step);
+  pendingConfirm = null;       save(KEY_CONFIRM, null);
+
+  // Fallback visible inmediato (para que nunca quede en negro)
+  if (msgs.length === 0) {
+    pushDM(
+      'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
+      'Vamos a registrar tu identidad para entrar en la historia.\n' +
+      '**Primero:** ¿cómo se va a llamar tu personaje?'
+    );
+  }
   render();
+
+  // Kickoff real contra el Máster (usa prompt-master.md). Si falla, queda el fallback.
+  await startOnboardingKickoff();
 }
 
 /* ============================================================
@@ -351,6 +366,23 @@ function getClientState(){
     sceneMemo: load('sw:scene_memo', []),
   };
 }
+// Lanza el onboarding real contra el Máster (prompt). Si falla, ya habrá un fallback visible.
+async function startOnboardingKickoff() {
+  try {
+    const kick = await api('/dm/respond', {
+      message: '',
+      history: [],
+      character_id: Number(character?.id) || null,
+      stage: mapStageForDM(step),   // ahora mismo 'name'
+      clientState: getClientState(),
+      config: { mode: getDmMode() }
+    });
+    if (kick?.text) handleIncomingDMText(kick.text);
+  } catch (e) {
+    dlog('kickoff fail (fallback visible)', e?.data || e);
+  }
+}
+
 async function showResumeOnDemand(){
   try{
     const r = await apiGet('/dm/resume');
@@ -554,80 +586,96 @@ async function loadHistory({ force = false } = {}) {
 }
 
 
-/* ============================================================
- *                     Auth (arreglos clave)
- * ========================================================== */
-async function doAuth(kind){
-    if (UI.authLoading) return;
-    const username=(authUserEl?.value||'').trim();
-    const pin=(authPinEl?.value||'').trim();
-    if (!username || !/^\d{4}$/.test(pin)){ if (authStatusEl) authStatusEl.textContent='Usuario y PIN (4 dígitos)'; return; }
+// ============================================================
+//                     Auth (robusto con 404)
+// ============================================================
+async function doAuth(kind) {
+  if (UI.authLoading) return;
+  const username = (authUserEl?.value || '').trim();
+  const pin = (authPinEl?.value || '').trim();
+  if (!username || !/^\d{4}$/.test(pin)) {
+    if (authStatusEl) authStatusEl.textContent = 'Usuario y PIN (4 dígitos)';
+    return;
+  }
 
-    dlog('doAuth',{kind,username}); setAuthLoading(true, kind);
+  dlog('doAuth', { kind, username });
+  setAuthLoading(true, kind);
 
-    try{
-    const url = (kind==='register') ? '/auth/register' : '/auth/login';
-    const { token, user } = await api(url, { username, pin });
+  try {
+    const url = kind === 'register' ? '/auth/register' : '/auth/login';
+    const { token, user } = (await api(url, { username, pin }));
     setAuth({ token, user });
     localStorage.setItem('sw:auth', JSON.stringify({ token, user }));
+
     migrateGuestToUser(user.id);
 
-    // 🔧 MUY IMPORTANTE: actualizamos la UI inmediatamente tras autenticar
-    if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
-    setIdentityBar(user.username, character?.name || '');
-    updateAuthUI();
-
-    // Estado base tras auth
+    // Cargamos estado local "limpio"
     setMsgs(load(KEY_MSGS, []));
     character = load(KEY_CHAR, null);
     step = load(KEY_STEP, 'name');
     pendingConfirm = load(KEY_CONFIRM, null);
 
-    // Si es registro nuevo → onboarding y salimos (UI ya actualizada)
-    if (kind === 'register'){
-      resetMsgs();
-      await startOnboarding({ hard:true });
-      render();
-      return;
+    // Quitar "bienvenida de invitado" si quedó
+    {
+      const t0 = (Array.isArray(msgs) && msgs[0]?.text) ? String(msgs[0].text) : '';
+      const esSoloBienvenida =
+        Array.isArray(msgs) && msgs.length <= 1 && t0.includes('HoloCanal') && t0.includes('inicia sesión');
+      if (esSoloBienvenida) { resetMsgs(); }
     }
 
-    // Si es login y no tiene personaje → onboarding y salimos
-    let me=null; try{ me = await apiGet('/world/characters/me'); }catch{}
-    if (!me?.character){
-      resetMsgs();
-      await startOnboarding({ hard:true });
+    // ¿Ya tiene personaje? → login con partida previa
+    let me = null;
+    try { me = await apiGet('/world/characters/me'); }
+    catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
+
+    if (me?.character) {
+      // Jugador existente: forzamos historial
+      character = me.character; save(KEY_CHAR, character);
+      step = 'done'; save(KEY_STEP, step);
+
+      await loadHistory({ force: true });
+      await showResumeIfAny();
+
+      if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
+      setIdentityBar(user.username, character?.name || '');
+      updateAuthUI();
       render();
-      return;
+      return; // listo para seguir jugando
     }
 
-    // Caso: login con personaje → cargar historia y mostrar resumen
-    resetMsgs(); // elimina posibles "bienvenidas" antiguas
-    character = me.character;
-    save(KEY_CHAR, character);
-    step = 'done'; save(KEY_STEP, step);
+    // === Registro nuevo: empezamos onboarding ===
+    // Estado inicial de onboarding
+    resetMsgs();
+    character = null; save(KEY_CHAR, character);
+    step = 'name'; save(KEY_STEP, step);
+    pendingConfirm = null; save(KEY_CONFIRM, null);
 
-    await loadHistory({ force: true });
-    await showResumeIfAny();
+    if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
+    setIdentityBar(user.username, '');
+    updateAuthUI();
     render();
-    return;
 
+    // Lanzamos el kickoff real; si falla, queda el fallback local
+    await startOnboardingKickoff();
 
-  } catch(e){
-    dlog('doAuth error:', e?.data||e);
-    let code=''; try{ code=(e.data?.json?.error)||(await e.response?.json?.())?.error||''; }catch{}
+  } catch (e) {
+    dlog('doAuth error:', e?.data || e);
+    let code = '';
+    try { code = (e.data?.json?.error) || (await e.response?.json?.())?.error || ''; } catch {}
     const friendly = {
-      INVALID_CREDENTIALS:'Usuario (3–24 minúsculas/números/_) y PIN de 4 dígitos.',
-      USERNAME_TAKEN:'Ese usuario ya existe.',
-      USER_NOT_FOUND:'Usuario no encontrado.',
-      INVALID_PIN:'PIN incorrecto.',
-      unauthorized:'No autorizado.',
-      not_found:'Recurso no encontrado.',
+      INVALID_CREDENTIALS: 'Usuario (3–24 minúsculas/números/_) y PIN de 4 dígitos.',
+      USERNAME_TAKEN: 'Ese usuario ya existe.',
+      USER_NOT_FOUND: 'Usuario no encontrado.',
+      INVALID_PIN: 'PIN incorrecto.',
+      unauthorized: 'No autorizado.',
+      not_found: 'Recurso no encontrado.',
     };
-    if (authStatusEl) authStatusEl.textContent = (code && (friendly[code]||code)) || 'Error de autenticación';
+    if (authStatusEl) authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
   } finally {
     setAuthLoading(false);
   }
 }
+
 
 /* ============================================================
  *      Vídeo invitado + SW (igual que antes)
