@@ -1,5 +1,5 @@
 // web/onboarding.js
-import { pushDM, resetMsgs, handleIncomingDMText, msgs, mapStageForDM } from './chat/chat-controller.js';
+import { resetMsgs, handleIncomingDMText, msgs, mapStageForDM } from './chat/chat-controller.js';
 import { KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save } from './auth/session.js';
 import { getDmMode } from './state.js';
 import { api } from './api-client.js';
@@ -60,7 +60,7 @@ export async function dmSay(message){
  * - NO inyecta ningún texto de bienvenida local.
  * - Solo muestra un banner de error si el backend responde 4xx/5xx o viene vacío.
  */
-export async function startOnboardingKickoff(){
+async function startOnboardingKickoff(){ // ← interna (sin export)
   try{
     const kick = await api('/dm/respond', {
       message: '<<CLIENT_HELLO>>',
@@ -83,10 +83,10 @@ export async function startOnboardingKickoff(){
 }
 
 /**
- * Entrada al flujo de onboarding (para usuario nuevo):
+ * Entrada al flujo de onboarding (usuario nuevo):
  * - Limpia estado local si hard=true.
  * - NO pinta mensajes locales de bienvenida.
- * - Llama al kickoff (una única fuente de verdad: el Máster).
+ * - Llama al kickoff (única fuente de verdad: el Máster).
  */
 export async function startOnboarding({ hard=false } = {}){
   try{ document.getElementById('guest-card')?.setAttribute('hidden','hidden'); }catch{}
@@ -134,8 +134,7 @@ export async function handleConfirmDecision(decision){
         }catch(e){ dlog('upsert name fail', e?.data||e); }
         setStep('species');
 
-        // ❌ IMPORTANTE: NO inyectamos pushDM local aquí para evitar duplicados.
-        // El Máster pedirá especie+rol en la respuesta al ACK de confirmación.
+        // No inyectar mensajes locales → evita duplicados
         ui.render?.();
 
         // Avisamos al Máster del avance de subpaso

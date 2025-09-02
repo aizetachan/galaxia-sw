@@ -26,9 +26,8 @@ async function userCol(table) {
   if (await hasColumn(table, 'user_id')) return 'user_id';
   return null;
 }
-async function chatHasUserId() {
-  return await hasColumn('chat_messages', 'user_id');
-}
+async function chatHasUserId() { return await hasColumn('chat_messages', 'user_id'); }
+async function storyHasCharacterId() { return await hasColumn('story_threads', 'character_id'); }
 
 /* ========= Utils ========= */
 function headLine(str = '') {
@@ -47,56 +46,83 @@ function wantsSuggestion(userMsg = '') {
   return t === 'sugerir' || t === 'sugerencia' || t.includes('sugerir') || t.includes('sugerencia');
 }
 
-/* ========= DB helpers compatibles con tu esquema ========= */
+/* ========= DB helpers ========= */
 
-// Thread de onboarding del usuario o lo crea en onboarding:name
+// Devuelve { id, state, character_id? } del thread de onboarding del user o lo crea
 async function getOrCreateOnboardingThread(userId) {
   if (!hasDb) throw new Error('DB not available');
   const uid = toInt(userId);
+
+  const hasChar = await storyHasCharacterId();
   const charUser = await userCol('characters');
+  const hasMsgUser = await chatHasUserId();
 
-  // Buscar thread por personaje del user
-  let q = await sql(
-    `
-    SELECT st.id, st.state, st.character_id
-      FROM story_threads st
-      JOIN characters c ON c.id = st.character_id
-      ${charUser ? `WHERE c.${charUser} = $1` : ''}
-      ORDER BY st.updated_at DESC
-      LIMIT 1
-    `,
-    charUser ? [uid] : []
-  );
-  let th = q.rows[0];
+  let row;
 
-  if (!th) {
-    // Intento vía tabla puente
-    q = await sql(
+  if (hasChar) {
+    // story_threads.character_id EXISTE → podemos enlazar con characters
+    let q = await sql(
       `
       SELECT st.id, st.state, st.character_id
         FROM story_threads st
         JOIN characters c ON c.id = st.character_id
-        JOIN user_characters uc ON uc.character_id = c.id
-       WHERE uc.user_id = $1
-       ORDER BY st.updated_at DESC
-       LIMIT 1
+        ${charUser ? `WHERE c.${charUser} = $1` : ''}
+        ORDER BY st.updated_at DESC
+        LIMIT 1
       `,
-      [uid]
+      charUser ? [uid] : []
     );
-    th = q.rows[0];
+    row = q.rows[0];
+
+    if (!row) {
+      // Intento vía puente user_characters
+      q = await sql(
+        `
+        SELECT st.id, st.state, st.character_id
+          FROM story_threads st
+          JOIN characters c ON c.id = st.character_id
+          JOIN user_characters uc ON uc.character_id = c.id
+         WHERE uc.user_id = $1
+         ORDER BY st.updated_at DESC
+         LIMIT 1
+        `,
+        [uid]
+      );
+      row = q.rows[0];
+    }
+  } else {
+    // story_threads.character_id NO existe
+    // Mejor intento: localizar por chat_messages.user_id si existe
+    if (hasMsgUser) {
+      const q = await sql(
+        `
+        SELECT st.id, st.state
+          FROM story_threads st
+          JOIN chat_messages cm ON cm.thread_id = st.id
+         WHERE cm.user_id = $1
+         ORDER BY st.updated_at DESC
+         LIMIT 1
+        `,
+        [uid]
+      );
+      row = q.rows[0];
+    } else {
+      // Último recurso: ningún vínculo → no podemos asociar por usuario; crearemos uno nuevo
+      row = null;
+    }
   }
 
-  if (th && th.state?.startsWith('onboarding')) return th;
+  if (row && row.state?.startsWith('onboarding')) return row;
 
-  // Crear thread nuevo (sin user_id)
   const ins = await sql(
     `INSERT INTO story_threads (state, updated_at)
      VALUES ('onboarding:name', now())
-     RETURNING id, state, character_id`
+     RETURNING id, state${hasChar ? ', character_id' : ''}`
   );
   return ins.rows[0];
 }
 
+// Personaje del user (si existe); si no hay relación directa, crea uno y lo asocia por puente si existe
 async function getOrCreateCharacterForUser(userId) {
   const uid = toInt(userId);
   const charUser = await userCol('characters');
@@ -124,7 +150,7 @@ async function getOrCreateCharacterForUser(userId) {
   }
   if (q.rows[0]) return q.rows[0];
 
-  // Crear personaje
+  // Crear
   let ins;
   if (charUser) {
     ins = await sql(
@@ -139,7 +165,6 @@ async function getOrCreateCharacterForUser(userId) {
        VALUES (now())
        RETURNING id, name, species, role`
     );
-    // Relación puente
     try {
       await sql(
         `INSERT INTO user_characters (user_id, character_id)
@@ -153,6 +178,7 @@ async function getOrCreateCharacterForUser(userId) {
 }
 
 async function linkThreadCharacter(threadId, characterId) {
+  if (!(await storyHasCharacterId())) return; // nada que enlazar
   await sql(
     `UPDATE story_threads
         SET character_id = $2,
@@ -161,6 +187,7 @@ async function linkThreadCharacter(threadId, characterId) {
     [toInt(threadId), toInt(characterId)]
   );
 }
+
 async function setThreadState(threadId, state) {
   await sql(
     `UPDATE story_threads
@@ -170,6 +197,7 @@ async function setThreadState(threadId, state) {
     [toInt(threadId), String(state)]
   );
 }
+
 async function loadShortHistory(threadId, limit = 8) {
   const q = await sql(
     `SELECT role, text
@@ -181,6 +209,7 @@ async function loadShortHistory(threadId, limit = 8) {
   );
   return q.rows || [];
 }
+
 async function saveChat({ userId, threadId, role, text }) {
   const hasUser = await chatHasUserId();
   if (hasUser) {
@@ -210,6 +239,7 @@ function buildSystemFor(state) {
   else body += play + '\n';
   return body;
 }
+
 function buildMessages({ state, historyMsgs = [], userText = '', suggestMode = false }) {
   const messages = [{ role: 'system', content: buildSystemFor(state) }];
 
@@ -246,6 +276,7 @@ function buildMessages({ state, historyMsgs = [], userText = '', suggestMode = f
   }
   return messages;
 }
+
 async function callOpenAI({ state, userText, historyMsgs, suggestMode }) {
   const openai = await getOpenAI();
   const model = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
@@ -272,8 +303,9 @@ router.post('/kickoff', requireAuth, async (req, res) => {
     const userId = toInt(req.auth.userId);
 
     const thread = await getOrCreateOnboardingThread(userId);
+    // Intentamos crear/obtener character, pero solo enlazamos si la columna existe
     const character = await getOrCreateCharacterForUser(userId);
-    if (!thread.character_id) await linkThreadCharacter(thread.id, character.id);
+    await linkThreadCharacter(thread.id, character.id);
 
     const hist = await loadShortHistory(thread.id);
     const modelText = await callOpenAI({
@@ -294,7 +326,7 @@ router.post('/kickoff', requireAuth, async (req, res) => {
   }
 });
 
-// Mensajes del usuario (no avanza fase aquí)
+// Mensajes del usuario
 router.post('/respond', requireAuth, async (req, res) => {
   try {
     if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
@@ -327,7 +359,7 @@ router.post('/respond', requireAuth, async (req, res) => {
   }
 });
 
-// Confirmaciones (Sí/No). Aquí se persiste y se avanza fase.
+// Confirmaciones (Sí/No)
 router.post('/confirm', requireAuth, async (req, res) => {
   try {
     if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
@@ -339,7 +371,7 @@ router.post('/confirm', requireAuth, async (req, res) => {
     }
 
     const thQ = await sql(
-      `SELECT id, state, character_id
+      `SELECT id, state${await storyHasCharacterId() ? ', character_id' : ''}
          FROM story_threads
         WHERE id = $1
         LIMIT 1`,
@@ -349,7 +381,7 @@ router.post('/confirm', requireAuth, async (req, res) => {
     if (!th) return res.status(404).json({ ok: false, error: 'thread_not_found' });
 
     const ch = await getOrCreateCharacterForUser(userId);
-    if (!th.character_id) await linkThreadCharacter(th.id, ch.id);
+    await linkThreadCharacter(th.id, ch.id);
 
     const state = th.state || 'onboarding:name';
 
