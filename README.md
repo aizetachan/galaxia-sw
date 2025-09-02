@@ -113,7 +113,8 @@ http://localhost:3000/?api=http://localhost:3001/api
 - `DATABASE_URL` — URL Postgres (Neon recomendado). Si no está:
   - **auth** y **sesiones** usan memoria
   - el Máster funciona, pero **/world** devolverá errores o se no-op donde corresponda
-- `LLM_MODEL` — *(opcional)* fuerza el modelo LLM del Máster. Si no se define, el servidor usa su valor por defecto (ver `server/dm.js`).
+- `LLM_MODEL` — *(opcional)* fuerza el modelo LLM del Máster (alias: `OPENAI_MODEL`).
+  Si no se define, el servidor usa `gpt-5-mini`.
 
 > En `server/openai.js` hay un **ping** que ayuda a validar credenciales.
 

@@ -314,7 +314,8 @@ async function callOpenAI({ client, model, messages, params }) {
 
 /* ========= Resumen comprimido ========= */
 async function summarizeTurn({ client, model, prevSummary, recentLines }) {
-  const summarizerModel = process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-5-mini';
+  const summarizerModel =
+    process.env.OPENAI_SUMMARY_MODEL || model || 'gpt-5-mini';
   const sys = [
     'Eres un asistente que resume partidas de rol en español.',
     'Objetivo: producir un RESUMEN COMPRIMIDO (4–8 viñetas, máximo ~700 caracteres).',
@@ -363,7 +364,10 @@ async function maybeUpdateSummary({ userId, historyLines }) {
     const recent = historyLines.slice(-24);
     const newSummary = await summarizeTurn({
       client,
-      model: process.env.OPENAI_MODEL || 'gpt-5-mini',
+      model:
+        process.env.LLM_MODEL ||
+        process.env.OPENAI_MODEL ||
+        'gpt-5-mini',
       prevSummary: prev,
       recentLines: recent,
     });
@@ -418,7 +422,10 @@ async function handleDM(req, res) {
       : '';
     const summaryBlock = summaryText ? `\n[RESUMEN BREVE DE SESIÓN]\n${summaryText}\n` : '';
 
-    const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+    const model =
+      process.env.LLM_MODEL ||
+      process.env.OPENAI_MODEL ||
+      'gpt-5-mini';
     const system = buildSystem({
       stage,
       brief,
