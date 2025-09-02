@@ -4,7 +4,8 @@ import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentit
 import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
 import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll } from "./chat/chat-controller.js";
 
-//                        Estado
+// ============================================================
+//                       Estado
 // ============================================================
 let character = load(KEY_CHAR, null);
 let step = load(KEY_STEP, 'name');
@@ -18,6 +19,7 @@ const UI = {
   authKind: null,
   confirmLoading: false,
 };
+
 // ===== Scene image jobs (estado en front para sobrevivir re-render) =====
 const SCENE_JOBS = load('sw:scene_jobs', {}) || {};   // { [msgKey]: { status, jobId, dataUrl } }
 const POLLERS = {};                                   // { [jobId]: intervalId }
@@ -34,18 +36,7 @@ setRenderCallback(render);
 //                        DOM
 // ============================================================
 const chatEl = document.getElementById('chat');
-let chatPlaceholder = null;
-if (document.documentElement.classList.contains('preload') && chatEl) {
-  chatPlaceholder = document.createElement('div');
-  chatPlaceholder.id = 'chat-placeholder';
-  chatPlaceholder.className = 'msg';
-  chatPlaceholder.style.visibility = 'hidden';
-  const t = document.createElement('div');
-  t.className = 'text';
-  t.textContent = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-  chatPlaceholder.appendChild(t);
-  chatEl.appendChild(chatPlaceholder);
-}
+// (Eliminado placeholder que creaba la “pantalla intermedia”)
 
 const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
 window.setIdentityBar = setIdentityBar;
@@ -71,12 +62,9 @@ const rollOutcomeEl = document.getElementById('roll-outcome');
 window.updateAuthUI = updateAuthUI;
 listenAuthChanges(updateAuthUI);
 
-
 // ============================================================
-//        UI helpers (FALTABAN)  ← ← ←
+//        UI helpers
 // ============================================================
-
-// Bloquea/desbloquea el ancho actual del botón para que no “salte”
 function lockWidth(el, on) {
   if (!el) return;
   if (on) {
@@ -174,7 +162,6 @@ function formatMarkdown(t = '') {
   const safe = escapeHtml(t);
   return safe.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 }
-// funciones de chat provienen de chat-controller.js
 
 const PASSIVE_VERBS = [
   'miro','observo','echo un vistazo','escucho',
@@ -237,6 +224,38 @@ async function apiGet(path) {
 }
 
 // ============================================================
+//               Helpers de onboarding dinámico
+// ============================================================
+async function dmSay(message, extras = {}) {
+  const hist = msgs.slice(-8);
+  try {
+    const r = await api('/dm/respond', {
+      message,
+      history: hist,
+      character_id: Number(character?.id) || null,
+      stage: mapStageForDM(step),
+      clientState: getClientState(),
+      config: { mode: getDmMode(), ...extras.config }
+    });
+    if (r?.text) handleIncomingDMText(r.text);
+  } catch (e) {
+    dlog('dmSay fail', e?.data || e);
+  }
+}
+function titleCase(s='') {
+  return String(s).toLowerCase().replace(/\b\w/g, m => m.toUpperCase()).replace(/\s+/g,' ').trim();
+}
+async function startOnboarding({ hard = false } = {}) {
+  try { document.getElementById('guest-card')?.setAttribute('hidden','hidden'); } catch {}
+  if (hard) resetMsgs();
+  character = null;             save(KEY_CHAR, character);
+  step = 'name';                save(KEY_STEP, step);
+  pendingConfirm = null;        save(KEY_CONFIRM, null);
+  await dmSay('<<ONBOARD START STEP="name">>');
+  render();
+}
+
+// ============================================================
 //                          BOOT
 // ============================================================
 async function boot() {
@@ -270,18 +289,29 @@ async function boot() {
   }
 
   await loadHistoryIfEmpty();
-
   updateAuthUI();
 
   if ((AUTH?.user?.id) && msgs.length === 0) {
     await showResumeIfAny();
   }
-  if (msgs.length === 0) {
+
+  // Si estoy logueado, sin histórico y sin personaje → onboarding
+  if (isLogged() && msgs.length === 0) {
+    let me = null;
+    try { me = await apiGet('/world/characters/me'); } catch {}
+    if (!me?.character) {
+      await startOnboarding({ hard: true });
+      return;
+    }
+  }
+
+  // Mensaje de invitado sólo si NO estoy logueado
+  if (msgs.length === 0 && !isLogged()) {
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
   }
 
-  // Listeners (defensivos)
+  // Listeners
   if (sendBtn) sendBtn.addEventListener('click', send);
   if (inputEl) inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
   if (resolveBtn) resolveBtn.addEventListener('click', resolveRoll);
@@ -301,7 +331,6 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   try {
     await boot();
   } finally {
-    if (chatPlaceholder) chatPlaceholder.remove();
     try {
       document.documentElement.classList.remove('preload');
       document.documentElement.classList.add('ready');
@@ -316,21 +345,20 @@ function render() {
   dgroup('render', () => console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   let html = msgs.map((m, i) => {
-    // Endurecer: valores por defecto
     const kind = (m && m.kind) === 'user' ? 'user' : 'dm';
     const tsSafe = Number(m?.ts) || (Date.now() + i);
     const isUser = (kind === 'user');
     const metaAlign = isUser ? 'text-right' : '';
     const labelUser = m?.user ? escapeHtml(m.user) : (isUser ? escapeHtml(character?.name || 'Tú') : 'Máster');
     const label = labelUser + ':';
-  
+
     const msgBoxStyle = isUser
       ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
       : 'width:fit-content; max-width:min(72ch, 92%);';
     const textStyle = isUser ? 'text-align:left; width:100%;' : '';
     const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
     const timeBoxStyle = isUser ? timeBoxBase + 'width:fit-content; margin-left:auto;' : timeBoxBase + 'width:fit-content;';
-  
+
     return `
       <div class="msg ${kind}" data-key="${tsSafe}" style="${msgBoxStyle}">
         <div class="meta ${metaAlign}">${label}</div>
@@ -341,7 +369,6 @@ function render() {
       </div>
     `;
   }).join('');
-  
 
   if (pendingConfirm) {
     const summary = (pendingConfirm.type === 'name')
@@ -398,9 +425,9 @@ function render() {
 function updatePlaceholder() {
   const placeholders = {
     name: 'Tu nombre en el HoloNet…',
-    species: 'Elige especie (Humano, Twi\'lek, Wookiee, Zabrak, Droide)…',
-    role: 'Elige rol (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…',
-    done: 'Habla con el Master'
+    species: 'Elige especie… (el Máster te da opciones)',
+    role: 'Elige rol… (el Máster te da opciones)',
+    done: 'Habla con el Máster',
   };
   if (inputEl) inputEl.placeholder = placeholders[step] || placeholders.done;
 }
@@ -559,67 +586,65 @@ async function send() {
     localStorage.removeItem(KEY_STEP);
     localStorage.removeItem(KEY_CONFIRM);
     resetMsgs(); character = null; step = 'name'; setPendingRoll(null); pendingConfirm = null;
-    pushDM(`Bienvenid@ al **HoloCanal**. Soy tu **Máster**. Vamos a registrar tu identidad para entrar en la galaxia.\n\nPrimero: ¿cómo se va a llamar tu personaje?`);
+    await dmSay('<<ONBOARD START STEP="name">>');
     setSending(false);
     return;
   }
 
   pushUser(value);
 
-  // --- Onboarding por fases ---
+  // --- Onboarding por fases (dinámico por Máster) ---
   if (step !== 'done') {
     if (step === 'name') {
       const name = value || 'Aventurer@';
       character = { name, species: '', role: '', publicProfile: true, lastLocation: 'Tatooine — Cantina de Mos Eisley' };
       save(KEY_CHAR, character);
-
       pendingConfirm = { type: 'name', name };
       save(KEY_CONFIRM, pendingConfirm);
-
       render();
       setSending(false);
       return;
     }
 
     if (step === 'species') {
-      const map = { humano: 'Humano', twi: "Twi'lek", wook: 'Wookiee', zabr: 'Zabrak', droid: 'Droide', droide: 'Droide' };
-      const key = Object.keys(map).find(k => value.toLowerCase().startsWith(k));
-      if (key) {
-        character.species = map[key];
+      const species = titleCase(value);
+      if (species.length >= 2) {
+        character.species = species;
         save(KEY_CHAR, character);
         try {
           const r = await api('/world/characters', charPayload(character));
-          if (r?.character?.id && !character.id) { character.id = r.character.id; }
-          save(KEY_CHAR, character);
+          if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('update species fail', e?.data || e); }
         step = 'role'; save(KEY_STEP, step);
+        await dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`);
+        setSending(false);
+        return;
       }
     } else if (step === 'role') {
-      const map = { pilo: 'Piloto', piloto: 'Piloto', contra: 'Contrabandista', jedi: 'Jedi', caza: 'Cazarrecompensas', inge: 'Ingeniero', ingeniero: 'Ingeniero' };
-      const key = Object.keys(map).find(k => value.toLowerCase().startsWith(k));
-      if (key) {
-        character.role = map[key];
+      const role = titleCase(value);
+      if (role.length >= 2) {
+        character.role = role;
         save(KEY_CHAR, character);
         try {
           const r = await api('/world/characters', charPayload(character));
-          if (r?.character?.id && !character.id) { character.id = r.character.id; }
-          save(KEY_CHAR, character);
+          if (r?.character?.id && !character.id) { character.id = r.character.id; save(KEY_CHAR, character); }
         } catch (e) { dlog('update role fail', e?.data || e); }
         step = 'done'; save(KEY_STEP, step);
+        await dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`);
+        setSending(false);
+        return;
       }
     }
 
     try {
       await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode);
-    }
-    finally { setSending(false); }
+    } finally { setSending(false); }
     return;
   }
 
   try {
     await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode);
-  }
-  finally { setSending(false); }
+  } finally { setSending(false); }
 }
 
 // Tiradas
@@ -705,6 +730,7 @@ async function handleConfirmDecision(decision) {
         } catch (e) { dlog('upsert name fail', e?.data || e); }
 
         step = 'species'; save(KEY_STEP, step);
+        await dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`);
       } else if (type === 'build') {
         if (!character) {
           character = { name: 'Aventurer@', species: pendingConfirm.species, role: pendingConfirm.role, publicProfile: true };
@@ -837,18 +863,21 @@ async function doAuth(kind) {
       const esSoloBienvenida =
         Array.isArray(msgs) && msgs.length <= 1 && t0.includes('HoloCanal') && t0.includes('inicia sesión');
       if (esSoloBienvenida) { resetMsgs(); }
+
       if (kind === 'register') {
-        step = 'name'; save(KEY_STEP, step);
-        pendingConfirm = null; save(KEY_CONFIRM, null);
+        await startOnboarding({ hard: true });
+        return;   // no seguir con resume/historial en alta nueva
       }
     }
 
-    let me = null;
-    try { me = await apiGet('/world/characters/me'); }
-    catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
-    if (me?.character) {
-      character = me.character; save(KEY_CHAR, character);
-      step = 'done'; save(KEY_STEP, step);
+    // Si entro por login y no tengo personaje → onboarding
+    if (kind === 'login') {
+      let me = null;
+      try { me = await apiGet('/world/characters/me'); } catch {}
+      if (!me?.character) {
+        await startOnboarding({ hard: true });
+        return;
+      }
     }
 
     await loadHistoryIfEmpty();
@@ -875,7 +904,7 @@ async function doAuth(kind) {
           character_id: Number(character?.id) || null,
           stage: mapStageForDM(step),
           clientState: getClientState(),
-          config: { mode: getDmMode() }   // <<< modo también aquí
+          config: { mode: getDmMode() }
         });
         handleIncomingDMText(kick.text);
       } catch (e) { dlog('kickoff fail', e?.data || e); }
@@ -981,6 +1010,7 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/service-worker.js').catch(e => dlog('SW registration failed', e));
   });
 }
+
 // ============================================================
 //          Scene image (🖌️) — decorate DM bubbles (Máster)
 // ============================================================
@@ -1033,16 +1063,9 @@ function decorateDMs() {
 }
 
 function getBoxKey(box){ return box?.getAttribute('data-key') || ''; }
-
 function findBoxByKey(key){
-  try {
-    const sel = `.msg.dm[data-key="${key}"]`;
-    return document.querySelector(sel);
-  } catch {
-    return null;
-  }
+  try { return document.querySelector(`.msg.dm[data-key="${key}"]`); } catch { return null; }
 }
-
 function paintShimmerForKey(key){
   const box = findBoxByKey(key);
   if (!box) return;
@@ -1053,14 +1076,12 @@ function paintShimmerForKey(key){
   shim.className = 'scene-image-loading';
   box.insertBefore(shim, txtEl);
 }
-
 function removeShimmerForKey(key){
   const box = findBoxByKey(key);
   if (!box) return;
   const shim = box.querySelector('.scene-image-loading');
   if (shim) shim.remove();
 }
-
 function injectSceneImageForKey(key, src){
   const box = findBoxByKey(key);
   if (!box) return;
@@ -1068,7 +1089,6 @@ function injectSceneImageForKey(key, src){
   if (!slot) return;
   injectSceneImage(slot, src);
 }
-
 function hydrateSceneJobs(){
   try {
     Object.entries(SCENE_JOBS).forEach(([key, job]) => {
@@ -1083,7 +1103,6 @@ function hydrateSceneJobs(){
     console.warn('[IMG] hydrateSceneJobs error:', e);
   }
 }
-
 function ensurePollingForJob(key){
   const job = SCENE_JOBS[key];
   if (!job?.jobId) return;
@@ -1126,25 +1145,14 @@ function ensurePollingForJob(key){
   }, intervalMs);
 }
 
-
-
 function getMasterTextFromBox(box){
-  // 1) Texto principal
   let t = (box.querySelector('.text')?.textContent || '').trim();
-  // 2) Si está vacío, probamos dataset/raw
   if (!t) t = (box.querySelector('.text')?.dataset?.raw || '').trim();
-  // 3) Último recurso: nodos de texto directos
   if (!t) {
-    t = [...box.childNodes]
-      .map(n => n.nodeType === 3 ? n.textContent : '')
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    t = [...box.childNodes].map(n => n.nodeType === 3 ? n.textContent : '').join(' ').replace(/\s+/g, ' ').trim();
   }
   return t;
 }
-
-
 
 async function handleBrushClick(btn) {
   const box = btn.closest('.msg.dm');
@@ -1155,35 +1163,28 @@ async function handleBrushClick(btn) {
   const slot  = box.querySelector('.scene-image-slot');
   if (!txtEl || !slot) return;
 
-  // Estado loading visual (el chat puede seguir)
   btn.disabled = true;
   btn.classList.add('loading');
 
-  // Shimmer temporal
   let shimmer = document.createElement('div');
   shimmer.className = 'scene-image-loading';
   box.insertBefore(shimmer, txtEl);
 
   try {
-    // Escena opcional desde memo (si existe)
     let sceneMemo = [];
     try { sceneMemo = load('sw:scene_memo', []); } catch {}
-    const scene = (Array.isArray(sceneMemo) && sceneMemo.length)
-      ? { memo: sceneMemo.slice(-6) }
-      : null;
+    const scene = (Array.isArray(sceneMemo) && sceneMemo.length) ? { memo: sceneMemo.slice(-6) } : null;
 
     const headers = { 'Content-Type': 'application/json' };
     if (AUTH?.token) headers['Authorization'] = `Bearer ${AUTH.token}`;
 
     const text = getMasterTextFromBox(box);
 
-    // 1) START → devuelve jobId inmediatamente
     const rStart = await fetch(joinUrl(API_BASE, '/scene-image/start'), {
       method: 'POST',
       headers,
       body: JSON.stringify({ masterText: (text || '').trim(), scene }),
     });
-
     if (!rStart.ok) {
       const t = await rStart.text().catch(()=> '');
       console.error('[IMG] start failed:', rStart.status, t);
@@ -1199,9 +1200,8 @@ async function handleBrushClick(btn) {
     const { jobId } = await rStart.json();
     console.log('[IMG] job started →', jobId);
 
-    // 2) STATUS polling (no bloquea la UI)
     let tries = 0;
-    const maxTries = 120; // ~3-4 min si interval=2s
+    const maxTries = 120;
     const intervalMs = 2000;
 
     await new Promise((resolve) => {
@@ -1258,12 +1258,10 @@ async function handleBrushClick(btn) {
     box.insertBefore(err, txtEl);
     setTimeout(() => err.remove(), 4000);
   } finally {
-    // Rehabilitamos el botón para permitir nuevas generaciones
     btn.disabled = false;
     btn.classList.remove('loading');
   }
 }
-
 
 // Convierte dataURL -> blob: URL (fallback cuando CSP bloquea data:)
 function dataUrlToBlobUrl(dataUrl) {
@@ -1284,14 +1282,12 @@ function dataUrlToBlobUrl(dataUrl) {
 
 // Inyecta la imagen en el slot con fallback y logs
 function injectSceneImage(slot, src) {
-  // 1) Si es data: -> conviértelo SIEMPRE a blob: (evita CSP silenciosas)
   let finalSrc = src;
   if (src && src.startsWith('data:image/')) {
     const blobUrl = dataUrlToBlobUrl(src);
     if (blobUrl) finalSrc = blobUrl;
   }
 
-  // 2) Crea <img>, muéstralo y ANEXA antes de cargar (no dependemos de onload)
   const img = new Image();
   img.alt = 'Escena generada';
   img.decoding = 'async';
@@ -1299,18 +1295,15 @@ function injectSceneImage(slot, src) {
   img.style.display = 'block';
   img.style.width = '100%';
 
-  // Mostrar el slot ya
   slot.hidden = false;
   slot.innerHTML = '';
   slot.appendChild(img);
 
-  // Logs para confirmar evento de carga
   img.onload = () => {
     console.log('[IMG] loaded, size:', img.naturalWidth, 'x', img.naturalHeight);
   };
   img.onerror = () => {
     console.error('[IMG] image load error, src starts with:', String(finalSrc).slice(0, 16));
-    // último intento: si finalSrc no es blob, intenta blob
     if (src && src.startsWith('data:image/') && !String(finalSrc).startsWith('blob:')) {
       const blobUrl = dataUrlToBlobUrl(src);
       if (blobUrl) {
@@ -1319,7 +1312,6 @@ function injectSceneImage(slot, src) {
         return;
       }
     }
-    // fallback visual si nada funciona
     slot.hidden = true;
     slot.innerHTML = '';
   };
@@ -1328,12 +1320,8 @@ function injectSceneImage(slot, src) {
   img.src = finalSrc;
 }
 
-
-
-
 // Delegación global de clicks
 document.addEventListener('click', (ev) => {
   const btn = ev.target.closest('.brush-btn');
   if (btn) handleBrushClick(btn);
 });
-
