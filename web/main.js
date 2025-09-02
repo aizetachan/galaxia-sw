@@ -153,12 +153,12 @@ async function startOnboarding({ hard=false } = {}){
 
   if (hard) resetMsgs();
 
-  // Estado base de onboarding
+  // Estado base
   character = null;            save(KEY_CHAR, character);
   step = 'name';               save(KEY_STEP, step);
   pendingConfirm = null;       save(KEY_CONFIRM, null);
 
-  // Fallback visible inmediato (para que nunca quede en negro)
+  // Fallback visible inmediato para NO dejar negro
   if (msgs.length === 0) {
     pushDM(
       'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
@@ -168,9 +168,10 @@ async function startOnboarding({ hard=false } = {}){
   }
   render();
 
-  // Kickoff real contra el Máster (usa prompt-master.md). Si falla, queda el fallback.
+  // Kickoff real al Máster (prompt-master). Si falla, queda el fallback.
   await startOnboardingKickoff();
 }
+
 
 /* ============================================================
  *                          BOOT
@@ -366,14 +367,14 @@ function getClientState(){
     sceneMemo: load('sw:scene_memo', []),
   };
 }
-// Lanza el onboarding real contra el Máster (prompt). Si falla, ya habrá un fallback visible.
+// Lanza el kickoff real al Máster (prompt). Si falla, ya habrá un fallback visible.
 async function startOnboardingKickoff() {
   try {
     const kick = await api('/dm/respond', {
       message: '',
       history: [],
       character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step),   // ahora mismo 'name'
+      stage: mapStageForDM(step),   // ahora 'name'
       clientState: getClientState(),
       config: { mode: getDmMode() }
     });
@@ -382,6 +383,7 @@ async function startOnboardingKickoff() {
     dlog('kickoff fail (fallback visible)', e?.data || e);
   }
 }
+
 
 async function showResumeOnDemand(){
   try{
@@ -434,11 +436,17 @@ async function send(){
   }
   if (value==='/resumen'||value==='/resume'){ await showResumeOnDemand(); setSending(false); return; }
   if (value==='/restart'){
-    localStorage.removeItem(KEY_MSGS); localStorage.removeItem(KEY_CHAR); localStorage.removeItem(KEY_STEP); localStorage.removeItem(KEY_CONFIRM);
+    localStorage.removeItem(KEY_MSGS);
+    localStorage.removeItem(KEY_CHAR);
+    localStorage.removeItem(KEY_STEP);
+    localStorage.removeItem(KEY_CONFIRM);
     resetMsgs(); character=null; step='name'; setPendingRoll(null); pendingConfirm=null;
-    await dmSay('<<ONBOARD START STEP="name">>');
+  
+    // Onboarding robusto: fallback inmediato + kickoff real en paralelo
+    await startOnboarding({ hard:true });
     setSending(false); return;
   }
+  
 
   pushUser(value);
 
@@ -456,8 +464,17 @@ async function send(){
         character.species = species; save(KEY_CHAR, character);
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('update species fail', e?.data||e); }
         step='role'; save(KEY_STEP, step);
-        await dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`);
-        setSending(false); return;
+
+// Fallback visible al instante
+pushDM(`Genial, ${character.name}. Ahora elige tu **rol** (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…`);
+render();
+
+// Kickoff real (no bloquea la UI)
+dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`)
+  .catch(()=>{});
+
+setSending(false); return;
+
       }
     } else if (step==='role'){
       const role = titleCase(value);
@@ -465,8 +482,17 @@ async function send(){
         character.role = role; save(KEY_CHAR, character);
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('update role fail', e?.data||e); }
         step='done'; save(KEY_STEP, step);
-        await dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`);
-        setSending(false); return;
+
+// Fallback visible al instante
+pushDM('¡Listo! Preparando escena inicial…');
+render();
+
+// Kickoff real (no bloquea la UI)
+dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`)
+  .catch(()=>{});
+
+setSending(false); return;
+
       }
     }
     try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
@@ -519,7 +545,15 @@ async function handleConfirmDecision(decision){
         save(KEY_CHAR, character);
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('upsert name fail', e?.data||e); }
         step='species'; save(KEY_STEP, step);
-        await dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`);
+
+        // Fallback visible al instante
+        pushDM(`Perfecto, **${character.name}**. Ahora elige **especie** (Humano, Twi'lek, Wookiee, Zabrak, Droide)…`);
+        render();
+        
+        // Kickoff real (no bloquea la UI)
+        dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`)
+          .catch(()=>{});
+        
       } else if (type==='build'){
         if (!character){ character = { name:'Aventurer@', species:pendingConfirm.species, role:pendingConfirm.role, publicProfile:true }; }
         else { character.species = pendingConfirm.species; character.role = pendingConfirm.role; }
