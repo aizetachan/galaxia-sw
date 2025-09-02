@@ -3,14 +3,12 @@ import { getDmMode, setDmMode } from "./state.js";
 import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentityFromState } from "./ui/main-ui.js";
 import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
 import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll } from "./chat/chat-controller.js";
+import { api, apiGet } from "./api-client.js";
+import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, getClientState, dmSay, startOnboarding, startOnboardingKickoff, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
 
 /* ============================================================
  *                       Estado
  * ========================================================== */
-let character = load(KEY_CHAR, null);
-let step = load(KEY_STEP, 'name');
-let pendingConfirm = load(KEY_CONFIRM, null);
-
 const UI = { sending:false, authLoading:false, authKind:null, confirmLoading:false };
 
 /* ===== Scene image re-hydration (igual que tenías) ===== */
@@ -100,77 +98,7 @@ function escapeHtml(s=''){ return String(s).replace(/&/g,'&amp;').replace(/</g,'
 function formatMarkdown(t=''){ const safe=escapeHtml(t); return safe.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>'); }
 const titleCase = (s='') => String(s).toLowerCase().replace(/\b\w/g, m=>m.toUpperCase()).replace(/\s+/g,' ').trim();
 
-/* ============================================================
- *                    API helpers
- * ========================================================== */
-async function readMaybeJson(res){
-  const ct = res.headers.get('content-type')||''; const body = await res.text();
-  if (ct.includes('application/json')){ try{ return { json: JSON.parse(body), raw: body, ct, status: res.status }; } catch(e){ return { json:null, raw:body, ct, status:res.status, parseError:String(e) }; } }
-  return { json:null, raw:body, ct, status:res.status };
-}
-async function api(path, body){
-  const headers = { 'Content-Type':'application/json' };
-  if (AUTH?.token) headers.Authorization = `Bearer ${AUTH.token}`;
-  const url = joinUrl(API_BASE, path);
-  dgroup('api POST '+url, ()=>console.log({body}));
-  const res = await fetch(url, { method:'POST', headers, body: JSON.stringify(body||{}) });
-  const data = await readMaybeJson(res);
-  dgroup('api POST result '+url, ()=>console.log(data));
-  if (!res.ok){ const err = new Error(`HTTP ${res.status}`); err.response=res; err.data=data; throw err; }
-  return data.json ?? {};
-}
-async function apiGet(path){
-  const headers = {}; if (AUTH?.token) headers.Authorization = `Bearer ${AUTH.token}`;
-  const url = joinUrl(API_BASE, path);
-  dgroup('api GET '+url, ()=>console.log({}));
-  const res = await fetch(url, { method:'GET', headers });
-  const data = await readMaybeJson(res);
-  dgroup('api GET result '+url, ()=>console.log(data));
-  if (!res.ok){ const err=new Error(`HTTP ${res.status}`); err.response=res; err.data=data; throw err; }
-  return data.json ?? {};
-}
 
-/* ============================================================
- *               Onboarding (el Máster guía)
- * ========================================================== */
-async function dmSay(message){
-  const hist = msgs.slice(-8);
-  try{
-    const r = await api('/dm/respond', {
-      message,
-      history: hist,
-      character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step),
-      clientState: getClientState(),
-      config: { mode: getDmMode() }
-    });
-    if (r?.text) handleIncomingDMText(r.text);
-  } catch(e){ dlog('dmSay fail', e?.data||e); }
-}
-
-async function startOnboarding({ hard=false } = {}){
-  try{ document.getElementById('guest-card')?.setAttribute('hidden','hidden'); }catch{}
-
-  if (hard) resetMsgs();
-
-  // Estado base
-  character = null;            save(KEY_CHAR, character);
-  step = 'name';               save(KEY_STEP, step);
-  pendingConfirm = null;       save(KEY_CONFIRM, null);
-
-  // Fallback visible inmediato para NO dejar negro
-  if (msgs.length === 0) {
-    pushDM(
-      'Bienvenid@ al **HoloCanal**. Soy tu **Máster**.\n\n' +
-      'Vamos a registrar tu identidad para entrar en la historia.\n' +
-      '**Primero:** ¿cómo se va a llamar tu personaje?'
-    );
-  }
-  render();
-
-  // Kickoff real al Máster (prompt-master). Si falla, queda el fallback.
-  await startOnboardingKickoff();
-}
 
 
 /* ============================================================
@@ -188,9 +116,9 @@ async function boot(){
       setAuth(saved);
       await apiGet('/auth/me').catch(e => { if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e; });
       setMsgs(load(KEY_MSGS, []));
-      character = load(KEY_CHAR, null);
-      step = load(KEY_STEP, 'name');
-      pendingConfirm = load(KEY_CONFIRM, null);
+      setCharacter(load(KEY_CHAR, null));
+      setStep(load(KEY_STEP, 'name'));
+      setPendingConfirm(load(KEY_CONFIRM, null));
       await loadHistory({ force: true });
       await showResumeIfAny();
       if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
@@ -198,9 +126,9 @@ async function boot(){
       setAuth(null);
       localStorage.removeItem('sw:auth');
       setMsgs(load(KEY_MSGS, []));
-      character = load(KEY_CHAR, null);
-      step = load(KEY_STEP, 'name');
-      pendingConfirm = null; save(KEY_CONFIRM, null);
+      setCharacter(load(KEY_CHAR, null));
+      setStep(load(KEY_STEP, 'name'));
+      setPendingConfirm(null);
     }
   } catch(e){
     dlog('Auth restore error:', e);
@@ -322,6 +250,8 @@ function render(){
   setAuthLoading(UI.authLoading, UI.authKind);
 }
 
+setupOnboardingUI({ setConfirmLoading, render });
+
 function updatePlaceholder(){
   const placeholders = {
     name:'Tu nombre en el HoloNet…',
@@ -357,34 +287,6 @@ function inflateTranscriptFromResume(text){
   }
   return out;
 }
-function getClientState(){
-  return {
-    step,
-    name: (character?.name || pendingConfirm?.name || null),
-    species: (character?.species || pendingConfirm?.species || null),
-    role: (character?.role || pendingConfirm?.role || null),
-    pendingConfirm: (pendingConfirm || null),
-    sceneMemo: load('sw:scene_memo', []),
-  };
-}
-// Lanza el kickoff real al Máster (prompt). Si falla, ya habrá un fallback visible.
-async function startOnboardingKickoff() {
-  try {
-    const kick = await api('/dm/respond', {
-      message: '',
-      history: [],
-      character_id: Number(character?.id) || null,
-      stage: mapStageForDM(step),   // ahora 'name'
-      clientState: getClientState(),
-      config: { mode: getDmMode() }
-    });
-    if (kick?.text) handleIncomingDMText(kick.text);
-  } catch (e) {
-    dlog('kickoff fail (fallback visible)', e?.data || e);
-  }
-}
-
-
 async function showResumeOnDemand(){
   try{
     const r = await apiGet('/dm/resume');
@@ -420,7 +322,7 @@ async function send(){
   const value = inputEl?.value?.trim?.() || '';
   if (!value) return;
 
-  if (pendingConfirm && step!=='done'){ pendingConfirm=null; save(KEY_CONFIRM,null); render(); }
+  if (pendingConfirm && step!=='done'){ setPendingConfirm(null); render(); }
 
   dlog('send',{value,step});
   setSending(true);
@@ -430,7 +332,7 @@ async function send(){
   if (m){ setDmMode(m[1].toLowerCase()); setSending(false); return; }
 
   if ((value==='/privado'||value==='/publico')&&character){
-    character.publicProfile = (value==='/publico'); save(KEY_CHAR, character);
+    character.publicProfile = (value==='/publico'); setCharacter(character);
     try{ await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); }catch(e){ dlog('privacy update fail', e?.data||e); }
     setSending(false); return;
   }
@@ -440,7 +342,7 @@ async function send(){
     localStorage.removeItem(KEY_CHAR);
     localStorage.removeItem(KEY_STEP);
     localStorage.removeItem(KEY_CONFIRM);
-    resetMsgs(); character=null; step='name'; setPendingRoll(null); pendingConfirm=null;
+    resetMsgs(); setCharacter(null); setStep('name'); setPendingRoll(null); setPendingConfirm(null);
   
     // Onboarding robusto: fallback inmediato + kickoff real en paralelo
     await startOnboarding({ hard:true });
@@ -453,17 +355,16 @@ async function send(){
   if (step!=='done'){
     if (step==='name'){
       const name = value || 'Aventurer@';
-      character = { name, species:'', role:'', publicProfile:true, lastLocation:'Tatooine — Cantina de Mos Eisley' };
-      save(KEY_CHAR, character);
-      pendingConfirm = { type:'name', name }; save(KEY_CONFIRM, pendingConfirm);
+      setCharacter({ name, species:'', role:'', publicProfile:true, lastLocation:'Tatooine — Cantina de Mos Eisley' });
+      setPendingConfirm({ type:'name', name });
       render(); setSending(false); return;
     }
     if (step==='species'){
       const species = titleCase(value);
       if (species.length>=2){
-        character.species = species; save(KEY_CHAR, character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('update species fail', e?.data||e); }
-        step='role'; save(KEY_STEP, step);
+        character.species = species; setCharacter(character);
+        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update species fail', e?.data||e); }
+        setStep('role');
 
 // Fallback visible al instante
 pushDM(`Genial, ${character.name}. Ahora elige tu **rol** (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…`);
@@ -479,9 +380,9 @@ setSending(false); return;
     } else if (step==='role'){
       const role = titleCase(value);
       if (role.length>=2){
-        character.role = role; save(KEY_CHAR, character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('update role fail', e?.data||e); }
-        step='done'; save(KEY_STEP, step);
+        character.role = role; setCharacter(character);
+        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update role fail', e?.data||e); }
+        setStep('done');
 
 // Fallback visible al instante
 pushDM('¡Listo! Preparando escena inicial…');
@@ -529,48 +430,6 @@ async function resolveRoll(){
   }
 }
 
-/* ============================================================
- *                    Confirmación
- * ========================================================== */
-let busyConfirm=false;
-async function handleConfirmDecision(decision){
-  if (!pendingConfirm || busyConfirm) return;
-  busyConfirm=true; setConfirmLoading(true);
-  const { type } = pendingConfirm;
-  try{
-    if (decision==='yes'){
-      if (type==='name'){
-        if (!character){ character = { name: pendingConfirm.name, species:'', role:'', publicProfile:true, lastLocation:'Tatooine — Cantina de Mos Eisley' }; }
-        else { character.name = pendingConfirm.name; }
-        save(KEY_CHAR, character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('upsert name fail', e?.data||e); }
-        step='species'; save(KEY_STEP, step);
-
-        // Fallback visible al instante
-        pushDM(`Perfecto, **${character.name}**. Ahora elige **especie** (Humano, Twi'lek, Wookiee, Zabrak, Droide)…`);
-        render();
-        
-        // Kickoff real (no bloquea la UI)
-        dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`)
-          .catch(()=>{});
-        
-      } else if (type==='build'){
-        if (!character){ character = { name:'Aventurer@', species:pendingConfirm.species, role:pendingConfirm.role, publicProfile:true }; }
-        else { character.species = pendingConfirm.species; character.role = pendingConfirm.role; }
-        save(KEY_CHAR, character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; save(KEY_CHAR,character);} }catch(e){ dlog('upsert build fail', e?.data||e); }
-        step='done'; save(KEY_STEP, step);
-      }
-    }
-    pendingConfirm=null; save(KEY_CONFIRM,null);
-    const hist = msgs.slice(-8);
-    const follow = await api('/dm/respond', { message:`<<CONFIRM_ACK TYPE="${type}" DECISION="${decision}">>`, history:hist, character_id:Number(character?.id)||null, stage:mapStageForDM(step), clientState:getClientState(), config:{ mode:getDmMode() } });
-    handleIncomingDMText((follow && follow.text) ? follow.text : '');
-  } catch(e){
-    dlog('handleConfirmDecision error', e?.data||e);
-    alert(e.message || 'No se pudo procesar la confirmación');
-  } finally { busyConfirm=false; setConfirmLoading(false); render(); }
-}
 
 /* ============================================================
  *           Migración guest → user y helpers de historia
@@ -589,7 +448,7 @@ async function showResumeIfAny(){
   try{
     const r = await apiGet('/dm/resume');
     if (r?.ok && r.text && msgs.length===0){
-      if (r.character){ character=r.character; save(KEY_CHAR, character); step='done'; save(KEY_STEP, step); }
+      if (r.character){ setCharacter(r.character); setStep('done'); }
       const transcript = inflateTranscriptFromResume(r.text);
       if (transcript.length){ setMsgs(transcript); save(KEY_MSGS, msgs); }
     }
@@ -645,9 +504,9 @@ async function doAuth(kind) {
 
     // Cargamos estado local "limpio"
     setMsgs(load(KEY_MSGS, []));
-    character = load(KEY_CHAR, null);
-    step = load(KEY_STEP, 'name');
-    pendingConfirm = load(KEY_CONFIRM, null);
+    setCharacter(load(KEY_CHAR, null));
+    setStep(load(KEY_STEP, 'name'));
+    setPendingConfirm(load(KEY_CONFIRM, null));
 
     // Quitar "bienvenida de invitado" si quedó
     {
@@ -664,8 +523,8 @@ async function doAuth(kind) {
 
     if (me?.character) {
       // Jugador existente: forzamos historial
-      character = me.character; save(KEY_CHAR, character);
-      step = 'done'; save(KEY_STEP, step);
+      setCharacter(me.character);
+      setStep('done');
 
       await loadHistory({ force: true });
       await showResumeIfAny();
@@ -680,9 +539,9 @@ async function doAuth(kind) {
     // === Registro nuevo: empezamos onboarding ===
     // Estado inicial de onboarding
     resetMsgs();
-    character = null; save(KEY_CHAR, character);
-    step = 'name'; save(KEY_STEP, step);
-    pendingConfirm = null; save(KEY_CONFIRM, null);
+    setCharacter(null);
+    setStep('name');
+    setPendingConfirm(null);
 
     if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
     setIdentityBar(user.username, '');
