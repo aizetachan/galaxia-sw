@@ -4,7 +4,8 @@ import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentit
 import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
 import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll } from "./chat/chat-controller.js";
 import { api, apiGet } from "./api-client.js";
-import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, getClientState, dmSay, startOnboarding, startOnboardingKickoff, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
+// ⬇️ Import actualizado: usamos startOnboardingOnce; mantenemos startOnboarding solo para /restart
+import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, getClientState, dmSay, startOnboardingOnce, startOnboarding, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
 import { setSending as applySending, setAuthLoading as applyAuthLoading, setConfirmLoading as applyConfirmLoading } from "./ui/helpers.js";
 import { now, hhmm, escapeHtml, formatMarkdown, titleCase } from "./utils.js";
 import { decorateDMs, hydrateSceneJobs } from "./scene-image.js";
@@ -19,7 +20,7 @@ setRenderCallback(render);
 /* ============================================================
  *                        DOM
  * ========================================================== */
-const chatEl = document.getElementById('chat'); // ← quitado el placeholder “pantalla intermedia”
+const chatEl = document.getElementById('chat'); // ← sin pantalla intermedia
 
 const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
 window.setIdentityBar = setIdentityBar;
@@ -46,9 +47,6 @@ const cancelBtn = document.getElementById('cancel-btn');
 const setSending = (on)=>applySending(UI,on,{sendBtn,inputEl});
 const setAuthLoading = (on,kind=null)=>applyAuthLoading(UI,on,kind,{authUserEl,authPinEl,authLoginBtn,authRegisterBtn});
 const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes-inline'); const no=document.getElementById('confirm-no-inline'); applyConfirmLoading(UI,on,yes,no); };
-
-
-
 
 /* ============================================================
  *                          BOOT
@@ -87,12 +85,13 @@ async function boot(){
   await loadHistory();
   updateAuthUI();
 
-  // Si estoy logueado y sin personaje -> empezamos onboarding (PERO SIN cortar boot)
+  // ⬇️ Cambio clave: arrancar onboarding SOLO UNA VEZ y sin mensajes locales duplicados
   if (isLogged() && msgs.length === 0){
     let me=null; try{ me = await apiGet('/world/characters/me'); }catch{}
-    if (!me?.character){ await startOnboarding({ hard:true }); }
+    if (!me?.character){ await startOnboardingOnce({ hard:true }); }
   }
 
+  // Bienvenida SOLO para invitados no logueados (no afecta al onboarding del usuario registrado)
   if (msgs.length === 0 && !isLogged()){
     pushDM(`Bienvenid@ al **HoloCanal**. Aquí jugamos una historia viva de Star Wars.
 Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y entramos en escena.`);
@@ -292,12 +291,11 @@ async function send(){
     localStorage.removeItem(KEY_STEP);
     localStorage.removeItem(KEY_CONFIRM);
     resetMsgs(); setCharacter(null); setStep('name'); setPendingRoll(null); setPendingConfirm(null);
-  
-    // Onboarding robusto: fallback inmediato + kickoff real en paralelo
+
+    // Reinicio del onboarding: permitimos reiniciar directamente
     await startOnboarding({ hard:true });
     setSending(false); return;
   }
-  
 
   pushUser(value);
 
@@ -315,16 +313,12 @@ async function send(){
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update species fail', e?.data||e); }
         setStep('role');
 
-// Fallback visible al instante
-pushDM(`Genial, ${character.name}. Ahora elige tu **rol** (Piloto, Contrabandista, Jedi, Cazarrecompensas, Ingeniero)…`);
-render();
+        // ⛔️ Eliminado fallback local (antes hacía pushDM “Genial, … ahora elige rol”)
+        // El Máster llevará la conversación en la siguiente respuesta.
+        dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`)
+          .catch(()=>{});
 
-// Kickoff real (no bloquea la UI)
-dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`)
-  .catch(()=>{});
-
-setSending(false); return;
-
+        setSending(false); return;
       }
     } else if (step==='role'){
       const role = titleCase(value);
@@ -333,16 +327,11 @@ setSending(false); return;
         try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update role fail', e?.data||e); }
         setStep('done');
 
-// Fallback visible al instante
-pushDM('¡Listo! Preparando escena inicial…');
-render();
+        // ⛔️ Eliminado fallback local (“¡Listo! Preparando escena…”)
+        dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`)
+          .catch(()=>{});
 
-// Kickoff real (no bloquea la UI)
-dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`)
-  .catch(()=>{});
-
-setSending(false); return;
-
+        setSending(false); return;
       }
     }
     try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
@@ -486,7 +475,6 @@ async function doAuth(kind) {
     }
 
     // === Registro nuevo: empezamos onboarding ===
-    // Estado inicial de onboarding
     resetMsgs();
     setCharacter(null);
     setStep('name');
@@ -497,8 +485,8 @@ async function doAuth(kind) {
     updateAuthUI();
     render();
 
-    // Lanzamos el kickoff real; si falla, queda el fallback local
-    await startOnboarding({ hard: false }); // pinta bienvenida local + intenta kickoff
+    // ⬇️ Cambio clave: arrancar onboarding una sola vez (sin pushDM locales)
+    await startOnboardingOnce({ hard: true });
 
   } catch (e) {
     dlog('doAuth error:', e?.data || e);
@@ -535,4 +523,3 @@ async function doAuth(kind) {
   const card=document.getElementById('guest-card'); if(card && window.MutationObserver){ new MutationObserver(apply).observe(card,{attributes:true,attributeFilter:['hidden','class','style']}); }
 })();
 if ('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/service-worker.js').catch(e=>dlog('SW registration failed',e)); }); }
-
