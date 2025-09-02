@@ -175,6 +175,8 @@ async function boot(){
       character = load(KEY_CHAR, null);
       step = load(KEY_STEP, 'name');
       pendingConfirm = load(KEY_CONFIRM, null);
+      await loadHistory({ force: true });
+      await showResumeIfAny();
       if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
       setAuth(null);
@@ -189,7 +191,7 @@ async function boot(){
     if (authStatusEl) authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  await loadHistoryIfEmpty();
+  await loadHistory();
   updateAuthUI();
 
   // Si estoy logueado y sin personaje -> empezamos onboarding (PERO SIN cortar boot)
@@ -556,14 +558,14 @@ async function loadHistory({ force = false } = {}) {
  *                     Auth (arreglos clave)
  * ========================================================== */
 async function doAuth(kind){
-  if (UI.authLoading) return;
-  const username=(authUserEl?.value||'').trim();
-  const pin=(authPinEl?.value||'').trim();
-  if (!username || !/^\d{4}$/.test(pin)){ if (authStatusEl) authStatusEl.textContent='Usuario y PIN (4 dígitos)'; return; }
+    if (UI.authLoading) return;
+    const username=(authUserEl?.value||'').trim();
+    const pin=(authPinEl?.value||'').trim();
+    if (!username || !/^\d{4}$/.test(pin)){ if (authStatusEl) authStatusEl.textContent='Usuario y PIN (4 dígitos)'; return; }
 
-  dlog('doAuth',{kind,username}); setAuthLoading(true, kind);
+    dlog('doAuth',{kind,username}); setAuthLoading(true, kind);
 
-  try{
+    try{
     const url = (kind==='register') ? '/auth/register' : '/auth/login';
     const { token, user } = await api(url, { username, pin });
     setAuth({ token, user });
@@ -598,11 +600,17 @@ async function doAuth(kind){
       return;
     }
 
-    // Caso: login con personaje → cargar historia/resumen
-    character = me.character; save(KEY_CHAR, character); step='done'; save(KEY_STEP, step);
-    await loadHistoryIfEmpty();
+    // Caso: login con personaje → cargar historia y mostrar resumen
+    resetMsgs(); // elimina posibles "bienvenidas" antiguas
+    character = me.character;
+    save(KEY_CHAR, character);
+    step = 'done'; save(KEY_STEP, step);
+
+    await loadHistory({ force: true });
     await showResumeIfAny();
     render();
+    return;
+
 
   } catch(e){
     dlog('doAuth error:', e?.data||e);
