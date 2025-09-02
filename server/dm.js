@@ -367,7 +367,7 @@ async function maybeUpdateSummary({ userId, historyLines }) {
       model:
         process.env.LLM_MODEL ||
         process.env.OPENAI_MODEL ||
-        'gpt-4o-mini',
+        'gpt-5-mini',
       prevSummary: prev,
       recentLines: recent,
     });
@@ -425,7 +425,7 @@ async function handleDM(req, res) {
     const model =
       process.env.LLM_MODEL ||
       process.env.OPENAI_MODEL ||
-      'gpt-4o-mini';
+      'gpt-5-mini';
     const system = buildSystem({
       stage,
       brief,
