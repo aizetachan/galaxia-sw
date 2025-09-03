@@ -76,6 +76,19 @@ async function chatThreadCol() {
   schemaCache.set(key, null);
   return null;
 }
+// Diagnóstico de esquema (GET /api/dm/_diag)
+router.get('/_diag', async (_req, res) => {
+  try {
+    const chat_thread_fk = await chatThreadCol();
+    const chat_has_user_id = await chatHasUserId();
+    const story_has_character_id = await storyHasCharacterId();
+    console.log('[DM][schema]', { chat_thread_fk, chat_has_user_id, story_has_character_id });
+    res.json({ ok: true, chat_thread_fk, chat_has_user_id, story_has_character_id });
+  } catch (e) {
+    console.error('[DM/_diag] error:', e?.message || e);
+    res.status(500).json({ ok: false, error: 'diag_failed' });
+  }
+});
 
 /* ========= Utils ========= */
 function headLine(str = '') {
