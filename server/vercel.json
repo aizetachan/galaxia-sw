@@ -2,7 +2,7 @@
     "version": 2,
     "trailingSlash": false,
     "rewrites": [
-      { "source": "/api/(.*)", "destination": "/api/index" },
+      { "source": "/api/(.*)", "destination": "https://galaxia-sw.vercel.app/api/$1" },
       { "source": "/health", "destination": "/api/index.js" }
     ],
     "headers": [

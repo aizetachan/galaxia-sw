@@ -95,17 +95,10 @@ export async function probeHealth(base) {
 // api.js (reemplaza SOLO esta función)
 export async function ensureApiBase() {
   try {
-    // 1) meta explícito o localStorage → prioridad absoluta
     const meta = document.querySelector('meta[name="api_base"]')?.content?.trim();
     let base = (meta && meta.length) ? meta : (localStorage.getItem('sw:api_base') || '').trim();
-
-    // 2) Si no había nada persistido, usa SIEMPRE relativo /api (same-origin)
     if (!base) base = '/api';
-
-    // 3) No convertimos 404 de /health en fallo: el proxy puede no tener health.
-    //    Simplemente guardamos y usamos.
     if (!/^https?:\/\//i.test(base) && !base.startsWith('/')) base = '/api';
-
     window.API_BASE = base;
     localStorage.setItem('sw:api_base', base);
     setServerStatus(true, `API_BASE ready = ${base}`);
