@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
 
 import dmRouter from './dm.js';
 import worldRouter from './world/index.js';
@@ -306,3 +307,12 @@ app.use((err, req, res, _next) => {
 });
 
 export default app;
+
+// If this file is executed directly (not imported), start the HTTP server.
+const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
+if (isDirectRun) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`[BOOT] listening on port ${PORT}`);
+  });
+}
