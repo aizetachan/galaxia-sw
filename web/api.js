@@ -92,36 +92,28 @@ export async function probeHealth(base) {
 }
 
 // Establece API_BASE probando varios candidatos y pinta el estado
+// api.js (reemplaza SOLO esta función)
 export async function ensureApiBase() {
-  const override = getQuerySafe('api');
-  const winSet   = (typeof window !== 'undefined' && window.API_BASE) || '';
-  const origin   = (typeof location !== 'undefined') ? (location.origin + '/api') : '';
-  const metaTag  = getMetaSafe('api_base') || '';
-  const cached   = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
+  try {
+    // 1) meta explícito o localStorage → prioridad absoluta
+    const meta = document.querySelector('meta[name="api_base"]')?.content?.trim();
+    let base = (meta && meta.length) ? meta : (localStorage.getItem('sw:api_base') || '').trim();
 
-  const candidates = [override, cached, winSet, metaTag, origin, 'https://galaxia-sw.vercel.app/api']
-    .filter(Boolean)
-    .map(s => String(s).replace(/\/+$/, ''));
+    // 2) Si no había nada persistido, usa SIEMPRE relativo /api (same-origin)
+    if (!base) base = '/api';
 
-  // quitar duplicados manteniendo orden
-  const seen = new Set();
-  const unique = candidates.filter(b => (seen.has(b) ? false : (seen.add(b), true)));
+    // 3) No convertimos 404 de /health en fallo: el proxy puede no tener health.
+    //    Simplemente guardamos y usamos.
+    if (!/^https?:\/\//i.test(base) && !base.startsWith('/')) base = '/api';
 
-  dgroup('API candidates', () => console.table(unique.map((b,i)=>({ i, base:b }))));
-
-  for (const base of unique) {
-    const result = await probeHealth(base);
-    dgroup(`probe ${base}`, () => console.log(result));
-    if (result.ok) {
-      API_BASE = base;
-      try { localStorage.setItem(API_STORE_KEY, API_BASE); } catch {}
-      if (typeof window !== 'undefined') window.API_BASE = API_BASE;
-      dlog('Using API_BASE =', API_BASE);
-      setServerStatus(true, `Server: OK — M: ${(typeof window !== 'undefined' && typeof window.getDmMode === 'function') ? window.getDmMode() : 'rich'}`);
-      return API_BASE;
-    }
+    window.API_BASE = base;
+    localStorage.setItem('sw:api_base', base);
+    setServerStatus(true, `API_BASE ready = ${base}`);
+    return base;
+  } catch (e) {
+    console.warn('[API] ensureApiBase error', e);
+    window.API_BASE = '/api';
+    setServerStatus(false, 'API_BASE fallback = /api');
+    return '/api';
   }
-  console.warn('[API] No healthy base found. Using initial:', API_BASE || '(empty)');
-  setServerStatus(false, 'Server: FAIL (no health)');
-  return API_BASE;
 }
