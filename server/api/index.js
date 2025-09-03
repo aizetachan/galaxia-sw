@@ -12,8 +12,7 @@ import dmRouter from '../dm.js';
 
 // --- Config CORS (lista blanca de orígenes permitidos) ---
 const ORIGINS = [
-  'https://galaxia-sw-kepe.vercel.app',   // front actual
-  'https://galaxia-sw.vercel.app',        // por si tenéis front aquí también
+  'https://galaxia-sw.vercel.app',        // front producción
   'http://localhost:5173',                // dev (opcional)
   'http://localhost:3000'                 // dev (opcional)
 ];
