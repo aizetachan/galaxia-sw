@@ -8,10 +8,11 @@ import { getOpenAI } from './openai-client.js';
 const router = Router();
 const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 
-/* ========= Schema helpers (autodetección) ========= */
+/* ========= Schema helpers (autodetección con caché) ========= */
 const schemaCache = new Map();
+
 async function hasColumn(table, column) {
-  const key = `${table}.${column}`;
+  const key = `has:${table}.${column}`;
   if (schemaCache.has(key)) return schemaCache.get(key);
   const q = await sql(
     `SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`,
@@ -21,13 +22,60 @@ async function hasColumn(table, column) {
   schemaCache.set(key, ok);
   return ok;
 }
+
+async function listColumns(table) {
+  const key = `cols:${table}`;
+  if (schemaCache.has(key)) return schemaCache.get(key);
+  const q = await sql(
+    `SELECT column_name FROM information_schema.columns WHERE table_name=$1`,
+    [table]
+  );
+  const cols = q.rows.map(r => r.column_name);
+  schemaCache.set(key, cols);
+  return cols;
+}
+
 async function userCol(table) {
   if (await hasColumn(table, 'owner_user_id')) return 'owner_user_id';
   if (await hasColumn(table, 'user_id')) return 'user_id';
   return null;
 }
-async function chatHasUserId() { return await hasColumn('chat_messages', 'user_id'); }
+
 async function storyHasCharacterId() { return await hasColumn('story_threads', 'character_id'); }
+async function chatHasUserId() { return await hasColumn('chat_messages', 'user_id'); }
+
+/** Autodetecta la columna que enlaza chat_messages → story_threads */
+async function chatThreadCol() {
+  const key = 'chat_messages.thread_fk';
+  if (schemaCache.has(key)) return schemaCache.get(key);
+
+  const candidates = [
+    'thread_id',
+    'story_thread_id',
+    'st_id',
+    'thread',
+    'conversation_id',
+    'conv_id',
+    'tid'
+  ];
+  for (const c of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await hasColumn('chat_messages', c)) {
+      schemaCache.set(key, c);
+      return c;
+    }
+  }
+
+  const cols = (await listColumns('chat_messages')) || [];
+  const found = cols.find(c => /thread/.test(c) && /id/.test(c));
+  if (found) {
+    schemaCache.set(key, found);
+    return found;
+  }
+
+  schemaCache.set(key, null);
+  return null;
+}
 
 /* ========= Utils ========= */
 function headLine(str = '') {
@@ -48,7 +96,6 @@ function wantsSuggestion(userMsg = '') {
 
 /* ========= DB helpers ========= */
 
-// Devuelve { id, state, character_id? } del thread de onboarding del user o lo crea
 async function getOrCreateOnboardingThread(userId) {
   if (!hasDb) throw new Error('DB not available');
   const uid = toInt(userId);
@@ -56,60 +103,40 @@ async function getOrCreateOnboardingThread(userId) {
   const hasChar = await storyHasCharacterId();
   const charUser = await userCol('characters');
   const hasMsgUser = await chatHasUserId();
+  const cmThread = await chatThreadCol();
 
   let row;
 
-  if (hasChar) {
-    // story_threads.character_id EXISTE → podemos enlazar con characters
+  if (hasChar && charUser) {
+    // Buscar por personaje del usuario
     let q = await sql(
       `
       SELECT st.id, st.state, st.character_id
         FROM story_threads st
         JOIN characters c ON c.id = st.character_id
-        ${charUser ? `WHERE c.${charUser} = $1` : ''}
-        ORDER BY st.updated_at DESC
-        LIMIT 1
+       WHERE c.${charUser} = $1
+       ORDER BY st.updated_at DESC
+       LIMIT 1
       `,
-      charUser ? [uid] : []
+      [uid]
     );
     row = q.rows[0];
+  }
 
-    if (!row) {
-      // Intento vía puente user_characters
-      q = await sql(
-        `
-        SELECT st.id, st.state, st.character_id
-          FROM story_threads st
-          JOIN characters c ON c.id = st.character_id
-          JOIN user_characters uc ON uc.character_id = c.id
-         WHERE uc.user_id = $1
-         ORDER BY st.updated_at DESC
-         LIMIT 1
-        `,
-        [uid]
-      );
-      row = q.rows[0];
-    }
-  } else {
-    // story_threads.character_id NO existe
-    // Mejor intento: localizar por chat_messages.user_id si existe
-    if (hasMsgUser) {
-      const q = await sql(
-        `
-        SELECT st.id, st.state
-          FROM story_threads st
-          JOIN chat_messages cm ON cm.thread_id = st.id
-         WHERE cm.user_id = $1
-         ORDER BY st.updated_at DESC
-         LIMIT 1
-        `,
-        [uid]
-      );
-      row = q.rows[0];
-    } else {
-      // Último recurso: ningún vínculo → no podemos asociar por usuario; crearemos uno nuevo
-      row = null;
-    }
+  // Plan B: si existe relación por mensajes (y tenemos columna de thread)
+  if (!row && cmThread && hasMsgUser) {
+    const q = await sql(
+      `
+      SELECT st.id, st.state${hasChar ? ', st.character_id' : ''}
+        FROM story_threads st
+        JOIN chat_messages cm ON cm.${cmThread} = st.id
+       WHERE cm.user_id = $1
+       ORDER BY st.updated_at DESC
+       LIMIT 1
+      `,
+      [uid]
+    );
+    row = q.rows[0];
   }
 
   if (row && row.state?.startsWith('onboarding')) return row;
@@ -122,7 +149,6 @@ async function getOrCreateOnboardingThread(userId) {
   return ins.rows[0];
 }
 
-// Personaje del user (si existe); si no hay relación directa, crea uno y lo asocia por puente si existe
 async function getOrCreateCharacterForUser(userId) {
   const uid = toInt(userId);
   const charUser = await userCol('characters');
@@ -178,7 +204,7 @@ async function getOrCreateCharacterForUser(userId) {
 }
 
 async function linkThreadCharacter(threadId, characterId) {
-  if (!(await storyHasCharacterId())) return; // nada que enlazar
+  if (!(await storyHasCharacterId())) return;
   await sql(
     `UPDATE story_threads
         SET character_id = $2,
@@ -199,10 +225,12 @@ async function setThreadState(threadId, state) {
 }
 
 async function loadShortHistory(threadId, limit = 8) {
+  const cmThread = await chatThreadCol();
+  if (!cmThread) return []; // no podemos filtrar → devolvemos vacío
   const q = await sql(
     `SELECT role, text
        FROM chat_messages
-      WHERE thread_id = $1
+      WHERE ${cmThread} = $1
       ORDER BY ts ASC
       LIMIT $2`,
     [toInt(threadId), limit]
@@ -212,15 +240,22 @@ async function loadShortHistory(threadId, limit = 8) {
 
 async function saveChat({ userId, threadId, role, text }) {
   const hasUser = await chatHasUserId();
+  const cmThread = await chatThreadCol();
+
+  if (!cmThread) {
+    // No sabemos enlazar al thread → evitar fallo silenciosamente
+    return;
+  }
+
   if (hasUser) {
     await sql(
-      `INSERT INTO chat_messages (user_id, thread_id, role, text, ts)
+      `INSERT INTO chat_messages (user_id, ${cmThread}, role, text, ts)
        VALUES ($1, $2, $3, $4, now())`,
       [toInt(userId), toInt(threadId), role, text]
     );
   } else {
     await sql(
-      `INSERT INTO chat_messages (thread_id, role, text, ts)
+      `INSERT INTO chat_messages (${cmThread}, role, text, ts)
        VALUES ($1, $2, $3, now())`,
       [toInt(threadId), role, text]
     );
@@ -296,14 +331,20 @@ async function callOpenAI({ state, userText, historyMsgs, suggestMode }) {
 
 /* ========= Rutas ONBOARDING ========= */
 
-// Arranque explícito
+// Arranque explícito (opcional)
 router.post('/kickoff', requireAuth, async (req, res) => {
   try {
     if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
-    const userId = toInt(req.auth.userId);
 
+    // Logs de esquema
+    console.log('[DM][schema]', {
+      chat_thread_fk: await chatThreadCol(),
+      chat_has_user_id: await chatHasUserId(),
+      story_has_character_id: await storyHasCharacterId()
+    });
+
+    const userId = toInt(req.auth.userId);
     const thread = await getOrCreateOnboardingThread(userId);
-    // Intentamos crear/obtener character, pero solo enlazamos si la columna existe
     const character = await getOrCreateCharacterForUser(userId);
     await linkThreadCharacter(thread.id, character.id);
 
@@ -330,6 +371,14 @@ router.post('/kickoff', requireAuth, async (req, res) => {
 router.post('/respond', requireAuth, async (req, res) => {
   try {
     if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+
+    // Logs de esquema
+    console.log('[DM][schema]', {
+      chat_thread_fk: await chatThreadCol(),
+      chat_has_user_id: await chatHasUserId(),
+      story_has_character_id: await storyHasCharacterId()
+    });
+
     const userId = toInt(req.auth.userId);
     const { message = '' } = req.body || {};
 
@@ -363,6 +412,13 @@ router.post('/respond', requireAuth, async (req, res) => {
 router.post('/confirm', requireAuth, async (req, res) => {
   try {
     if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+
+    // Logs de esquema
+    console.log('[DM][schema]', {
+      chat_thread_fk: await chatThreadCol(),
+      chat_has_user_id: await chatHasUserId(),
+      story_has_character_id: await storyHasCharacterId()
+    });
 
     const userId = toInt(req.auth.userId);
     const { thread_id, confirm, accept } = req.body || {};
