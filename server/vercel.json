@@ -1,19 +1,40 @@
 {
-    "version": 2,
-    "trailingSlash": false,
-    "rewrites": [
-      { "source": "/api/(.*)", "destination": "/api/index" },
-      { "source": "/health", "destination": "/api/index.js" }
-    ],
-    "headers": [
-      {
-        "source": "/api/(.*)",
-        "headers": [
-          { "key": "Access-Control-Allow-Origin", "value": "*" },
-          { "key": "Access-Control-Allow-Methods", "value": "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS" },
-          { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
-        ]
-      }
-    ]
-  }
+  "version": 2,
+  "trailingSlash": false,
+  "functions": {
+    "api/index.js": {
+      "includeFiles": [
+        "auth.js",
+        "db.js",
+        "chat.js",
+        "roll.js",
+        "dm.js",
+        "world.js",
+        "openai.js",
+        "openai-client.js",
+        "memory.js",
+        "prompts.js",
+        "routes/**",
+        "prompts/**",
+        "migrations/**",
+        "world/**",
+        "seeds/**"
+      ]
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/health", "destination": "/api/index.js" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+      ]
+    }
+  ]
+}
   
