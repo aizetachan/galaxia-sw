@@ -90,23 +90,3 @@ export async function probeHealth(base) {
     return { ok: false, reason: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error') };
   } finally { clearTimeout(timer); }
 }
-
-// Establece API_BASE probando varios candidatos y pinta el estado
-// api.js (reemplaza SOLO esta función)
-export async function ensureApiBase() {
-  try {
-    const meta = document.querySelector('meta[name="api_base"]')?.content?.trim();
-    let base = (meta && meta.length) ? meta : (localStorage.getItem('sw:api_base') || '').trim();
-    if (!base) base = '/api';
-    if (!/^https?:\/\//i.test(base) && !base.startsWith('/')) base = '/api';
-    window.API_BASE = base;
-    localStorage.setItem('sw:api_base', base);
-    setServerStatus(true, `API_BASE ready = ${base}`);
-    return base;
-  } catch (e) {
-    console.warn('[API] ensureApiBase error', e);
-    window.API_BASE = '/api';
-    setServerStatus(false, 'API_BASE fallback = /api');
-    return '/api';
-  }
-}
