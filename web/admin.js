@@ -1,4 +1,4 @@
-import { API_BASE, joinUrl, ensureApiBase } from './api.js';
+import { API_BASE, joinUrl } from './api.js';
 import { AUTH, setAuth, listenAuthChanges } from './auth/session.js';
 
 let userEl,
@@ -63,7 +63,6 @@ async function handleLogin() {
 }
 
 async function loadUsers() {
-  await ensureApiBase();
   const tbody = panelEl ? panelEl.querySelector('#users-table tbody')
                         : document.querySelector('#users-table tbody');
   if (!tbody) return;
@@ -128,7 +127,6 @@ async function editUser(u) {
 
 // Abrir panel SOLO cuando el usuario pulsa ⚙️ y SOLO si es 'admin'
 document.addEventListener('admin-open', async () => {
-  await ensureApiBase();
   const isAdmin = AUTH?.token && AUTH?.user?.username === 'admin';
   if (!isAdmin) return;
   loginSectionEl.hidden = true;
@@ -151,10 +149,6 @@ listenAuthChanges(async () => {
   }
 });
 
-// Init: solo asegurar API_BASE
-(async function init(){
-  try { await ensureApiBase(); } catch {}
-})();
 
 function escapeHtml(s='') {
   return String(s)
@@ -163,7 +157,6 @@ function escapeHtml(s='') {
 }
 // === Preload helper para evitar flicker en Settings ===
 export async function prepareAdminPanel() {
-  try { await ensureApiBase(); } catch {}
   const isAdmin = AUTH?.token && AUTH?.user?.username === 'admin';
   if (isAdmin) {
     // Asegura estado del panel aunque esté oculto

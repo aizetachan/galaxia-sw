@@ -1,4 +1,4 @@
-import { dlog, dgroup, API_BASE, setServerStatus, ensureApiBase } from "./api.js";
+import { dlog, dgroup, API_BASE, setServerStatus, probeHealth } from "./api.js";
 import { getDmMode, setDmMode } from "./state.js";
 import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentityFromState } from "./ui/main-ui.js";
 import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
@@ -53,9 +53,9 @@ const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes
  * ========================================================== */
 async function boot(){
   dlog('Boot start');
-  await ensureApiBase();
-  dlog('API_BASE ready =', API_BASE);
-  setServerStatus(true, `Server: OK — M: ${getDmMode()}`);
+  const health = await probeHealth(API_BASE);
+  dlog('API_BASE =', API_BASE);
+  setServerStatus(health.ok, health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL');
 
   try{
     const saved = JSON.parse(localStorage.getItem('sw:auth')||'null');
