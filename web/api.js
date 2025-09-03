@@ -20,6 +20,20 @@ function getMetaSafe(name) {
 function getQuerySafe(name) {
   try { return new URL(location.href).searchParams.get(name) || ''; } catch { return ''; }
 }
+
+// Normaliza un base asegurando que termine en "/api"
+function normalizeApiBase(base) {
+  try {
+    const url = new URL(base, window.location.href);
+    if (url.pathname === '/' || url.pathname === '') url.pathname = '/api';
+    if (!url.pathname.endsWith('/api') && !/\/api(\/|$)/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/$/, '') + '/api';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return (base && base !== '/') ? base : '/api';
+  }
+}
 export function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/,'');
   const p = String(path || '').replace(/^\/+/, '');
@@ -29,10 +43,10 @@ export function joinUrl(base, path) {
 // Resolución de API base (orden: ?api → <meta api_base> → localStorage si coincide host → window.API_BASE → fallback same-origin)
 export function resolveApiBase() {
   const q = getQuerySafe('api');
-  if (q) { try { localStorage.setItem(API_STORE_KEY, q); } catch {} return q; }
+  if (q) { const n = normalizeApiBase(q); try { localStorage.setItem(API_STORE_KEY, n); } catch {} return n; }
 
   const meta = getMetaSafe('api_base');
-  if (meta) return meta; // ← ahora el <meta> manda
+  if (meta) return normalizeApiBase(meta); // ← ahora el <meta> manda
 
   // Si había un valor cacheado, solo úsalo si coincide de host con la página actual
   const cached = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
@@ -40,17 +54,17 @@ export function resolveApiBase() {
     if (cached) {
       const loc = new URL(window.location.href);
       const api = new URL(cached, loc);
-      if (api.origin === loc.origin) return api.toString(); // mismo host → ok
+      if (api.origin === loc.origin) return normalizeApiBase(api.toString()); // mismo host → ok
     }
   } catch {} // si falla el parseo, seguimos
 
   const win = (typeof window !== 'undefined' && window.API_BASE) ? String(window.API_BASE) : '';
-  if (win) return win;
+  if (win) return normalizeApiBase(win);
 
   // Fallback: misma origin + /api
   try {
     const loc = new URL(window.location.href);
-    return new URL('/api', loc).toString();
+    return normalizeApiBase(new URL('/api', loc).toString());
   } catch {
     return '/api';
   }

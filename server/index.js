@@ -1,7 +1,6 @@
 // server/index.js
 import express from 'express';
 import cors from 'cors';
-import pg from 'pg';
 import { randomUUID } from 'crypto';
 
 import dmRouter from './dm.js';
@@ -10,6 +9,7 @@ import chatRouter from './chat.js';
 import {
   register,
   login,
+  logout,
   requireAuth,
   requireAdmin,
   listUsers,
@@ -18,19 +18,16 @@ import {
 } from './auth.js';
 import adminRouter from './routes/admin.js';
 import { getOpenAI } from './openai-client.js';
+import { sql, hasDb } from './db.js';
 
 const app = express();
 const api = express.Router();
 
 /* ====== DB helper ====== */
-const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
 async function ensureCharacter(username) {
-  if (!username) return;
+  if (!username || !hasDb) return;
   try {
-    await pool.query('SELECT public.ensure_active_character($1)', [username]);
+    await sql('SELECT public.ensure_active_character($1)', [username]);
   } catch (e) {
     console.warn('[ensureCharacter] warning:', e?.message || e);
   }
@@ -119,9 +116,14 @@ api.get('/auth/me', requireAuth, async (req, res) => {
   return res.json({ user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-api.post('/auth/logout', requireAuth, async (_req, res) => {
-  try { return res.json({ ok: true }); }
-  catch (e) { console.error('[AUTH/logout] error', e); return res.status(500).json({ error: 'logout_failed' }); }
+api.post('/auth/logout', requireAuth, async (req, res) => {
+  try {
+    await logout(req.auth.token);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[AUTH/logout] error', e);
+    return res.status(500).json({ error: 'logout_failed' });
+  }
 });
 
 /* ====== Admin ====== */

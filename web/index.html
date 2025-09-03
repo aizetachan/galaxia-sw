@@ -90,11 +90,11 @@
       </section>
     </main>
 
-    <!-- Inicializa la base de la API ANTES de cargar main.js -->
+    <!-- Chequea el estado del servidor antes de cargar main.js -->
     <script type="module">
-      import { ensureApiBase } from './api.js';
-      // espera a resolver la API y pintar el estado del server
-      await ensureApiBase();
+      import { API_BASE, probeHealth, setServerStatus } from './api.js';
+      const r = await probeHealth(API_BASE);
+      setServerStatus(r.ok);
     </script>
 
     <!-- App principal -->
