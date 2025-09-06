@@ -18,7 +18,10 @@ Tu proyecto ya está configurado como un monorepo con:
 5. **Build Command**: `npm run build`
 6. **Output Directory**: `dist`
 
-**Importante**: Configura estos valores manualmente en la interfaz de Vercel, no dejes campos vacíos.
+**Importante**: 
+- Configura estos valores manualmente en la interfaz de Vercel
+- El `vercel.json` también tiene la configuración, pero es mejor ser explícito en la UI
+- Asegúrate de que el meta tag en `web/index.html` tenga `content="/api"` (no URL absoluta)
 
 ### 2. Variables de Entorno
 
@@ -122,6 +125,14 @@ galaxia-sw/
    - **Output Directory**: `dist`
 2. Verifica que el build funcione localmente: `npm run build`
 3. Asegúrate de que el directorio `dist/` se cree después del build
+4. El `vercel.json` debe tener `"outputDirectory": "dist"`
+
+### Error 404 en el frontend (pantalla en blanco)
+**Solución**:
+1. Verifica que el meta tag en `web/index.html` tenga `content="/api"` (no URL absoluta)
+2. Asegúrate de que el build genere el archivo `dist/index.html`
+3. Verifica que las rutas en `vercel.json` estén correctas
+4. Revisa la consola del navegador para errores de JavaScript
 
 ### Error: "Function Runtimes must have a valid version"
 **Solución**: 
