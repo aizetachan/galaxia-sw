@@ -207,8 +207,8 @@ El Máster narra **éxito/fallo** y consecuencias de forma breve y clara.
 
 ### Auth (`/api/auth/*`)
 
-- `POST /api/auth/register` → `{ username, pin }` → `{ token, user }`
-- `POST /api/auth/login` → `{ username, pin }` → `{ token, user }`
+- `POST /api/auth/register` → `{ username, pin }` → `{ ok:true, token, user }`
+- `POST /api/auth/login` → `{ username, pin }` → `{ ok:true, token, user }`
 - `POST /api/auth/logout` → header `Authorization: Bearer <token>`
 
 > Sin `DATABASE_URL`, usuarios y sesiones se guardan **en memoria** (útil para pruebas).
