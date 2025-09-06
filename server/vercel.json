@@ -1,15 +1,8 @@
 {
-    "version": 2,
-    "trailingSlash": false,
-    "rewrites": [
-      { "source": "/api/(.*)", "destination": "/api/index.js" },
-      { "source": "/health", "destination": "/api/index.js" }
-    ],
-    "headers": [{
-  "source": "/api/(.*)",
-  "headers": [
-    { "key": "Access-Control-Allow-Origin", "value": "*" } 
+  "version": 2,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/health", "destination": "/api/index.js" }
   ]
-}]
-  }
-  
+}

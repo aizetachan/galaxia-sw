@@ -48,7 +48,7 @@ app.get(['/health', '/api/health'], (_req, res) => {
 
 // ==== Routers
 import authRouter from '../auth.js';
-import worldRouter from '../world.js';
+import worldRouter from '../world/index.js';
 import chatRouter from '../chat.js';
 import rollRouter from '../roll.js';
 import dmRouter from '../dm.js';
