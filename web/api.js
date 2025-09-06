@@ -11,67 +11,6 @@ export function dgroup(label, fn) {
   try { fn?.(); } finally { console.groupEnd(); }
 }
 
-export const API_STORE_KEY = 'sw:api_base';
-
-// Helpers seguros (sin duplicados)
-function getMetaSafe(name) {
-  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
-}
-function getQuerySafe(name) {
-  try { return new URL(location.href).searchParams.get(name) || ''; } catch { return ''; }
-}
-
-// Normaliza un base asegurando que termine en "/api"
-function normalizeApiBase(base) {
-  try {
-    const url = new URL(base, window.location.href);
-    if (url.pathname === '/' || url.pathname === '') url.pathname = '/api';
-    if (!url.pathname.endsWith('/api') && !/\/api(\/|$)/.test(url.pathname)) {
-      url.pathname = url.pathname.replace(/\/$/, '') + '/api';
-    }
-    return url.toString().replace(/\/+$/, '');
-  } catch {
-    return (base && base !== '/') ? base : '/api';
-  }
-}
-export function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');
-  const p = String(path || '').replace(/^\/+/, '');
-  return `${b}/${p}`;
-}
-
-// Resolución de API base (orden: ?api → <meta api_base> → localStorage si coincide host → window.API_BASE → fallback same-origin)
-export function resolveApiBase() {
-  const q = getQuerySafe('api');
-  if (q) { const n = normalizeApiBase(q); try { localStorage.setItem(API_STORE_KEY, n); } catch {} return n; }
-
-  const meta = getMetaSafe('api_base');
-  if (meta) return normalizeApiBase(meta); // ← ahora el <meta> manda
-
-  // Si había un valor cacheado, solo úsalo si coincide de host con la página actual
-  const cached = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
-  try {
-    if (cached) {
-      const loc = new URL(window.location.href);
-      const api = new URL(cached, loc);
-      if (api.origin === loc.origin) return normalizeApiBase(api.toString()); // mismo host → ok
-    }
-  } catch {} // si falla el parseo, seguimos
-
-  const win = (typeof window !== 'undefined' && window.API_BASE) ? String(window.API_BASE) : '';
-  if (win) return normalizeApiBase(win);
-
-  // Fallback: misma origin + /api
-  try {
-    const loc = new URL(window.location.href);
-    return normalizeApiBase(new URL('/api', loc).toString());
-  } catch {
-    return '/api';
-  }
-}
-
-export let API_BASE = resolveApiBase();
-
 // UI: pinta estado del server en la badgita
 export function setServerStatus(ok, msg) {
   const el = document.getElementById('server-status');
@@ -85,12 +24,17 @@ export function setServerStatus(ok, msg) {
   el.classList.toggle('bad', !ok);
 }
 
-export async function probeHealth(base) {
-  const url = joinUrl(base, '/health');
+// Health check simplificado para el mismo dominio
+export async function probeHealth() {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
+    const r = await fetch('/api/health', { 
+      method: 'GET', 
+      headers: { 'Accept': 'application/json' }, 
+      credentials: 'include',
+      signal: ctrl.signal 
+    });
     const ct = r.headers.get('content-type') || '';
     const txt = await r.text();
     if (!r.ok) return { ok: false, reason: `HTTP ${r.status}`, text: txt };
