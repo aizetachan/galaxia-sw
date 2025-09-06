@@ -93,7 +93,7 @@ api.post('/auth/register', async (req, res) => {
     const payload = await login(username, pin);
     await ensureCharacter(username);
     console.log('[AUTH/register] success user=', username);
-    return res.json(payload);
+    return res.json({ ok: true, ...payload });
   } catch (e) {
     console.error('[AUTH/register] error', e);
     return res.status(400).json({ error: e.message || 'error' });
@@ -107,7 +107,7 @@ api.post('/auth/login', async (req, res) => {
     const r = await login(username, pin);
     await ensureCharacter(username);
     console.log('[AUTH/login] success user=', username);
-    return res.json(r);
+    return res.json({ ok: true, ...r });
   } catch (e) {
     console.error('[AUTH/login] error', e);
     return res.status(400).json({ error: e.message || 'error' });

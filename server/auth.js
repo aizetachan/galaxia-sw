@@ -171,12 +171,13 @@ async function ensureAdminUserOnce(){
 }
 router.use(async (_req, _res, next) => { await ensureAdminUserOnce(); next(); });
 
-// POST /auth/register { username, pin }
+// POST /auth/register { username, pin } → { ok:true, token, user }
 router.post('/register', async (req, res) => {
   try{
     const { username, pin } = req.body || {};
-    const user = await register(username, pin);
-    res.json({ ok:true, user });
+    await register(username, pin);
+    const data = await login(username, pin);
+    res.json({ ok:true, ...data });
   } catch(e){
     const msg = String(e?.message || 'ERROR');
     const map = { INVALID_CREDENTIALS: 400, USERNAME_TAKEN: 409 };
