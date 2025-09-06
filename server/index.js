@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
+import path from 'path';
 import { fileURLToPath } from 'url';
 
 import dmRouter from './dm.js';
@@ -20,6 +21,8 @@ import {
 import adminRouter from './routes/admin.js';
 import { getOpenAI } from './openai-client.js';
 import { sql, hasDb } from './db.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const api = express.Router();
@@ -167,8 +170,8 @@ api.post('/roll', async (req, res) => {
 app.use('/api', api);
 app.use('/api/v1', api);
 
-/* ====== Raíz ====== */
-app.get('/', (_req, res) => res.type('text/plain').send('OK'));
+/* ====== Static ====== */
+app.use(express.static(path.resolve(__dirname, '../dist')));
 
 /* ====== Prompt builder ====== */
 function buildSceneImagePrompt({ masterText = '', scene = {} }) {
@@ -300,6 +303,11 @@ api.get('/scene-image/status', requireAuth, async (req, res) => {
 app.use(['/api', '/api/v1'], (req, res) => {
   console.warn('[API 404]', req.method, req.originalUrl);
   return res.status(404).json({ error: 'not_found', path: req.originalUrl });
+});
+
+/* ====== Catch-all ====== */
+app.get('*', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, '../dist/index.html'));
 });
 
 /* ====== Error handler ====== */
