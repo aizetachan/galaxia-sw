@@ -48,40 +48,87 @@ async function dbGetSession(token){ if(!token) return null;
 async function dbDeleteSession(token){ if(!token) return; if(!hasDb){ mem.sessions.delete(token); return; } await sql(`DELETE FROM sessions WHERE token=$1`,[token]); }
 
 export async function register(usernameRaw,pinRaw){
+  console.log('[AUTH/register] attempt user=', usernameRaw);
   const username=normalizeUsername(usernameRaw); const pin=normalizePin(pinRaw);
-  if(!username||!pin) throw new Error('INVALID_CREDENTIALS');
-  const exists=await dbFindUserByUsername(username); if(exists) throw new Error('USERNAME_TAKEN');
-  const pin_hash=hashPinV2(pin); const user=await dbInsertUser(username,pin_hash);
-  return { id:user.id, username:user.username };
+  if(!username||!pin){
+    console.warn('[AUTH/register] invalid credentials user=', usernameRaw);
+    throw new Error('INVALID_CREDENTIALS');
+  }
+  try{
+    const exists=await dbFindUserByUsername(username);
+    if(exists){
+      console.warn('[AUTH/register] username taken:', username);
+      throw new Error('USERNAME_TAKEN');
+    }
+    const pin_hash=hashPinV2(pin); const user=await dbInsertUser(username,pin_hash);
+    console.log('[AUTH/register] success id=', user.id, 'username=', user.username);
+    return { id:user.id, username:user.username };
+  } catch(e){
+    console.error('[AUTH/register] failure', e);
+    throw e;
+  }
 }
 
 export async function login(usernameRaw,pinRaw){
+  console.log('[AUTH/login] attempt user=', usernameRaw);
   const username=normalizeUsername(usernameRaw); const pin=normalizePin(pinRaw);
-  if(!username||!pin) throw new Error('INVALID_CREDENTIALS');
-  const user=await dbFindUserByUsername(username); if(!user) throw new Error('USER_NOT_FOUND');
-  let ok=false; const stored=user.pin_hash||'';
-  if(stored.startsWith('v2:')) ok=verifyPinV2(pin,stored);
-  else { ok = stored===hashPinLegacy(username,pin); if(ok&&hasDb){ try{ await dbUpdateUserPinHash(user.id,hashPinV2(pin)); } catch{} } }
-  if(!ok) throw new Error('INVALID_PIN');
-  const session=await dbCreateSession(user.id);
-  return { token:session.token, user:{ id:user.id, username:user.username } };
+  if(!username||!pin){
+    console.warn('[AUTH/login] invalid credentials user=', usernameRaw);
+    throw new Error('INVALID_CREDENTIALS');
+  }
+  try{
+    const user=await dbFindUserByUsername(username);
+    if(!user){
+      console.warn('[AUTH/login] user not found:', username);
+      throw new Error('USER_NOT_FOUND');
+    }
+    let ok=false; const stored=user.pin_hash||'';
+    if(stored.startsWith('v2:')) ok=verifyPinV2(pin,stored);
+    else { ok = stored===hashPinLegacy(username,pin); if(ok&&hasDb){ try{ await dbUpdateUserPinHash(user.id,hashPinV2(pin)); } catch{} } }
+    if(!ok){
+      console.warn('[AUTH/login] invalid pin for user=', username);
+      throw new Error('INVALID_PIN');
+    }
+    const session=await dbCreateSession(user.id);
+    console.log('[AUTH/login] success uid=', user.id, 'token=', session.token.slice(0,8)+'...');
+    return { token:session.token, user:{ id:user.id, username:user.username } };
+  } catch(e){
+    console.error('[AUTH/login] failure', e);
+    throw e;
+  }
 }
 
 export async function requireAuth(req,res,next){
   const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
-  const token=m?m[1]:null; const s=await dbGetSession(token);
+  const token=m?m[1]:null;
+  console.log('[AUTH/requireAuth] token=', token?token.slice(0,8)+'...':'none');
+  const s=await dbGetSession(token);
   if(!s){
+    console.warn('[AUTH/requireAuth] unauthorized token=', token?token.slice(0,8)+'...':'none');
     const origin=req.headers.origin||'*';
     res.setHeader('Access-Control-Allow-Origin', origin==='null'?'*':origin);
     res.setHeader('Vary','Origin');
     return res.status(401).json({ error:'unauthorized' });
   }
-  req.auth={ userId:s.user_id, username:s.username, token }; next();
+  req.auth={ userId:s.user_id, username:s.username, token };
+  console.log('[AUTH/requireAuth] user=', s.username, 'id=', s.user_id);
+  next();
 }
 export async function optionalAuth(req,_res,next){
-  try{ const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
-    const token=m?m[1]:null; if(!token) return next(); const s=await dbGetSession(token);
-    if(s) req.auth={ userId:s.user_id, username:s.username, token }; } catch {}
+  try{
+    const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
+    const token=m?m[1]:null;
+    if(!token) return next();
+    const s=await dbGetSession(token);
+    if(s){
+      req.auth={ userId:s.user_id, username:s.username, token };
+      console.log('[AUTH/optionalAuth] user=', s.username, 'id=', s.user_id);
+    } else {
+      console.warn('[AUTH/optionalAuth] invalid token=', token.slice(0,8)+'...');
+    }
+  } catch(e){
+    console.error('[AUTH/optionalAuth] error', e);
+  }
   next();
 }
 export async function getSession(token){ return dbGetSession(token); }
