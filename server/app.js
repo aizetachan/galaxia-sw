@@ -102,13 +102,19 @@ export async function createApp() {
   /* ====== Auth Middleware ====== */
   // Middleware personalizado que lee tanto cookies como headers
   async function requireAuth(req, res, next) {
+    console.log('[AUTH/requireAuth] Request received');
+    console.log('[AUTH/requireAuth] Cookies:', req.cookies);
+    console.log('[AUTH/requireAuth] Headers:', req.headers);
+    
     // Intentar leer token de cookie primero, luego de header
     const cookieToken = req.cookies?.sid;
     const headerMatch = (req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
     const headerToken = headerMatch ? headerMatch[1] : null;
     
     const token = cookieToken || headerToken;
-    console.log('[AUTH/requireAuth] token=', token ? token.slice(0, 8) + '...' : 'none');
+    console.log('[AUTH/requireAuth] cookieToken:', cookieToken ? cookieToken.slice(0, 8) + '...' : 'none');
+    console.log('[AUTH/requireAuth] headerToken:', headerToken ? headerToken.slice(0, 8) + '...' : 'none');
+    console.log('[AUTH/requireAuth] final token:', token ? token.slice(0, 8) + '...' : 'none');
     
     if (!token) {
       console.warn('[AUTH/requireAuth] no token found');
@@ -116,13 +122,17 @@ export async function createApp() {
     }
     
     try {
+      console.log('[AUTH/requireAuth] Getting session for token...');
       const session = await getSession(token);
+      console.log('[AUTH/requireAuth] Session result:', session);
+      
       if (!session) {
         console.warn('[AUTH/requireAuth] invalid token');
         return res.status(401).json({ error: 'unauthorized' });
       }
       
       req.auth = { userId: session.user_id, username: session.username, token };
+      console.log('[AUTH/requireAuth] Auth set:', req.auth);
       console.log('[AUTH/requireAuth] user=', session.username, 'id=', session.user_id);
       next();
     } catch (e) {
@@ -133,14 +143,26 @@ export async function createApp() {
 
   /* ====== Auth ====== */
   api.post('/auth/register', async (req, res) => {
-    console.log('[AUTH/register] body=', req.body);
+    console.log('[AUTH/register] Request received');
+    console.log('[AUTH/register] Headers:', req.headers);
+    console.log('[AUTH/register] Body:', req.body);
     try {
       const { username, pin } = req.body || {};
+      console.log('[AUTH/register] Extracted username:', username, 'pin:', pin);
+      
+      console.log('[AUTH/register] Calling register function...');
       await register(username, pin);
+      console.log('[AUTH/register] Register successful, calling login...');
+      
       const payload = await login(username, pin);
+      console.log('[AUTH/register] Login successful, payload:', payload);
+      
+      console.log('[AUTH/register] Ensuring character...');
       await ensureCharacter(username);
+      console.log('[AUTH/register] Character ensured');
       
       // Configurar cookie HttpOnly para producción
+      console.log('[AUTH/register] Setting cookie...');
       res.cookie('sid', payload.token, {
         httpOnly: true,
         sameSite: 'lax',
@@ -148,23 +170,37 @@ export async function createApp() {
         path: '/',
         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 días
       });
+      console.log('[AUTH/register] Cookie set');
       
-      console.log('[AUTH/register] success user=', username);
-      return res.json({ ok: true, user: payload.user });
+      const response = { ok: true, user: payload.user };
+      console.log('[AUTH/register] Sending response:', response);
+      return res.json(response);
     } catch (e) {
-      console.error('[AUTH/register] error', e);
+      console.error('[AUTH/register] Error occurred:', e);
+      console.error('[AUTH/register] Error message:', e.message);
+      console.error('[AUTH/register] Error stack:', e.stack);
       return res.status(400).json({ error: e.message || 'error' });
     }
   });
 
   api.post('/auth/login', async (req, res) => {
-    console.log('[AUTH/login] body=', req.body);
+    console.log('[AUTH/login] Request received');
+    console.log('[AUTH/login] Headers:', req.headers);
+    console.log('[AUTH/login] Body:', req.body);
     try {
       const { username, pin } = req.body || {};
+      console.log('[AUTH/login] Extracted username:', username, 'pin:', pin);
+      
+      console.log('[AUTH/login] Calling login function...');
       const r = await login(username, pin);
+      console.log('[AUTH/login] Login successful, result:', r);
+      
+      console.log('[AUTH/login] Ensuring character...');
       await ensureCharacter(username);
+      console.log('[AUTH/login] Character ensured');
       
       // Configurar cookie HttpOnly para producción
+      console.log('[AUTH/login] Setting cookie...');
       res.cookie('sid', r.token, {
         httpOnly: true,
         sameSite: 'lax',
@@ -172,11 +208,15 @@ export async function createApp() {
         path: '/',
         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 días
       });
+      console.log('[AUTH/login] Cookie set');
       
-      console.log('[AUTH/login] success user=', username);
-      return res.json({ ok: true, user: r.user });
+      const response = { ok: true, user: r.user };
+      console.log('[AUTH/login] Sending response:', response);
+      return res.json(response);
     } catch (e) {
-      console.error('[AUTH/login] error', e);
+      console.error('[AUTH/login] Error occurred:', e);
+      console.error('[AUTH/login] Error message:', e.message);
+      console.error('[AUTH/login] Error stack:', e.stack);
       return res.status(400).json({ error: e.message || 'error' });
     }
   });

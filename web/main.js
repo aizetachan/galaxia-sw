@@ -434,15 +434,22 @@ async function doAuth(kind) {
 
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
+    console.log('[AUTH] Starting', kind, 'for user:', username);
+    console.log('[AUTH] Calling API:', url, { username, pin });
+    
     const response = await api(url, { username, pin });
+    console.log('[AUTH] API response:', response);
     
     // El backend devuelve { ok: true, user: {...} } y el token se envía como cookie
     if (response.ok && response.user) {
+      console.log('[AUTH] Success! User:', response.user);
       // Para compatibilidad, creamos un token dummy ya que usamos cookies
       const token = 'cookie-based-auth';
       setAuth({ token, user: response.user });
       localStorage.setItem('sw:auth', JSON.stringify({ token, user: response.user }));
+      console.log('[AUTH] Auth state set, user stored in localStorage');
     } else {
+      console.error('[AUTH] Invalid response:', response);
       throw new Error('Invalid response from server');
     }
 
@@ -497,6 +504,14 @@ async function doAuth(kind) {
     await startOnboardingOnce({ hard: true });
 
   } catch (e) {
+    console.error('[AUTH] Error in doAuth:', e);
+    console.error('[AUTH] Error details:', {
+      message: e.message,
+      data: e?.data,
+      response: e?.response,
+      stack: e.stack
+    });
+    
     dlog('doAuth error:', e?.data || e);
     let code = '';
     try { code = (e.data?.json?.error) || (await e.response?.json?.())?.error || ''; } catch {}
@@ -508,8 +523,11 @@ async function doAuth(kind) {
       unauthorized: 'No autorizado.',
       not_found: 'Recurso no encontrado.',
     };
-    if (authStatusEl) authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
+    const errorMessage = (code && (friendly[code] || code)) || 'Error de autenticación';
+    console.log('[AUTH] Setting error message:', errorMessage);
+    if (authStatusEl) authStatusEl.textContent = errorMessage;
   } finally {
+    console.log('[AUTH] Setting loading to false');
     setAuthLoading(false);
   }
 }

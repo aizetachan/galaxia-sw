@@ -22,6 +22,10 @@ export async function api(path, body) {
   if (AUTH?.token) headers.Authorization = `Bearer ${AUTH.token}`;
 
   const url = joinUrl(API_BASE, path);
+  console.log('[API] POST request to:', url);
+  console.log('[API] Request body:', body);
+  console.log('[API] Request headers:', headers);
+  
   dgroup('api POST ' + url, () => console.log({ body }));
 
   let res;
@@ -33,12 +37,15 @@ export async function api(path, body) {
       mode: 'cors',
       credentials: 'include',
     });
+    console.log('[API] Response status:', res.status, res.statusText);
+    console.log('[API] Response headers:', Object.fromEntries(res.headers.entries()));
   } catch (e) {
     console.error('[API] network error', e);
     throw new Error('Network error while calling API');
   }
 
   const data = await readMaybeJson(res);
+  console.log('[API] Response data:', data);
   dgroup('api POST result ' + url, () => console.log(data));
 
   if (!res.ok) {
@@ -46,11 +53,13 @@ export async function api(path, body) {
       (data && data.json && (data.json.error || data.json.message)) ||
       (data && data.text) ||
       `${res.status} ${res.statusText}`;
+    console.error('[API] Error response:', msg);
     const err = new Error(`HTTP ${res.status} ${res.statusText} – ${msg}`);
     err.response = res;
     err.data = data;
     throw err;
   }
+  console.log('[API] Success, returning:', data.json ?? {});
   return data.json ?? {};
 }
 
