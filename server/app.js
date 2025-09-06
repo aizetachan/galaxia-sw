@@ -24,7 +24,7 @@ import { sql, hasDb } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function createApp() {
+export function createApp() {
   const app = express();
   const api = express.Router();
 
@@ -44,25 +44,12 @@ export async function createApp() {
     next();
   });
 
-  // morgan opcional
-  let morganMW = null;
-  try {
-    const m = await import('morgan');
-    morganMW = m.default || m;
-    console.log('[BOOT] morgan loaded');
-  } catch (e) {
-    console.warn('[BOOT] morgan not available:', e?.message);
-  }
-  if (morganMW) app.use(morganMW('tiny'));
-
   /* ====== Parsing ====== */
   app.use(express.json({ limit: '1mb' }));
   
-  // Cookie parser para autenticación
-  let cookieParser = null;
+  // Cookie parser para autenticación - cargar de forma síncrona
   try {
-    const cp = await import('cookie-parser');
-    cookieParser = cp.default || cp;
+    const cookieParser = require('cookie-parser');
     app.use(cookieParser());
     console.log('[BOOT] cookie-parser loaded');
   } catch (e) {

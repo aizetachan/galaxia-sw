@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Exporta la app ya configurada, sin listen()
-const app = await createApp();
+const app = createApp();
 
 // Para desarrollo local standalone (opcional):
 if (process.env.NODE_ENV !== 'production' && process.argv.includes('--serve')) {
