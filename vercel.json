@@ -2,8 +2,5 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "trailingSlash": false,
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/server/api/[...all].js" }
-  ]
+  "trailingSlash": false
 }
