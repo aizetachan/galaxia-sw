@@ -135,6 +135,16 @@ galaxia-sw/
 3. Verifica que las rutas en `vercel.json` estén correctas
 4. Revisa la consola del navegador para errores de JavaScript
 
+### Error: "Failed to load module script: Expected a JavaScript module script but the server responded with a MIME type of 'text/html'"
+**Solución**:
+1. El problema es que las rutas en `vercel.json` están capturando los archivos estáticos
+2. Asegúrate de que `vercel.json` tenga la ruta para assets:
+   ```json
+   { "src": "/assets/(.*)", "dest": "/assets/$1" }
+   ```
+3. Verifica que el build genere los archivos en `dist/assets/`
+4. Las rutas deben estar en este orden: API → Assets → SPA fallback
+
 ### Error: "Function Runtimes must have a valid version"
 **Solución**: 
 1. El `vercel.json` está configurado correctamente con `@vercel/node`
