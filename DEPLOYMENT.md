@@ -151,6 +151,13 @@ galaxia-sw/
 2. Asegúrate de que `api/package.json` existe y tiene las dependencias necesarias
 3. Verifica que `serverless-http` esté instalado
 
+### Error: "SyntaxError: Unexpected reserved word"
+**Solución**:
+1. El problema es que se usa `await` en una función que no es `async`
+2. Asegúrate de que `createApp()` sea una función `async`
+3. Verifica que `server/index.js` use `await createApp()`
+4. Instala `cookie-parser` en el servidor: `npm install cookie-parser`
+
 ### Error 404 en rutas del SPA
 - Verifica que `vercel.json` tenga el rewrite a `/index.html`
 

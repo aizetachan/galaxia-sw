@@ -24,7 +24,7 @@ import { sql, hasDb } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp() {
+export async function createApp() {
   const app = express();
   const api = express.Router();
 
