@@ -19,8 +19,8 @@ Tu proyecto ya está configurado como un monorepo con:
 6. **Output Directory**: `dist`
 
 **Importante**: 
-- Configura estos valores manualmente en la interfaz de Vercel
-- El `vercel.json` también tiene la configuración, pero es mejor ser explícito en la UI
+- El `vercel.json` está configurado correctamente con `@vercel/static-build`
+- Configura estos valores manualmente en la interfaz de Vercel también
 - Asegúrate de que el meta tag en `web/index.html` tenga `content="/api"` (no URL absoluta)
 
 ### 2. Variables de Entorno
@@ -118,14 +118,15 @@ galaxia-sw/
 
 ## Troubleshooting
 
-### Error: "No Output Directory named 'public' found"
+### Error: "No Output Directory named 'dist' found"
 **Solución**: 
-1. En la configuración de Vercel, asegúrate de que:
+1. El `vercel.json` está configurado correctamente con `@vercel/static-build`
+2. En la configuración de Vercel, asegúrate de que:
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
-2. Verifica que el build funcione localmente: `npm run build`
-3. Asegúrate de que el directorio `dist/` se cree después del build
-4. El `vercel.json` debe tener `"outputDirectory": "dist"`
+3. Verifica que el build funcione localmente: `npm run build`
+4. Asegúrate de que el directorio `dist/` se cree después del build
+5. El `vercel.json` usa `@vercel/static-build` con `"distDir": "dist"`
 
 ### Error 404 en el frontend (pantalla en blanco)
 **Solución**:
