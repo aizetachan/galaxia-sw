@@ -41,23 +41,24 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Health (dos paths por si el rewrite conserva /api)
+// Health (soporta /health y /api/health)
 app.get(['/health', '/api/health'], (_req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
-// ==== Routers
+// ==== Routers válidos según tu árbol de archivos ====
 import authRouter from '../auth.js';
-import worldRouter from '../world/index.js';
-import chatRouter from '../chat.js';
-import rollRouter from '../roll.js';
-import dmRouter from '../dm.js';
+import worldRouter from '../world/index.js'; // existe
+import chatRouter from '../chat.js';         // existe
+import dmRouter from '../dm.js';             // existe
+// 🚫 eliminado: import rollRouter from '../roll.js'
 
+// Montaje
 app.use('/auth', authRouter);
 app.use('/world', worldRouter);
 app.use('/chat', chatRouter);
-app.use('/roll', rollRouter);
 app.use('/dm', dmRouter);
+// 🚫 eliminado: app.use('/roll', rollRouter);
 
 // 404 controlado (mantiene CORS)
 app.use((req, res) => {
