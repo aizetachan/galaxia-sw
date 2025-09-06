@@ -1,19 +1,9 @@
 {
-    "version": 2,
+    "version": 3,
     "trailingSlash": false,
     "rewrites": [
-      { "source": "/api/(.*)", "destination": "https://galaxia-sw.vercel.app/api/$1" },
+      { "source": "/api/(.*)", "destination": "/api/index.js" },
       { "source": "/health", "destination": "/api/index.js" }
-    ],
-    "headers": [
-      {
-        "source": "/api/(.*)",
-        "headers": [
-          { "key": "Access-Control-Allow-Origin", "value": "https://galaxia-sw.vercel.app" },
-          { "key": "Access-Control-Allow-Methods", "value": "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS" },
-          { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
-        ]
-      }
     ]
   }
   
