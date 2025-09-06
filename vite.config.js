@@ -7,4 +7,5 @@ export default defineConfig({
     emptyOutDir: true,
     // target: 'esnext', // <-- solo si algún día quieres permitir top-level await
   },
+  publicDir: 'assets', // Copiar assets estáticos
 });

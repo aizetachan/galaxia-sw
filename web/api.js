@@ -59,9 +59,9 @@ export async function probeHealth() {
   
   const ctrl = new AbortController();
   const timer = setTimeout(() => {
-    console.log('[probeHealth] Timeout reached (4s), aborting request');
+    console.log('[probeHealth] Timeout reached (10s), aborting request');
     ctrl.abort();
-  }, 4000);
+  }, 10000);
   
   try {
     console.log('[probeHealth] Making fetch request...');
