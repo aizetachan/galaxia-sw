@@ -15,10 +15,10 @@ Tu proyecto ya está configurado como un monorepo con:
 2. **Root Directory**: Deja vacío (raíz del repo)
 3. **Framework Preset**: "Other"
 4. **Install Command**: `npm install`
-5. **Build Command**: `npm run build` (o deja vacío, está en vercel.json)
-6. **Output Directory**: `dist` (o deja vacío, está en vercel.json)
+5. **Build Command**: `npm run build`
+6. **Output Directory**: `dist`
 
-**Nota**: El `vercel.json` ya contiene la configuración de build, así que puedes dejar estos campos vacíos en la interfaz de Vercel.
+**Importante**: Configura estos valores manualmente en la interfaz de Vercel, no dejes campos vacíos.
 
 ### 2. Variables de Entorno
 
@@ -116,10 +116,18 @@ galaxia-sw/
 ## Troubleshooting
 
 ### Error: "No Output Directory named 'public' found"
-**Solución**: El `vercel.json` ya está configurado con `"outputDirectory": "dist"`. Si ves este error:
-1. Verifica que el build funcione localmente: `npm run build`
-2. Asegúrate de que el directorio `dist/` se cree después del build
-3. En la configuración de Vercel, deja vacío el campo "Output Directory" (ya está en vercel.json)
+**Solución**: 
+1. En la configuración de Vercel, asegúrate de que:
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+2. Verifica que el build funcione localmente: `npm run build`
+3. Asegúrate de que el directorio `dist/` se cree después del build
+
+### Error: "Function Runtimes must have a valid version"
+**Solución**: 
+1. El `vercel.json` está configurado correctamente con `@vercel/node`
+2. Asegúrate de que `api/package.json` existe y tiene las dependencias necesarias
+3. Verifica que `serverless-http` esté instalado
 
 ### Error 404 en rutas del SPA
 - Verifica que `vercel.json` tenga el rewrite a `/index.html`
