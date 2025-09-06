@@ -53,7 +53,9 @@ const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes
  * ========================================================== */
 async function boot(){
   dlog('Boot start');
-  const health = await probeHealth(API_BASE);
+  console.log('[BOOT] Starting health check...');
+  const health = await probeHealth();
+  console.log('[BOOT] Health check result:', health);
   dlog('API_BASE =', API_BASE);
   setServerStatus(health.ok, health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL');
 

@@ -30,17 +30,27 @@ export async function api(path, body) {
 
   let res;
   try {
+    // Agregar timeout de 30 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
     res = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body ?? {}),
       mode: 'cors',
       credentials: 'include',
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
     console.log('[API] Response status:', res.status, res.statusText);
     console.log('[API] Response headers:', Object.fromEntries(res.headers.entries()));
   } catch (e) {
     console.error('[API] network error', e);
+    if (e.name === 'AbortError') {
+      throw new Error('Request timeout - server took too long to respond');
+    }
     throw new Error('Network error while calling API');
   }
 
@@ -72,14 +82,24 @@ export async function apiGet(path) {
 
   let res;
   try {
+    // Agregar timeout de 30 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
     res = await fetch(url, {
       method: 'GET',
       headers,
       mode: 'cors',
       credentials: 'include',
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
   } catch (e) {
     console.error('[API] network error', e);
+    if (e.name === 'AbortError') {
+      throw new Error('Request timeout - server took too long to respond');
+    }
     throw new Error('Network error while calling API');
   }
 
