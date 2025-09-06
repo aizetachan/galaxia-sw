@@ -27,7 +27,7 @@ const corsUniversal = (req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
 
-  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method === 'OPTIONS') return res.status(204).end();// preflight OK siempre
   next();
 };
 
@@ -54,11 +54,15 @@ import dmRouter from '../dm.js';             // existe
 // 🚫 eliminado: import rollRouter from '../roll.js'
 
 // Montaje
-app.use('/auth', authRouter);
-app.use('/world', worldRouter);
-app.use('/chat', chatRouter);
-app.use('/dm', dmRouter);
-// 🚫 eliminado: app.use('/roll', rollRouter);
+const bases = ['', '/api']; // '' -> sin prefijo, '/api' -> con prefijo
+for (const base of bases) {
+  app.use(`${base}/auth`, authRouter);
+  app.use(`${base}/world`, worldRouter);
+  app.use(`${base}/chat`, chatRouter);
+  app.use(`${base}/dm`, dmRouter);
+  // 🚫 eliminado: app.use('/roll', rollRouter);
+}
+
 
 // 404 controlado (mantiene CORS)
 app.use((req, res) => {
