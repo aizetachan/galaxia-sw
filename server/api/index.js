@@ -17,11 +17,9 @@ const ORIGINS = new Set([
 const corsUniversal = (req, res, next) => {
   const origin = req.headers.origin;
 
-  // Si no hay Origin (curl/cron), permitimos '*' para que no bloquee herramientas
   if (!origin) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   } else if (ORIGINS.has(origin)) {
-    // Reflejamos el origin permitido (necesario si usas credenciales/cookies)
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Vary', 'Origin');
@@ -37,7 +35,7 @@ const app = express();
 app.use(corsUniversal);
 app.use(express.json({ limit: '1mb' }));
 
-// Log rápido (útil en Vercel > Functions)
+// Log rápido
 app.use((req, _res, next) => {
   console.log('[API][IN]', req.method, req.url);
   next();

@@ -147,11 +147,29 @@ export function requireAdmin(req,res,next){
 /* ========= endpoints (Router) ========= */
 const router = Router();
 
-// Corto-circuito OPTIONS en /auth/* (el CORS global ya respondió, pero por si acaso)
+// Corto-circuito OPTIONS en /auth/* (por si llegara aquí)
 router.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+// Lazy init del admin: SIN top-level await
+let adminEnsured = false;
+async function ensureAdminUser(){
+  const exists=await dbFindUserByUsername(ADMIN_USER);
+  if(!exists){
+    const pin_hash=hashPinV2(ADMIN_PIN);
+    await dbInsertUser(ADMIN_USER,pin_hash);
+    console.log('[AUTH] admin user created:', ADMIN_USER);
+  }
+}
+async function ensureAdminUserOnce(){
+  if (adminEnsured) return;
+  adminEnsured = true;
+  try { await ensureAdminUser(); }
+  catch(e){ adminEnsured = false; console.error('[AUTH] ensureAdminUser error', e?.message || e); }
+}
+router.use(async (_req, _res, next) => { await ensureAdminUserOnce(); next(); });
 
 // POST /auth/register { username, pin }
 router.post('/register', async (req, res) => {
@@ -161,10 +179,7 @@ router.post('/register', async (req, res) => {
     res.json({ ok:true, user });
   } catch(e){
     const msg = String(e?.message || 'ERROR');
-    const map = {
-      INVALID_CREDENTIALS: 400,
-      USERNAME_TAKEN: 409
-    };
+    const map = { INVALID_CREDENTIALS: 400, USERNAME_TAKEN: 409 };
     res.status(map[msg] || 500).json({ ok:false, error: msg });
   }
 });
@@ -177,22 +192,18 @@ router.post('/login', async (req, res) => {
     res.json({ ok:true, ...data });
   } catch(e){
     const msg = String(e?.message || 'ERROR');
-    const map = {
-      INVALID_CREDENTIALS: 400,
-      USER_NOT_FOUND: 404,
-      INVALID_PIN: 401
-    };
+    const map = { INVALID_CREDENTIALS: 400, USER_NOT_FOUND: 404, INVALID_PIN: 401 };
     res.status(map[msg] || 500).json({ ok:false, error: msg });
   }
 });
 
-// GET /auth/session  (devuelve user si hay token válido)
+// GET /auth/session
 router.get('/session', optionalAuth, async (req, res) => {
   if (!req.auth) return res.status(401).json({ ok:false, error:'unauthorized' });
   res.json({ ok:true, user: { id: req.auth.userId, username: req.auth.username } });
 });
 
-// POST /auth/logout  (requiere Authorization: Bearer <token>)
+// POST /auth/logout
 router.post('/logout', requireAuth, async (req, res) => {
   try{
     await logout(req.auth.token);
@@ -202,21 +213,10 @@ router.post('/logout', requireAuth, async (req, res) => {
   }
 });
 
-/* ========= crear admin por defecto a primer uso ========= */
-async function ensureAdminUser(){
-  const exists=await dbFindUserByUsername(ADMIN_USER);
-  if(!exists){
-    const pin_hash=hashPinV2(ADMIN_PIN);
-    await dbInsertUser(ADMIN_USER,pin_hash);
-    console.log('[AUTH] admin user created:', ADMIN_USER);
-  }
-}
-await ensureAdminUser().catch(e=>console.error('[AUTH] ensureAdminUser error',e?.message||e));
-
 /* ========= export default ========= */
 export default router;
 
-/* ========= util admin ========= */
+/* ========= util admin extra ========= */
 export async function listUsers(){
   if(!hasDb){
     return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
