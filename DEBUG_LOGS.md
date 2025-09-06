@@ -1,122 +1,107 @@
-# Logs de Debug Agregados
+# Logs de Debugging Agregados
 
 ## Problema
 
-El registro y login se quedan en loading infinito, necesitamos logs detallados para diagnosticar el problema.
+Necesitamos entender por qué el frontend muestra "Server: FAIL" cuando el backend de Vercel no reporta problemas.
 
 ## Logs Agregados
 
-### Frontend (`web/main.js`)
+### 1. Health Check Detallado (`web/api.js` - `probeHealth`)
 
-**En la función `doAuth`**:
 ```javascript
-console.log('[AUTH] Starting', kind, 'for user:', username);
-console.log('[AUTH] Calling API:', url, { username, pin });
-console.log('[AUTH] API response:', response);
-console.log('[AUTH] Success! User:', response.user);
-console.log('[AUTH] Auth state set, user stored in localStorage');
-console.error('[AUTH] Error in doAuth:', e);
-console.error('[AUTH] Error details:', { message, data, response, stack });
-console.log('[AUTH] Setting error message:', errorMessage);
-console.log('[AUTH] Setting loading to false');
+console.log('[probeHealth] Starting health check...');
+console.log('[probeHealth] URL:', '/api/health');
+console.log('[probeHealth] Current location:', window.location.href);
+console.log('[probeHealth] User agent:', navigator.userAgent);
+console.log('[probeHealth] Making fetch request...');
+console.log('[probeHealth] Response received:');
+console.log('[probeHealth] Status:', r.status, r.statusText);
+console.log('[probeHealth] Headers:', Object.fromEntries(r.headers.entries()));
+console.log('[probeHealth] OK:', r.ok);
+console.log('[probeHealth] Content-Type:', ct);
+console.log('[probeHealth] Response text:', txt);
+console.log('[probeHealth] Parsed JSON:', j);
 ```
 
-### Frontend (`web/api-client.js`)
+### 2. Server Status Detallado (`web/api.js` - `setServerStatus`)
 
-**En la función `api`**:
 ```javascript
-console.log('[API] POST request to:', url);
-console.log('[API] Request body:', body);
-console.log('[API] Request headers:', headers);
-console.log('[API] Response status:', res.status, res.statusText);
-console.log('[API] Response headers:', Object.fromEntries(res.headers.entries()));
-console.log('[API] Response data:', data);
-console.error('[API] Error response:', msg);
-console.log('[API] Success, returning:', data.json ?? {});
+console.log('[setServerStatus] Called with:', { ok, msg });
+console.log('[setServerStatus] Element found:', !!el);
+console.log('[setServerStatus] DM mode:', mode);
+console.log('[setServerStatus] Setting label:', label);
+console.log('[setServerStatus] Setting classes - ok:', !!ok, 'bad:', !ok);
+console.log('[setServerStatus] Element classes after:', el.className);
+console.log('[setServerStatus] Element text after:', el.textContent);
 ```
 
-### Backend (`server/app.js`)
+### 3. Boot Process Detallado (`web/main.js` - `boot`)
 
-**En `/auth/register`**:
 ```javascript
-console.log('[AUTH/register] Request received');
-console.log('[AUTH/register] Headers:', req.headers);
-console.log('[AUTH/register] Body:', req.body);
-console.log('[AUTH/register] Extracted username:', username, 'pin:', pin);
-console.log('[AUTH/register] Calling register function...');
-console.log('[AUTH/register] Register successful, calling login...');
-console.log('[AUTH/register] Login successful, payload:', payload);
-console.log('[AUTH/register] Ensuring character...');
-console.log('[AUTH/register] Character ensured');
-console.log('[AUTH/register] Setting cookie...');
-console.log('[AUTH/register] Cookie set');
-console.log('[AUTH/register] Sending response:', response);
+console.log('[BOOT] ===== BOOT START =====');
+console.log('[BOOT] Current URL:', window.location.href);
+console.log('[BOOT] API_BASE:', API_BASE);
+console.log('[BOOT] Health check completed');
+console.log('[BOOT] Health check result:', health);
+console.log('[BOOT] Health check ok:', health.ok);
+console.log('[BOOT] Health check reason:', health.reason);
+console.log('[BOOT] Setting server status:', { ok: health.ok, message: statusMessage });
+console.log('[BOOT] Server status set, continuing with auth...');
 ```
 
-**En `/auth/login`**:
+### 4. Auth Process Detallado (`web/main.js` - `doAuth`)
+
 ```javascript
-console.log('[AUTH/login] Request received');
-console.log('[AUTH/login] Headers:', req.headers);
-console.log('[AUTH/login] Body:', req.body);
-console.log('[AUTH/login] Extracted username:', username, 'pin:', pin);
-console.log('[AUTH/login] Calling login function...');
-console.log('[AUTH/login] Login successful, result:', r);
-console.log('[AUTH/login] Ensuring character...');
-console.log('[AUTH/login] Character ensured');
-console.log('[AUTH/login] Setting cookie...');
-console.log('[AUTH/login] Cookie set');
-console.log('[AUTH/login] Sending response:', response);
+console.log('[AUTH] ===== doAuth START =====');
+console.log('[AUTH] Kind:', kind);
+console.log('[AUTH] UI.authLoading:', UI.authLoading);
+console.log('[AUTH] Username:', username);
+console.log('[AUTH] PIN:', pin);
+console.log('[AUTH] PIN regex test:', /^\d{4}$/.test(pin));
+console.log('[AUTH] Setting auth loading to true');
 ```
 
-**En `requireAuth` middleware**:
-```javascript
-console.log('[AUTH/requireAuth] Request received');
-console.log('[AUTH/requireAuth] Cookies:', req.cookies);
-console.log('[AUTH/requireAuth] Headers:', req.headers);
-console.log('[AUTH/requireAuth] cookieToken:', cookieToken ? '...' : 'none');
-console.log('[AUTH/requireAuth] headerToken:', headerToken ? '...' : 'none');
-console.log('[AUTH/requireAuth] final token:', token ? '...' : 'none');
-console.log('[AUTH/requireAuth] Getting session for token...');
-console.log('[AUTH/requireAuth] Session result:', session);
-console.log('[AUTH/requireAuth] Auth set:', req.auth);
-```
+## Información que Obtendremos
 
-## Cómo Usar los Logs
+Con estos logs podremos identificar:
 
-### En el Navegador (Frontend)
-1. Abrir DevTools (F12)
-2. Ir a la pestaña "Console"
-3. Intentar registrar/login
-4. Revisar los logs que empiezan con `[AUTH]` y `[API]`
+1. **Health Check**:
+   - Si la petición se hace correctamente
+   - Qué respuesta recibe del servidor
+   - Si hay errores de red, timeout, o parsing
+   - El contenido exacto de la respuesta
 
-### En Vercel (Backend)
-1. Ir al dashboard de Vercel
-2. Seleccionar el proyecto
-3. Ir a "Functions" → "View Function Logs"
-4. Revisar los logs que empiezan con `[AUTH/register]`, `[AUTH/login]`, `[AUTH/requireAuth]`
+2. **Server Status**:
+   - Si el elemento DOM existe
+   - Qué valores se están pasando
+   - Cómo se actualiza la UI
 
-## Qué Buscar
+3. **Boot Process**:
+   - El flujo completo de inicialización
+   - Dónde exactamente falla el health check
+   - Qué valores se están procesando
 
-### Si el problema está en el Frontend:
-- ¿Se ejecuta `[AUTH] Starting`?
-- ¿Se ejecuta `[API] POST request to`?
-- ¿Qué devuelve `[API] Response status`?
-- ¿Qué devuelve `[API] Response data`?
-
-### Si el problema está en el Backend:
-- ¿Se ejecuta `[AUTH/register] Request received`?
-- ¿Se ejecuta `[AUTH/register] Register successful`?
-- ¿Se ejecuta `[AUTH/register] Sending response`?
-- ¿Hay algún error en `[AUTH/register] Error occurred`?
-
-### Si el problema está en las Cookies:
-- ¿Se ejecuta `[AUTH/register] Cookie set`?
-- ¿En `[AUTH/requireAuth]` aparece el cookieToken?
+4. **Auth Process**:
+   - Si la validación de entrada funciona
+   - El estado de loading
+   - El flujo de autenticación
 
 ## Próximos Pasos
 
-1. Hacer commit y push de los cambios
-2. Redesplegar en Vercel
-3. Probar registro/login
-4. Revisar logs en navegador y Vercel
-5. Identificar dónde se detiene el flujo
+1. **Hacer commit y push**:
+   ```bash
+   git add .
+   git commit -m "Add detailed debugging logs for health check and auth"
+   git push
+   ```
+
+2. **Redesplegar en Vercel**
+
+3. **Abrir la consola del navegador** y revisar los logs detallados
+
+4. **Identificar el problema exacto** basado en los logs
+
+## Archivos Modificados
+
+- `web/api.js` - Logs detallados en `probeHealth` y `setServerStatus`
+- `web/main.js` - Logs detallados en `boot` y `doAuth`

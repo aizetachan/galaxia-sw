@@ -52,12 +52,26 @@ const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes
  *                          BOOT
  * ========================================================== */
 async function boot(){
+  console.log('[BOOT] ===== BOOT START =====');
   dlog('Boot start');
+  
   console.log('[BOOT] Starting health check...');
+  console.log('[BOOT] Current URL:', window.location.href);
+  console.log('[BOOT] API_BASE:', API_BASE);
+  
   const health = await probeHealth();
+  console.log('[BOOT] Health check completed');
   console.log('[BOOT] Health check result:', health);
+  console.log('[BOOT] Health check ok:', health.ok);
+  console.log('[BOOT] Health check reason:', health.reason);
+  
   dlog('API_BASE =', API_BASE);
-  setServerStatus(health.ok, health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL');
+  
+  const statusMessage = health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL';
+  console.log('[BOOT] Setting server status:', { ok: health.ok, message: statusMessage });
+  setServerStatus(health.ok, statusMessage);
+  
+  console.log('[BOOT] Server status set, continuing with auth...');
 
   try{
     const saved = JSON.parse(localStorage.getItem('sw:auth')||'null');
@@ -423,15 +437,29 @@ async function loadHistory({ force = false } = {}) {
 //                     Auth (robusto con 404)
 // ============================================================
 async function doAuth(kind) {
-  if (UI.authLoading) return;
+  console.log('[AUTH] ===== doAuth START =====');
+  console.log('[AUTH] Kind:', kind);
+  console.log('[AUTH] UI.authLoading:', UI.authLoading);
+  
+  if (UI.authLoading) {
+    console.log('[AUTH] Already loading, returning');
+    return;
+  }
+  
   const username = (authUserEl?.value || '').trim();
   const pin = (authPinEl?.value || '').trim();
+  console.log('[AUTH] Username:', username);
+  console.log('[AUTH] PIN:', pin);
+  console.log('[AUTH] PIN regex test:', /^\d{4}$/.test(pin));
+  
   if (!username || !/^\d{4}$/.test(pin)) {
+    console.log('[AUTH] Invalid input, setting error message');
     if (authStatusEl) authStatusEl.textContent = 'Usuario y PIN (4 dígitos)';
     return;
   }
 
   dlog('doAuth', { kind, username });
+  console.log('[AUTH] Setting auth loading to true');
   setAuthLoading(true, kind);
 
   try {
