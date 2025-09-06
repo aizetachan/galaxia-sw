@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PROMPT_DIRS = [
-  path.join(process.cwd(), 'server', 'prompts'),
-  path.join(process.cwd(), 'server', 'data', 'prompts'),
+  path.join(__dirname, 'prompts'),
+  path.join(__dirname, 'data', 'prompts'),
 ];
 
 const cache = {};
