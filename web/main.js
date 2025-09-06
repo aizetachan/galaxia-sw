@@ -522,4 +522,11 @@ async function doAuth(kind) {
   const orig=window.updateIdentityFromState; window.updateIdentityFromState=function(...args){ try{ return orig?.apply(this,args); } finally{ apply(); } };
   const card=document.getElementById('guest-card'); if(card && window.MutationObserver){ new MutationObserver(apply).observe(card,{attributes:true,attributeFilter:['hidden','class','style']}); }
 })();
-if ('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/service-worker.js').catch(e=>dlog('SW registration failed',e)); }); }
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    const swUrl = './service-worker.js';
+    navigator.serviceWorker
+      .register(swUrl)
+      .catch(e=>dlog('SW registration failed', e));
+  });
+}
