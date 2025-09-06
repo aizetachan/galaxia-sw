@@ -15,8 +15,10 @@ Tu proyecto ya está configurado como un monorepo con:
 2. **Root Directory**: Deja vacío (raíz del repo)
 3. **Framework Preset**: "Other"
 4. **Install Command**: `npm install`
-5. **Build Command**: `npm run build`
-6. **Output Directory**: `dist`
+5. **Build Command**: `npm run build` (o deja vacío, está en vercel.json)
+6. **Output Directory**: `dist` (o deja vacío, está en vercel.json)
+
+**Nota**: El `vercel.json` ya contiene la configuración de build, así que puedes dejar estos campos vacíos en la interfaz de Vercel.
 
 ### 2. Variables de Entorno
 
@@ -113,6 +115,12 @@ galaxia-sw/
 
 ## Troubleshooting
 
+### Error: "No Output Directory named 'public' found"
+**Solución**: El `vercel.json` ya está configurado con `"outputDirectory": "dist"`. Si ves este error:
+1. Verifica que el build funcione localmente: `npm run build`
+2. Asegúrate de que el directorio `dist/` se cree después del build
+3. En la configuración de Vercel, deja vacío el campo "Output Directory" (ya está en vercel.json)
+
 ### Error 404 en rutas del SPA
 - Verifica que `vercel.json` tenga el rewrite a `/index.html`
 
@@ -127,3 +135,4 @@ galaxia-sw/
 ### Build falla
 - Verifica que `npm run build` funcione localmente
 - Revisa que todas las dependencias estén en `package.json`
+- Si hay errores de importación, verifica que `API_BASE` y `joinUrl` estén exportados en `web/api.js`

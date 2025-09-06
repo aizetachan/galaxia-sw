@@ -11,6 +11,16 @@ export function dgroup(label, fn) {
   try { fn?.(); } finally { console.groupEnd(); }
 }
 
+// API base para compatibilidad
+export const API_BASE = '/api';
+
+// Helper para unir URLs
+export function joinUrl(base, path) {
+  const b = String(base || '').replace(/\/+$/, '');
+  const p = String(path || '').replace(/^\/+/, '');
+  return `${b}/${p}`;
+}
+
 // UI: pinta estado del server en la badgita
 export function setServerStatus(ok, msg) {
   const el = document.getElementById('server-status');
