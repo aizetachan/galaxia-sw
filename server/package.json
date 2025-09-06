@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "build": "node -e \"console.log('no build step')"
+    "build": "node -e \"console.log('no build step')\""
 
   },
   "dependencies": {
