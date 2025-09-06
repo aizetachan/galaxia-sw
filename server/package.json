@@ -6,7 +6,10 @@
     "node": ">=18"
   },
   "scripts": {
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "build": "node -e \"console.log('no build step')"
+
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.5",

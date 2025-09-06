@@ -90,12 +90,7 @@
       </section>
     </main>
 
-    <!-- Chequea el estado del servidor antes de cargar main.js -->
-    <script type="module">
-      import { API_BASE, probeHealth, setServerStatus } from './api.js';
-      const r = await probeHealth(API_BASE);
-      setServerStatus(r.ok);
-    </script>
+    
 
     <!-- App principal -->
     <script type="module" src="./main.js"></script>

@@ -2,5 +2,10 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "trailingSlash": false
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/[...all].js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "routes": [{ "src": "/(.*)", "dest": "/api/[...all].js" }]
+  
 }

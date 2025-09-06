@@ -5,9 +5,6 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
-    target: 'esnext'
+    // target: 'esnext', // <-- solo si algún día quieres permitir top-level await
   },
-  define: {
-    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development')
-  }
 });
