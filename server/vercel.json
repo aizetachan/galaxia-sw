@@ -1,5 +1,5 @@
 {
-    "version": 3,
+    "version": 2,
     "trailingSlash": false,
     "rewrites": [
       { "source": "/api/(.*)", "destination": "/api/index.js" },
