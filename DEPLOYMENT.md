@@ -158,6 +158,13 @@ galaxia-sw/
 3. Verifica que `server/index.js` use `await createApp()`
 4. Instala `cookie-parser` en el servidor: `npm install cookie-parser`
 
+### Loading infinito en registro/login
+**Solución**:
+1. El problema es que el frontend espera `{ token, user }` pero el backend devuelve `{ ok: true, user: {...} }`
+2. El token se envía como cookie HttpOnly, no en la respuesta JSON
+3. Corregir la función `doAuth` en `web/main.js` para manejar la respuesta correctamente
+4. Usar `response.user` en lugar de `user` en el código
+
 ### Error 404 en rutas del SPA
 - Verifica que `vercel.json` tenga el rewrite a `/index.html`
 

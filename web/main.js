@@ -434,11 +434,19 @@ async function doAuth(kind) {
 
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
-    const { token, user } = (await api(url, { username, pin }));
-    setAuth({ token, user });
-    localStorage.setItem('sw:auth', JSON.stringify({ token, user }));
+    const response = await api(url, { username, pin });
+    
+    // El backend devuelve { ok: true, user: {...} } y el token se envía como cookie
+    if (response.ok && response.user) {
+      // Para compatibilidad, creamos un token dummy ya que usamos cookies
+      const token = 'cookie-based-auth';
+      setAuth({ token, user: response.user });
+      localStorage.setItem('sw:auth', JSON.stringify({ token, user: response.user }));
+    } else {
+      throw new Error('Invalid response from server');
+    }
 
-    migrateGuestToUser(user.id);
+    migrateGuestToUser(response.user.id);
 
     // Cargamos estado local "limpio"
     setMsgs(load(KEY_MSGS, []));
@@ -467,8 +475,8 @@ async function doAuth(kind) {
       await loadHistory({ force: true });
       await showResumeIfAny();
 
-      if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
-      setIdentityBar(user.username, character?.name || '');
+      if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
+      setIdentityBar(response.user.username, character?.name || '');
       updateAuthUI();
       render();
       return; // listo para seguir jugando
@@ -480,8 +488,8 @@ async function doAuth(kind) {
     setStep('name');
     setPendingConfirm(null);
 
-    if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
-    setIdentityBar(user.username, '');
+    if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
+    setIdentityBar(response.user.username, '');
     updateAuthUI();
     render();
 
