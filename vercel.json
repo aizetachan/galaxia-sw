@@ -1,14 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/health.js": {
-      "runtime": "@vercel/node"
-    },
-    "api/auth/route.js": {
-      "runtime": "@vercel/node"
-    },
-    "api/[...all].js": {
-      "runtime": "@vercel/node"
-    }
-  }
+  "version": 2
 }
