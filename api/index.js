@@ -1,9 +1,9 @@
 // Adaptador Vercel para Express - Versión mínima
-import serverless from 'serverless-http';
+const serverless = require('serverless-http');
 
 // Crear una app Express mínima para evitar timeouts
-import express from 'express';
-import cookieParser from 'cookie-parser';
+const express = require('express');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
@@ -128,4 +128,4 @@ app.use('*', (req, res) => {
   res.status(404).json({ ok: false, error: 'Route not found' });
 });
 
-export default serverless(app);
+module.exports = serverless(app);

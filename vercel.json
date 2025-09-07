@@ -9,12 +9,17 @@
       }
     },
     {
-      "src": "api/**/*.js",
+      "src": "api/health.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/auth.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/api/health", "dest": "/api/health.js" },
+    { "src": "/api/auth/(.*)", "dest": "/api/auth.js" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
