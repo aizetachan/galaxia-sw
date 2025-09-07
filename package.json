@@ -2,20 +2,12 @@
   "name": "galaxia-sw",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "packageManager": "npm@10",
-  "workspaces": ["server", "web"],
   "scripts": {
-    "dev": "concurrently \"npm run dev:web\" \"npm run dev:server\"",
-    "dev:web": "vite",
-    "dev:server": "npm run dev --prefix server",
+    "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "test": "node tests/test-runner.js",
-    "test:deployment": "node test-deployment.js"
+    "preview": "vite preview"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
     "vite": "^5.0.0"
   }
 }
