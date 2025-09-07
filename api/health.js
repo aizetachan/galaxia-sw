@@ -1,15 +1,11 @@
-// Función serverless mínima para diagnosticar problemas
-export default async function handler(event, context) {
+// Función serverless ultra-simple para health check
+export default function handler() {
   return {
     statusCode: 200,
     headers: {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': '*'
     },
-    body: JSON.stringify({
-      ok: true,
-      timestamp: Date.now(),
-      message: 'Health OK'
-    })
+    body: '{"ok":true,"message":"Health OK"}'
   };
 }

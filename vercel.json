@@ -7,24 +7,9 @@
       "config": {
         "distDir": "dist"
       }
-    },
-    {
-      "src": "health.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "auth.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "[...all].js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
-    { "src": "/api/health", "dest": "/health.js" },
-    { "src": "/api/auth/(.*)", "dest": "/auth.js" },
-    { "src": "/api/(.*)", "dest": "/[...all].js" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
