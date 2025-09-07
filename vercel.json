@@ -7,6 +7,18 @@
       "config": {
         "distDir": "dist"
       }
+    },
+    {
+      "src": "api/health.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/auth/route.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/[...all].js",
+      "use": "@vercel/node"
     }
   ]
 }
