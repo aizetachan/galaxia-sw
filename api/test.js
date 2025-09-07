@@ -1,8 +1,4 @@
-// Función de prueba simple
+// Función ultra-simple
 module.exports = (req, res) => {
-  res.status(200).json({
-    ok: true,
-    message: 'API funcionando correctamente',
-    timestamp: Date.now()
-  });
+  res.status(200).send('OK');
 };
