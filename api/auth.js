@@ -1,5 +1,5 @@
 // Función serverless independiente para auth
-exports.handler = async (event, context) => {
+export default async function handler(event, context) {
   console.log('[AUTH] Function invoked');
   console.log('[AUTH] Event:', JSON.stringify(event, null, 2));
   
@@ -131,4 +131,4 @@ exports.handler = async (event, context) => {
       })
     };
   }
-};
+}

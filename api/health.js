@@ -1,5 +1,5 @@
 // Función serverless independiente para health check
-exports.handler = async (event, context) => {
+export default async function handler(event, context) {
   console.log('[HEALTH] Function invoked');
   console.log('[HEALTH] Event:', JSON.stringify(event, null, 2));
   
@@ -37,4 +37,4 @@ exports.handler = async (event, context) => {
       })
     };
   }
-};
+}
