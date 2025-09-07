@@ -1,7 +1,16 @@
 // Función serverless independiente para health check
 export default async function handler(event, context) {
   console.log('[HEALTH] Function invoked');
-  console.log('[HEALTH] Event:', JSON.stringify(event, null, 2));
+
+  // Safe logging to avoid circular reference errors
+  const safeEvent = {
+    httpMethod: event.httpMethod,
+    path: event.path,
+    headers: event.headers,
+    queryStringParameters: event.queryStringParameters,
+    body: event.body
+  };
+  console.log('[HEALTH] Event:', JSON.stringify(safeEvent, null, 2));
   
   try {
     const response = {

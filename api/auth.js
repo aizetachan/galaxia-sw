@@ -1,7 +1,16 @@
 // Función serverless independiente para auth
 export default async function handler(event, context) {
   console.log('[AUTH] Function invoked');
-  console.log('[AUTH] Event:', JSON.stringify(event, null, 2));
+
+  // Safe logging to avoid circular reference errors
+  const safeEvent = {
+    httpMethod: event.httpMethod,
+    path: event.path,
+    headers: event.headers,
+    queryStringParameters: event.queryStringParameters,
+    body: event.body
+  };
+  console.log('[AUTH] Event:', JSON.stringify(safeEvent, null, 2));
   
   try {
     const { httpMethod, path, body } = event;
