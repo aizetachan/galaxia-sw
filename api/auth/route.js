@@ -1,5 +1,5 @@
-// Función serverless independiente para auth
-export default async function handler(event, context) {
+// Función serverless CommonJS para auth
+function handler(event, context) {
   console.log('[AUTH] Function invoked');
 
   // Safe logging to avoid circular reference errors
@@ -141,3 +141,5 @@ export default async function handler(event, context) {
     };
   }
 }
+
+module.exports = handler;

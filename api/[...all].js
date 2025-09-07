@@ -1,5 +1,5 @@
-// Función serverless catch-all usando formato AWS Lambda
-export default async function handler(event, context) {
+// Función serverless catch-all usando CommonJS
+function handler(event, context) {
   console.log('[CATCH-ALL] Request received:', event.httpMethod, event.path);
 
   return {
@@ -19,3 +19,5 @@ export default async function handler(event, context) {
     })
   };
 }
+
+module.exports = handler;
