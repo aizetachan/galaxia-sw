@@ -1,31 +1,21 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+  "functions": {
+    "health.js": {
+      "runtime": "nodejs18.x"
     },
-    {
-      "src": "health.js",
-      "use": "@vercel/node"
+    "auth.js": {
+      "runtime": "nodejs18.x"
     },
-    {
-      "src": "auth.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "[...all].js",
-      "use": "@vercel/node"
+    "[...all].js": {
+      "runtime": "nodejs18.x"
     }
-  ],
+  },
   "routes": [
     { "src": "/api/health", "dest": "/health.js" },
     { "src": "/api/auth/(.*)", "dest": "/auth.js" },
     { "src": "/api/(.*)", "dest": "/[...all].js" },
-    { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
-  ]
+  ],
+  "outputDirectory": "dist"
 }
