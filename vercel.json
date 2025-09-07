@@ -1,8 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "api/**/*.js": {
-      "runtime": "nodejs18.x"
+    "api/health.js": {
+      "runtime": "@vercel/node"
+    },
+    "api/auth/route.js": {
+      "runtime": "@vercel/node"
+    },
+    "api/[...all].js": {
+      "runtime": "@vercel/node"
     }
   }
 }
