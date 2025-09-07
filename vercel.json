@@ -1,18 +1,3 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    }
-  ],
-  "routes": [
-    { "src": "/api/health", "dest": "/api/health.js" },
-    { "src": "/api/auth/(.*)", "dest": "/api/auth/route.js" },
-    { "src": "/api/(.*)", "dest": "/api/[...all].js" },
-    { "src": "/(.*)", "dest": "/index.html" }
-  ]
+  "version": 2
 }
