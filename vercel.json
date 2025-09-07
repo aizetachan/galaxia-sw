@@ -9,22 +9,22 @@
       }
     },
     {
-      "src": "api/health.js",
+      "src": "health.js",
       "use": "@vercel/node"
     },
     {
-      "src": "api/auth.js",
+      "src": "auth.js",
       "use": "@vercel/node"
     },
     {
-      "src": "api/[...all].js",
+      "src": "[...all].js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
-    { "src": "/api/health", "dest": "/api/health.js" },
-    { "src": "/api/auth/(.*)", "dest": "/api/auth.js" },
-    { "src": "/api/(.*)", "dest": "/api/[...all].js" },
+    { "src": "/api/health", "dest": "/health.js" },
+    { "src": "/api/auth/(.*)", "dest": "/auth.js" },
+    { "src": "/api/(.*)", "dest": "/[...all].js" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
