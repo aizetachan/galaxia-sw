@@ -1,21 +1,21 @@
-// Función serverless catch-all para rutas API no manejadas por funciones específicas
-export default function handler(request, context) {
-  console.log('[CATCH-ALL] Request received:', request.method, request.url);
+// Función serverless catch-all usando formato AWS Lambda
+export default async function handler(event, context) {
+  console.log('[CATCH-ALL] Request received:', event.httpMethod, event.path);
 
-  return new Response(
-    JSON.stringify({
+  return {
+    statusCode: 404,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+    },
+    body: JSON.stringify({
       ok: false,
       error: 'Endpoint not found',
-      message: 'Esta ruta API no está implementada aún'
-    }),
-    {
-      status: 404,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
-      }
-    }
-  );
+      message: 'Esta ruta API no está implementada aún',
+      path: event.path,
+      method: event.httpMethod
+    })
+  };
 }
