@@ -9,15 +9,10 @@
       }
     }
   ],
-  "functions": {
-    "api/health.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/auth/route.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/[...all].js": {
-      "runtime": "nodejs18.x"
-    }
-  }
+  "routes": [
+    { "src": "/api/health", "dest": "/api/health.js" },
+    { "src": "/api/auth/(.*)", "dest": "/api/auth/route.js" },
+    { "src": "/api/(.*)", "dest": "/api/[...all].js" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 }
