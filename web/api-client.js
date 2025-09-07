@@ -29,11 +29,17 @@ export async function api(path, body) {
   dgroup('api POST ' + url, () => console.log({ body }));
 
   let res;
+  let controller;
+  let timeoutId;
+
   try {
     // Agregar timeout de 30 segundos
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
+    controller = new AbortController();
+    timeoutId = setTimeout(() => {
+      console.log('[API] Timeout reached (30s), aborting request');
+      controller.abort('timeout');
+    }, 30000);
+
     res = await fetch(url, {
       method: 'POST',
       headers,
@@ -42,16 +48,22 @@ export async function api(path, body) {
       credentials: 'include',
       signal: controller.signal,
     });
-    
-    clearTimeout(timeoutId);
+
     console.log('[API] Response status:', res.status, res.statusText);
     console.log('[API] Response headers:', Object.fromEntries(res.headers.entries()));
   } catch (e) {
     console.error('[API] network error', e);
     if (e.name === 'AbortError') {
-      throw new Error('Request timeout - server took too long to respond');
+      const reason = e.message || 'timeout';
+      console.log('[API] Request was aborted:', reason);
+      throw new Error(`Request ${reason} - server took too long to respond`);
     }
     throw new Error('Network error while calling API');
+  } finally {
+    // Limpiar timeout de manera segura
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 
   const data = await readMaybeJson(res);
@@ -81,11 +93,17 @@ export async function apiGet(path) {
   dgroup('api GET ' + url, () => console.log({}));
 
   let res;
+  let controller;
+  let timeoutId;
+
   try {
     // Agregar timeout de 30 segundos
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    
+    controller = new AbortController();
+    timeoutId = setTimeout(() => {
+      console.log('[API] Timeout reached (30s), aborting GET request');
+      controller.abort('timeout');
+    }, 30000);
+
     res = await fetch(url, {
       method: 'GET',
       headers,
@@ -93,14 +111,20 @@ export async function apiGet(path) {
       credentials: 'include',
       signal: controller.signal,
     });
-    
-    clearTimeout(timeoutId);
+
   } catch (e) {
     console.error('[API] network error', e);
     if (e.name === 'AbortError') {
-      throw new Error('Request timeout - server took too long to respond');
+      const reason = e.message || 'timeout';
+      console.log('[API] GET request was aborted:', reason);
+      throw new Error(`GET request ${reason} - server took too long to respond`);
     }
     throw new Error('Network error while calling API');
+  } finally {
+    // Limpiar timeout de manera segura
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 
   const data = await readMaybeJson(res);

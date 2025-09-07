@@ -56,52 +56,55 @@ export async function probeHealth() {
   console.log('[probeHealth] URL:', '/api/health');
   console.log('[probeHealth] Current location:', window.location.href);
   console.log('[probeHealth] User agent:', navigator.userAgent);
-  
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => {
-    console.log('[probeHealth] Timeout reached (10s), aborting request');
-    ctrl.abort();
-  }, 10000);
-  
+
+  let ctrl;
+  let timer;
+
   try {
+    ctrl = new AbortController();
+    timer = setTimeout(() => {
+      console.log('[probeHealth] Timeout reached (15s), aborting request');
+      ctrl.abort('timeout');
+    }, 15000);
+
     console.log('[probeHealth] Making fetch request...');
-    const r = await fetch('/api/health', { 
-      method: 'GET', 
-      headers: { 'Accept': 'application/json' }, 
+    const r = await fetch('/api/health', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
       credentials: 'include',
-      signal: ctrl.signal 
+      signal: ctrl.signal
     });
-    
+
     console.log('[probeHealth] Response received:');
     console.log('[probeHealth] Status:', r.status, r.statusText);
     console.log('[probeHealth] Headers:', Object.fromEntries(r.headers.entries()));
     console.log('[probeHealth] OK:', r.ok);
-    
+
     const ct = r.headers.get('content-type') || '';
     console.log('[probeHealth] Content-Type:', ct);
-    
+
     const txt = await r.text();
     console.log('[probeHealth] Response text:', txt);
-    
+
     if (!r.ok) {
       console.log('[probeHealth] HTTP error:', r.status);
       return { ok: false, reason: `HTTP ${r.status}`, text: txt };
     }
-    
+
     if (!ct.includes('application/json')) {
       console.log('[probeHealth] Not JSON response');
       return { ok: false, reason: 'not-json', text: txt };
     }
-    
+
     try {
       const j = JSON.parse(txt);
       console.log('[probeHealth] Parsed JSON:', j);
-      
+
       if (j && (j.ok === true || 'ts' in j)) {
         console.log('[probeHealth] Health check successful');
         return { ok: true, json: j };
       }
-      
+
       console.log('[probeHealth] JSON response invalid (no ok=true or ts)');
       return { ok: false, reason: 'json-no-ok', json: j };
     } catch (parseError) {
@@ -114,12 +117,23 @@ export async function probeHealth() {
     console.error('[probeHealth] Error message:', e.message);
     console.error('[probeHealth] Error name:', e.name);
     console.error('[probeHealth] Full error:', e);
-    
-    const reason = e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error');
+
+    // Mejor manejo de errores de abort
+    if (e?.name === 'AbortError') {
+      const reason = e.message || 'timeout';
+      console.log('[probeHealth] Request was aborted:', reason);
+      return { ok: false, reason: reason };
+    }
+
+    const reason = e?.message || 'network-error';
     console.log('[probeHealth] Returning error result:', { ok: false, reason });
     return { ok: false, reason };
-  } finally { 
-    clearTimeout(timer);
+  } finally {
+    // Limpiar timeout de manera segura
+    if (timer) {
+      clearTimeout(timer);
+      console.log('[probeHealth] Timeout cleared');
+    }
     console.log('[probeHealth] Health check completed');
   }
 }
