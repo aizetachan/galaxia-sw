@@ -75,9 +75,15 @@ async function boot(){
 
   try{
     const saved = JSON.parse(localStorage.getItem('sw:auth')||'null');
+    console.log('[BOOT] Saved auth data:', saved);
     if (saved?.token && saved?.user?.id){
+      console.log('[BOOT] Setting auth from localStorage:', saved.user.username);
       setAuth(saved);
-      await apiGet('/auth/me').catch(e => { if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e; });
+      console.log('[BOOT] AUTH after setAuth:', AUTH);
+      await apiGet('/auth/me').catch(e => {
+        console.error('[BOOT] /auth/me failed:', e);
+        if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e;
+      });
       setMsgs(load(KEY_MSGS, []));
       setCharacter(load(KEY_CHAR, null));
       setStep(load(KEY_STEP, 'name'));

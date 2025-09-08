@@ -304,15 +304,199 @@ export default function handler(request, response) {
     return;
   }
 
-  // DM/Master endpoints
-  if (request.method === 'POST' && (path === '/api/dm/respond' || path === '/dm/respond')) {
-    console.log('[DM] Respond endpoint called');
+  // Chat history endpoint
+  if (request.method === 'GET' && path === '/api/chat/history') {
+    console.log('[CHAT] History endpoint called');
+
+    // Verificar token
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Simular historial vacío (en producción vendría de BD)
+    response.statusCode = 200;
+    response.end(JSON.stringify({
+      ok: true,
+      messages: [],
+      message: 'Chat history loaded'
+    }));
+    return;
+  }
+
+  // DM resume endpoint
+  if (request.method === 'GET' && path === '/api/dm/resume') {
+    console.log('[DM] Resume endpoint called');
+
+    // Verificar token
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Simular respuesta de resumen
+    response.statusCode = 200;
+    response.end(JSON.stringify({
+      ok: true,
+      text: 'Resumen no disponible (modo demo)',
+      character: null
+    }));
+    return;
+  }
+
+  // Auth logout endpoint
+  if (request.method === 'POST' && path === '/api/auth/logout') {
+    console.log('[AUTH] Logout endpoint called');
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Methods', 'POST');
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
     response.statusCode = 200;
-    response.end('{"ok":true,"text":"¡Hola! Soy el Máster de la Galaxia. ¿Estás listo para tu aventura?","stage":"name"}');
+    response.end(JSON.stringify({
+      ok: true,
+      message: 'Sesión cerrada exitosamente'
+    }));
+    return;
+  }
+
+  // World characters POST endpoint
+  if (request.method === 'POST' && path === '/api/world/characters') {
+    console.log('[WORLD] Save character endpoint called');
+
+    // Verificar token
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Methods', 'POST');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Extraer datos del body
+    let body = '';
+    request.on('data', chunk => {
+      body += chunk.toString();
+    });
+
+    request.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        console.log('[WORLD] Character data:', data);
+
+        // Simular guardado exitoso
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          character: {
+            id: Date.now(),
+            name: data.name || data.character?.name,
+            species: data.species || data.character?.species,
+            role: data.role || data.character?.role,
+            publicProfile: data.publicProfile || data.character?.publicProfile || true,
+            lastLocation: data.lastLocation || data.character?.lastLocation,
+            userId: 12345
+          },
+          message: 'Personaje guardado exitosamente'
+        }));
+      } catch (parseError) {
+        console.error('[WORLD] JSON parse error:', parseError);
+        response.statusCode = 400;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'INVALID_JSON',
+          message: 'JSON inválido'
+        }));
+      }
+    });
+    return;
+  }
+
+  // DM/Master endpoints
+  if (request.method === 'POST' && (path === '/api/dm/respond' || path === '/dm/respond')) {
+    console.log('[DM] Respond endpoint called');
+
+    // Verificar token
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Methods', 'POST');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Extraer datos del body
+    let body = '';
+    request.on('data', chunk => {
+      body += chunk.toString();
+    });
+
+    request.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        console.log('[DM] DM request data:', data);
+
+        // Simular respuesta del DM
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          text: "¡Hola! Soy el Máster de la Galaxia. ¿Estás listo para tu aventura?",
+          stage: "name"
+        }));
+      } catch (parseError) {
+        console.error('[DM] JSON parse error:', parseError);
+        response.statusCode = 400;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'INVALID_JSON',
+          message: 'JSON inválido'
+        }));
+      }
+    });
     return;
   }
 

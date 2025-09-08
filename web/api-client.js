@@ -87,9 +87,15 @@ export async function api(path, body) {
 
 export async function apiGet(path) {
   const headers = { 'Accept': 'application/json' };
-  if (AUTH?.token) headers.Authorization = `Bearer ${AUTH.token}`;
+  if (AUTH?.token) {
+    headers.Authorization = `Bearer ${AUTH.token}`;
+    console.log('[API-GET] Adding token to headers for:', path);
+  } else {
+    console.log('[API-GET] No token found in AUTH for:', path, 'AUTH:', AUTH);
+  }
 
   const url = joinUrl(API_BASE, path);
+  console.log('[API-GET] Making request to:', url, 'with headers:', headers);
   dgroup('api GET ' + url, () => console.log({}));
 
   let res;
