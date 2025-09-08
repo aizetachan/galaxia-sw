@@ -1,48 +1,15 @@
-// Autenticación con base de datos Neon
+// Autenticación temporal sin base de datos (para testing)
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
 
 const router = express.Router();
 
-// Configuración de la base de datos
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+// Almacenamiento temporal en memoria (para testing)
+const users = new Map();
+const sessions = new Map();
 
-// Función para crear tablas si no existen
-async function initDatabase() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        pin_hash VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS sessions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        token VARCHAR(255) UNIQUE NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-      CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-    `);
-    console.log('[DB] Tables initialized successfully');
-  } catch (error) {
-    console.error('[DB] Error initializing tables:', error);
-  }
-}
-
-// Inicializar base de datos al cargar el módulo
-initDatabase();
+console.log('[AUTH] Using in-memory storage for testing (no database configured)');
 
 // Función para generar JWT
 function generateToken(user) {
@@ -102,8 +69,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Verificar si el usuario ya existe
-    const existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
-    if (existingUser.rows.length > 0) {
+    if (users.has(username)) {
       return res.status(409).json({ ok: false, error: 'Username already exists' });
     }
 
@@ -111,22 +77,28 @@ router.post('/register', async (req, res) => {
     const pinHash = await bcrypt.hash(pin, 10);
 
     // Crear usuario
-    const result = await pool.query(
-      'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id, username',
-      [username, pinHash]
-    );
+    const userId = Date.now(); // ID simple para testing
+    const user = {
+      id: userId,
+      username,
+      pinHash,
+      createdAt: new Date()
+    };
 
-    const user = result.rows[0];
+    users.set(username, user);
 
     // Generar token
     const token = generateToken(user);
 
     // Crear sesión
+    const sessionId = Date.now().toString();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 días
-    await pool.query(
-      'INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, token, expiresAt]
-    );
+    sessions.set(sessionId, {
+      id: sessionId,
+      userId: user.id,
+      token,
+      expiresAt
+    });
 
     // Configurar cookie HttpOnly
     res.cookie('sid', token, {
@@ -136,6 +108,7 @@ router.post('/register', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
     });
 
+    console.log(`[AUTH] User registered: ${username}`);
     res.json({
       ok: true,
       user: { id: user.id, username: user.username },
@@ -158,15 +131,13 @@ router.post('/login', async (req, res) => {
     }
 
     // Buscar usuario
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-    if (result.rows.length === 0) {
+    const user = users.get(username);
+    if (!user) {
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
 
-    const user = result.rows[0];
-
     // Verificar PIN
-    const isValidPin = await bcrypt.compare(pin, user.pin_hash);
+    const isValidPin = await bcrypt.compare(pin, user.pinHash);
     if (!isValidPin) {
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
@@ -175,11 +146,14 @@ router.post('/login', async (req, res) => {
     const token = generateToken(user);
 
     // Crear sesión
+    const sessionId = Date.now().toString();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await pool.query(
-      'INSERT INTO sessions (user_id, token, expires_at) VALUES ($1, $2, $3)',
-      [user.id, token, expiresAt]
-    );
+    sessions.set(sessionId, {
+      id: sessionId,
+      userId: user.id,
+      token,
+      expiresAt
+    });
 
     // Configurar cookie HttpOnly
     res.cookie('sid', token, {
@@ -189,6 +163,7 @@ router.post('/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
+    console.log(`[AUTH] User logged in: ${username}`);
     res.json({
       ok: true,
       user: { id: user.id, username: user.username },
@@ -204,12 +179,19 @@ router.post('/login', async (req, res) => {
 // POST /auth/logout
 router.post('/logout', requireAuth, async (req, res) => {
   try {
-    // Eliminar sesión
-    await pool.query('DELETE FROM sessions WHERE token = $1', [req.cookies.sid]);
+    // Eliminar sesión (en memoria)
+    const token = req.cookies.sid;
+    for (const [sessionId, session] of sessions) {
+      if (session.token === token) {
+        sessions.delete(sessionId);
+        break;
+      }
+    }
 
     // Limpiar cookie
     res.clearCookie('sid');
 
+    console.log('[AUTH] User logged out');
     res.json({ ok: true, message: 'Logged out successfully' });
   } catch (error) {
     console.error('[AUTH] Logout error:', error);
@@ -220,15 +202,22 @@ router.post('/logout', requireAuth, async (req, res) => {
 // GET /auth/me
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username FROM users WHERE id = $1', [req.user.userId]);
+    // Buscar usuario por ID
+    let user = null;
+    for (const [username, userData] of users) {
+      if (userData.id === req.user.userId) {
+        user = userData;
+        break;
+      }
+    }
 
-    if (result.rows.length === 0) {
+    if (!user) {
       return res.status(404).json({ ok: false, error: 'User not found' });
     }
 
     res.json({
       ok: true,
-      user: result.rows[0]
+      user: { id: user.id, username: user.username }
     });
   } catch (error) {
     console.error('[AUTH] Me error:', error);
