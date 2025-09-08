@@ -80,10 +80,17 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
       console.log('[ONBOARDING] CLIENT_HELLO successful, enabling chat mode');
       setStep('done'); // Esto hace que el placeholder cambie a "Habla con el Máster…"
 
-      // Importar y llamar render para actualizar la UI
-      import('./main.js').then(module => {
-        if (module.render) module.render();
-      }).catch(e => console.error('[ONBOARDING] Failed to update UI:', e));
+      // Llamar render para actualizar la UI
+      try {
+        // Intentar acceder a render desde el contexto global
+        if (window.render) {
+          window.render();
+        } else {
+          console.warn('[ONBOARDING] render function not available globally');
+        }
+      } catch (e) {
+        console.error('[ONBOARDING] Failed to call render:', e);
+      }
 
     } else {
       showConnectionErrorBanner('Respuesta vacía del Máster');

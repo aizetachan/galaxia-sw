@@ -86,8 +86,10 @@ body::before{
 
 /* -------- 3) LAYOUT PRINCIPAL -------- */
 .chat-wrap{
+  width: 100%; /* Asegurar ancho completo */
   max-width:920px; margin:0 auto; padding:0 20px;
   display:flex; flex-direction:column; min-height:0; flex:1 1 auto; overflow:hidden;
+  box-sizing: border-box; /* Incluir padding en el ancho total */
 }
 
 /* Un único estilo para el contenedor de conversación y el de settings */

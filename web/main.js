@@ -696,3 +696,6 @@ if ('serviceWorker' in navigator){
       .catch(e=>dlog('SW registration failed', e));
   });
 }
+
+// Exportar render globalmente para que pueda ser llamado desde otros módulos
+window.render = render;
