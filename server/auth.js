@@ -1,6 +1,5 @@
 // Autenticación temporal sin base de datos (para testing)
 const express = require('express');
-const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const router = express.Router();
@@ -73,15 +72,12 @@ router.post('/register', async (req, res) => {
       return res.status(409).json({ ok: false, error: 'Username already exists' });
     }
 
-    // Hash del PIN
-    const pinHash = await bcrypt.hash(pin, 10);
-
-    // Crear usuario
+    // Crear usuario (PIN en texto plano para testing)
     const userId = Date.now(); // ID simple para testing
     const user = {
       id: userId,
       username,
-      pinHash,
+      pin,
       createdAt: new Date()
     };
 
@@ -136,9 +132,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
 
-    // Verificar PIN
-    const isValidPin = await bcrypt.compare(pin, user.pinHash);
-    if (!isValidPin) {
+    // Verificar PIN (comparación simple para testing)
+    if (pin !== user.pin) {
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
 
