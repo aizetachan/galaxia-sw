@@ -1,9 +1,9 @@
-// Función health con respuesta JSON
-module.exports = () => ({
-  statusCode: 200,
-  headers: {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*'
-  },
-  body: JSON.stringify({ ok: true, message: 'Health OK' })
-});
+// Función health mínima
+const handler = () => {
+  return {
+    statusCode: 200,
+    body: '{"ok":true}'
+  };
+};
+
+module.exports = handler;
