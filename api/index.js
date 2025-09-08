@@ -1,9 +1,20 @@
 // Función serverless básica sin dependencias pesadas
 exports.handler = async (event, context) => {
   console.log('[BASIC] Handler called with method:', event.httpMethod, 'path:', event.path);
+  console.log('[BASIC] Raw path:', event.rawPath || 'not available');
+  console.log('[BASIC] RequestContext:', JSON.stringify(event.requestContext || {}));
+
+  // Normalizar la ruta para manejar diferentes formatos de Vercel
+  let path = event.path;
+  if (event.rawPath) {
+    path = event.rawPath;
+  }
+
+  console.log('[BASIC] Normalized path:', path);
 
   // Health check
-  if (event.httpMethod === 'GET' && event.path === '/api/health') {
+  if (event.httpMethod === 'GET' && (path === '/api/health' || path === '/health')) {
+    console.log('[HEALTH] Health check called');
     return {
       statusCode: 200,
       headers: {
@@ -15,14 +26,15 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         ok: true,
         message: 'API working',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        path: path
       })
     };
   }
 
   // Register endpoint (simplified)
-  if (event.httpMethod === 'POST' && event.path === '/api/auth/register') {
-    console.log('[AUTH] Register called');
+  if (event.httpMethod === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
+    console.log('[AUTH] Register called for path:', path);
     return {
       statusCode: 200,
       headers: {
@@ -40,8 +52,8 @@ exports.handler = async (event, context) => {
   }
 
   // Login endpoint (simplified)
-  if (event.httpMethod === 'POST' && event.path === '/api/auth/login') {
-    console.log('[AUTH] Login called');
+  if (event.httpMethod === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
+    console.log('[AUTH] Login called for path:', path);
     return {
       statusCode: 200,
       headers: {
