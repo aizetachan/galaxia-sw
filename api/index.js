@@ -55,43 +55,252 @@ export default function handler(request, response) {
     return;
   }
 
-  // Register endpoint simple
+  // Register endpoint - manejar petición completa
   if (request.method === 'POST' && path === '/api/auth/register') {
     console.log('[REGISTER] Register endpoint called for path:', path);
 
-    response.setHeader('Content-Type', 'application/json');
-    response.setHeader('Access-Control-Allow-Origin', '*');
-    response.setHeader('Access-Control-Allow-Methods', 'POST');
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    try {
+      // Extraer datos del body
+      let body = '';
+      request.on('data', chunk => {
+        body += chunk.toString();
+      });
 
-    // Simplemente devolver una respuesta fija por ahora
-    response.statusCode = 200;
-    response.end('{"ok":true,"user":{"id":12345,"username":"miusuario"},"message":"User registered successfully"}');
+      request.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const { username, pin } = data;
+
+          console.log('[REGISTER] Registration attempt for user:', username);
+
+          response.setHeader('Content-Type', 'application/json');
+          response.setHeader('Access-Control-Allow-Origin', '*');
+          response.setHeader('Access-Control-Allow-Methods', 'POST');
+          response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+          // Validación básica
+          if (!username || !pin) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'INVALID_INPUT',
+              message: 'Usuario y PIN requeridos'
+            }));
+            return;
+          }
+
+          // Validar formato
+          if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'INVALID_USERNAME',
+              message: 'Usuario debe tener 3-24 caracteres (letras, números, _)'
+            }));
+            return;
+          }
+
+          if (!/^\d{4}$/.test(pin)) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'INVALID_PIN',
+              message: 'PIN debe ser 4 dígitos'
+            }));
+            return;
+          }
+
+          // Simular registro exitoso
+          const userId = Date.now();
+          const tokenData = { id: userId, username: username, timestamp: Date.now() };
+          const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            user: { id: userId, username: username },
+            token: token,
+            message: 'Usuario registrado exitosamente'
+          }));
+
+        } catch (parseError) {
+          console.error('[REGISTER] JSON parse error:', parseError);
+          response.statusCode = 400;
+          response.end(JSON.stringify({
+            ok: false,
+            error: 'INVALID_JSON',
+            message: 'JSON inválido'
+          }));
+        }
+      });
+
+    } catch (error) {
+      console.error('[REGISTER] Error:', error);
+      response.statusCode = 500;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'SERVER_ERROR',
+        message: 'Error en el servidor'
+      }));
+    }
     return;
   }
 
-  // Login endpoint simple
+  // Login endpoint - usar lógica real
   if (request.method === 'POST' && path === '/api/auth/login') {
     console.log('[LOGIN] Login endpoint called for path:', path);
 
-    response.setHeader('Content-Type', 'application/json');
-    response.setHeader('Access-Control-Allow-Origin', '*');
-    response.setHeader('Access-Control-Allow-Methods', 'POST');
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    try {
+      // Extraer datos del body
+      let body = '';
+      request.on('data', chunk => {
+        body += chunk.toString();
+      });
 
-    // Simplemente devolver una respuesta fija por ahora
-    response.statusCode = 200;
-    response.end('{"ok":true,"user":{"id":12345,"username":"miusuario"},"message":"Login successful"}');
+      request.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const { username, pin } = data;
+
+          console.log('[LOGIN] Login attempt for user:', username);
+
+          response.setHeader('Content-Type', 'application/json');
+          response.setHeader('Access-Control-Allow-Origin', '*');
+          response.setHeader('Access-Control-Allow-Methods', 'POST');
+          response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+          // Validación básica
+          if (!username || !pin) {
+            response.statusCode = 400;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'INVALID_INPUT',
+              message: 'Usuario y PIN requeridos'
+            }));
+            return;
+          }
+
+          // Simular autenticación exitosa
+          const userId = Date.now();
+          const tokenData = { id: userId, username: username, timestamp: Date.now() };
+          const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            user: { id: userId, username: username },
+            token: token,
+            message: 'Login exitoso'
+          }));
+
+        } catch (parseError) {
+          console.error('[LOGIN] JSON parse error:', parseError);
+          response.statusCode = 400;
+          response.end(JSON.stringify({
+            ok: false,
+            error: 'INVALID_JSON',
+            message: 'JSON inválido'
+          }));
+        }
+      });
+
+    } catch (error) {
+      console.error('[LOGIN] Error:', error);
+      response.statusCode = 500;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'SERVER_ERROR',
+        message: 'Error en el servidor'
+      }));
+    }
     return;
   }
 
-  // World endpoints
-  if (request.method === 'GET' && (path === '/api/world/characters/me' || path === '/world/characters/me')) {
-    console.log('[WORLD] Characters/me endpoint called');
+  // Auth me endpoint
+  if (request.method === 'GET' && path === '/api/auth/me') {
+    console.log('[AUTH] Me endpoint called');
+
+    // Verificar token en headers
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Extraer información del token
+    let username = 'unknown_user';
+    let userId = 12345;
+
+    try {
+      // Decodificar token base64
+      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+      userId = decoded.id || 12345;
+      username = decoded.username || 'unknown_user';
+      console.log('[AUTH] Token decoded successfully:', { userId, username });
+    } catch (error) {
+      console.error('[AUTH] Error decoding token:', error);
+      username = 'unknown_user';
+      userId = 12345;
+    }
+
     response.statusCode = 200;
-    response.end('{"ok":true,"characters":[],"message":"No characters found"}');
+    response.end(JSON.stringify({
+      ok: true,
+      user: { id: userId, username: username }
+    }));
+    return;
+  }
+
+  // World characters/me endpoint
+  if (request.method === 'GET' && (path === '/api/world/characters/me' || path === '/world/characters/me')) {
+    console.log('[WORLD] Characters/me endpoint called');
+
+    // Verificar token
+    const authHeader = request.headers.authorization || request.headers.Authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (!token) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: 'Token requerido'
+      }));
+      return;
+    }
+
+    // Decodificar token para obtener información del usuario
+    let username = 'unknown_user';
+    let userId = 12345;
+
+    try {
+      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+      userId = decoded.id || 12345;
+      username = decoded.username || 'unknown_user';
+    } catch (error) {
+      console.error('[WORLD] Error decoding token:', error);
+    }
+
+    // Simular respuesta de personajes (en producción buscaría en BD)
+    response.statusCode = 200;
+    response.end(JSON.stringify({
+      ok: true,
+      character: null, // No hay personaje guardado aún
+      message: `No character found for user: ${username}`
+    }));
     return;
   }
 

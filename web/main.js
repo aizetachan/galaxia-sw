@@ -497,12 +497,30 @@ async function doAuth(kind) {
     // El backend devuelve { ok: true, user: {...}, token: '...' }
     if (response.ok && response.user) {
       console.log('[AUTH] Success! User:', response.user);
-      // Usar el token JWT real del backend, o crear uno dummy si no viene
-      const token = response.token || 'cookie-based-auth';
-      setAuth({ token, user: response.user });
-      localStorage.setItem('sw:auth', JSON.stringify({ token, user: response.user }));
-      console.log('[AUTH] Auth state set, user stored in localStorage');
       console.log('[AUTH] Token received:', !!response.token);
+
+      // Usar el token real del backend
+      const token = response.token || 'dummy-token';
+      const userData = { token, user: response.user };
+
+      // Intentar decodificar el token para obtener información adicional
+      if (response.token) {
+        try {
+          const decoded = JSON.parse(atob(response.token));
+          console.log('[AUTH] Token decoded:', decoded);
+          // Actualizar user con información del token si es necesario
+          if (decoded.username && decoded.username !== response.user.username) {
+            userData.user.username = decoded.username;
+            console.log('[AUTH] Updated username from token:', decoded.username);
+          }
+        } catch (error) {
+          console.log('[AUTH] Could not decode token:', error.message);
+        }
+      }
+
+      setAuth(userData);
+      localStorage.setItem('sw:auth', JSON.stringify(userData));
+      console.log('[AUTH] Auth state set, user stored in localStorage');
     } else {
       console.error('[AUTH] Invalid response:', response);
       throw new Error('Invalid response from server');
