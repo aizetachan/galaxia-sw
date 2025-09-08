@@ -1,2 +1,4 @@
-// Función health ultra-mínima
-module.exports = () => ({ statusCode: 200, body: 'OK' });
+// Función health con formato Express
+module.exports = (req, res) => {
+  res.status(200).json({ ok: true });
+};

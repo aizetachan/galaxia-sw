@@ -1,2 +1,4 @@
-// Función test ultra-simple
-module.exports = () => ({ statusCode: 200, body: 'TEST' });
+// Función test con formato Express
+module.exports = (req, res) => {
+  res.status(200).send('TEST');
+};

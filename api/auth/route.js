@@ -1,23 +1,23 @@
-// Función auth mínima
-const handler = (event) => {
-  if (event.path && event.path.includes('/register')) {
-    return {
-      statusCode: 200,
-      body: '{"ok":true,"user":{"id":"1","username":"test"}}'
-    };
+// Función auth con formato Express
+module.exports = (req, res) => {
+  const path = req.url;
+
+  if (path.includes('/register')) {
+    return res.status(200).json({
+      ok: true,
+      user: { id: '1', username: 'testuser' }
+    });
   }
 
-  if (event.path && event.path.includes('/login')) {
-    return {
-      statusCode: 200,
-      body: '{"ok":true,"user":{"id":"1","username":"test"}}'
-    };
+  if (path.includes('/login')) {
+    return res.status(200).json({
+      ok: true,
+      user: { id: '1', username: 'testuser' }
+    });
   }
 
-  return {
-    statusCode: 404,
-    body: '{"ok":false,"error":"Not found"}'
-  };
+  return res.status(404).json({
+    ok: false,
+    error: 'Not found'
+  });
 };
-
-module.exports = handler;
