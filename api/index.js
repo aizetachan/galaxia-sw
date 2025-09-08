@@ -109,11 +109,27 @@ export default function handler(request, response) {
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.statusCode = 200;
+
+    // Verificar estado de la base de datos
+    let dbStatus = 'not_configured';
+    if (process.env.DATABASE_URL) {
+      if (pool) {
+        dbStatus = 'connected';
+      } else {
+        dbStatus = 'configured_but_not_connected';
+      }
+    }
+
     response.end(JSON.stringify({
       ok: true,
       message: 'API working',
       timestamp: Date.now(),
-      database: !!process.env.DATABASE_URL
+      database: {
+        configured: !!process.env.DATABASE_URL,
+        status: dbStatus,
+        url: process.env.DATABASE_URL ? '[CONFIGURED]' : '[NOT_SET]'
+      },
+      environment: process.env.NODE_ENV || 'development'
     }));
     return;
   }
