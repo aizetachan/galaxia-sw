@@ -56,8 +56,8 @@ export default function handler(request, response) {
   }
 
   // Register endpoint simple
-  if (request.method === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
-    console.log('[REGISTER] Register endpoint called');
+  if (request.method === 'POST' && path === '/api/auth/register') {
+    console.log('[REGISTER] Register endpoint called for path:', path);
 
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
@@ -71,8 +71,8 @@ export default function handler(request, response) {
   }
 
   // Login endpoint simple
-  if (request.method === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
-    console.log('[LOGIN] Login endpoint called');
+  if (request.method === 'POST' && path === '/api/auth/login') {
+    console.log('[LOGIN] Login endpoint called for path:', path);
 
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
