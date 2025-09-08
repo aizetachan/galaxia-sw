@@ -1,9 +1,23 @@
 {
   "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "functions": {
-    "api/**/*.js": {
+    "api/index.js": {
+      "runtime": "nodejs18.x",
+      "maxDuration": 10
+    },
+    "api/auth/route.js": {
+      "runtime": "nodejs18.x",
+      "maxDuration": 5
+    },
+    "api/health.js": {
       "runtime": "nodejs18.x",
       "maxDuration": 5
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
