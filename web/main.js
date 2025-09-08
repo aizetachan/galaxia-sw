@@ -542,14 +542,19 @@ async function doAuth(kind) {
 
     try {
       // Verificar si el usuario ya tiene un personaje guardado
+      console.log('[AUTH] Calling /world/characters/me...');
       const meResponse = await apiGet('/world/characters/me');
+      console.log('[AUTH] /world/characters/me response:', meResponse);
       if (meResponse?.character) {
         userCharacter = meResponse.character;
         userStep = 'done'; // Usuario ya completó onboarding
         console.log('[AUTH] Found existing character:', userCharacter);
+      } else {
+        console.log('[AUTH] No character found in response');
       }
     } catch (error) {
-      console.log('[AUTH] No existing character found, will start onboarding');
+      console.log('[AUTH] Error loading character:', error);
+      console.error('[AUTH] Character loading error details:', error);
     }
 
     // Cargar mensajes del usuario o usar mensajes limpios
@@ -558,7 +563,9 @@ async function doAuth(kind) {
       // Si no hay mensajes pero tiene personaje, cargar historial
       if (userMsgs.length === 0) {
         try {
+          console.log('[AUTH] Loading chat history for user with character...');
           const historyResponse = await apiGet('/chat/history');
+          console.log('[AUTH] Chat history response:', historyResponse);
           if (historyResponse?.messages) {
             const mappedMsgs = historyResponse.messages.map((m) => ({
               user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
@@ -568,10 +575,15 @@ async function doAuth(kind) {
             }));
             userMsgs = mappedMsgs;
             console.log('[AUTH] Loaded chat history:', userMsgs.length, 'messages');
+          } else {
+            console.log('[AUTH] No messages in chat history response');
           }
         } catch (error) {
           console.log('[AUTH] Could not load chat history:', error);
+          console.error('[AUTH] Chat history error details:', error);
         }
+      } else {
+        console.log('[AUTH] User has local messages, skipping history load');
       }
     } else {
       userMsgs = load(KEY_MSGS, []);
