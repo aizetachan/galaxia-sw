@@ -48,7 +48,50 @@ export default function handler(request, response) {
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.statusCode = 200;
-    response.end('{"ok":true,"message":"API working","timestamp":' + Date.now() + '}');
+    response.end(JSON.stringify({
+      ok: true,
+      message: 'API working',
+      timestamp: Date.now(),
+      database: !!process.env.DATABASE_URL
+    }));
+    return;
+  }
+
+  // Database test endpoint
+  if (request.method === 'GET' && path === '/api/test-db') {
+    console.log('[TEST-DB] Database connection test called');
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+
+    try {
+      if (!process.env.DATABASE_URL) {
+        response.statusCode = 500;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'DATABASE_URL not configured',
+          message: 'Please configure DATABASE_URL in Vercel environment variables'
+        }));
+        return;
+      }
+
+      // Probar conexión a la base de datos
+      await pool.query('SELECT 1');
+      response.statusCode = 200;
+      response.end(JSON.stringify({
+        ok: true,
+        message: 'Database connection successful',
+        database_url: !!process.env.DATABASE_URL
+      }));
+
+    } catch (error) {
+      console.error('[TEST-DB] Database error:', error);
+      response.statusCode = 500;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'Database connection failed',
+        message: error.message
+      }));
+    }
     return;
   }
 
