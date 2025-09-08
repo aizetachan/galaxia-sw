@@ -8,6 +8,16 @@ export default defineConfig({
     // target: 'esnext', // <-- solo si algún día quieres permitir top-level await
   },
   publicDir: 'assets', // Copiar assets estáticos
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      }
+    }
+  },
   define: {
     global: 'globalThis',
     'process.env': {},
