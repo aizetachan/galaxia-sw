@@ -1,4 +1,4 @@
-// Configuración simple de base de datos
+// Configuración de base de datos completa
 let pool = null;
 const demoUsers = new Map();
 
@@ -10,11 +10,90 @@ if (process.env.DATABASE_URL) {
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     });
     console.log('[DB] Database configured');
+
+    // Inicializar tablas automáticamente
+    initDatabase().catch(error => {
+      console.error('[DB] Failed to initialize database:', error);
+    });
   } catch (error) {
     console.error('[DB] Database setup error:', error.message);
   }
 } else {
   console.log('[DB] No DATABASE_URL - using demo mode');
+}
+
+// Función para inicializar la base de datos
+async function initDatabase() {
+  if (!pool) return;
+
+  try {
+    console.log('[DB] Initializing database tables...');
+
+    // Crear tabla de usuarios
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        pin_hash VARCHAR(64) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Crear tabla de personajes
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS characters (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        species VARCHAR(50),
+        role VARCHAR(50),
+        public_profile BOOLEAN DEFAULT true,
+        last_location TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id)
+      )
+    `);
+
+    // Crear tabla de mensajes del chat
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+        role VARCHAR(20) NOT NULL,
+        text TEXT NOT NULL,
+        ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log('[DB] Database tables initialized successfully');
+  } catch (error) {
+    console.error('[DB] Database initialization error:', error);
+  }
+}
+
+// Función para verificar token JWT
+function authenticateToken(token) {
+  try {
+    const jwt = require('jsonwebtoken');
+    return jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
+  } catch (error) {
+    console.error('[AUTH] Token verification error:', error);
+    return null;
+  }
+}
+
+// Función para hashear PIN
+function hashPin(pin) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha256').update(pin).digest('hex');
+}
+
+// Función para verificar PIN
+function verifyPin(pin, hash) {
+  return hashPin(pin) === hash;
 }
 
 export default function handler(request, response) {
@@ -110,17 +189,72 @@ export default function handler(request, response) {
             return;
           }
 
-          // Simular registro exitoso
-          const userId = Date.now();
-          const tokenData = { id: userId, username: username, timestamp: Date.now() };
-          const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-          response.statusCode = 200;
-          response.end(JSON.stringify({
-            ok: true,
-            user: { id: userId, username: username },
-            token: token,
-            message: 'Usuario registrado exitosamente'
-          }));
+          // Intentar registrar en base de datos
+          if (pool) {
+            try {
+              console.log('[REGISTER] Attempting database registration for:', username);
+
+              // Verificar si usuario ya existe
+              const existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+              if (existingUser.rows.length > 0) {
+                response.statusCode = 409;
+                response.end(JSON.stringify({
+                  ok: false,
+                  error: 'USER_EXISTS',
+                  message: 'Usuario ya existe'
+                }));
+                return;
+              }
+
+              // Crear nuevo usuario
+              const pinHash = hashPin(pin);
+              const result = await pool.query(
+                'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id',
+                [username, pinHash]
+              );
+
+              const userId = result.rows[0].id;
+              console.log('[REGISTER] User created with ID:', userId);
+
+              // Generar token JWT
+              const jwt = require('jsonwebtoken');
+              const token = jwt.sign(
+                { id: userId, username: username },
+                process.env.JWT_SECRET || 'your-jwt-secret-change-this',
+                { expiresIn: '7d' }
+              );
+
+              response.statusCode = 200;
+              response.end(JSON.stringify({
+                ok: true,
+                user: { id: userId, username: username },
+                token: token,
+                message: 'Usuario registrado exitosamente'
+              }));
+
+            } catch (dbError) {
+              console.error('[REGISTER] Database error:', dbError);
+              response.statusCode = 500;
+              response.end(JSON.stringify({
+                ok: false,
+                error: 'DATABASE_ERROR',
+                message: 'Error interno del servidor'
+              }));
+            }
+          } else {
+            // Fallback a modo demo
+            console.log('[REGISTER] Using demo mode');
+            const userId = Date.now();
+            const tokenData = { id: userId, username: username, timestamp: Date.now() };
+            const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+            response.statusCode = 200;
+            response.end(JSON.stringify({
+              ok: true,
+              user: { id: userId, username: username },
+              token: token,
+              message: 'Usuario registrado exitosamente (demo mode)'
+            }));
+          }
 
         } catch (parseError) {
           console.error('[REGISTER] JSON parse error:', parseError);
@@ -179,17 +313,78 @@ export default function handler(request, response) {
             return;
           }
 
-          // Simular autenticación exitosa
-          const userId = Date.now();
-          const tokenData = { id: userId, username: username, timestamp: Date.now() };
-          const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-          response.statusCode = 200;
-          response.end(JSON.stringify({
-            ok: true,
-            user: { id: userId, username: username },
-            token: token,
-            message: 'Login exitoso'
-          }));
+          // Intentar autenticar con base de datos
+          if (pool) {
+            try {
+              console.log('[LOGIN] Attempting database authentication for:', username);
+
+              // Buscar usuario en base de datos
+              const result = await pool.query('SELECT id, username, pin_hash FROM users WHERE username = $1', [username]);
+
+              if (result.rows.length === 0) {
+                response.statusCode = 401;
+                response.end(JSON.stringify({
+                  ok: false,
+                  error: 'INVALID_CREDENTIALS',
+                  message: 'Usuario o PIN incorrectos'
+                }));
+                return;
+              }
+
+              const user = result.rows[0];
+
+              // Verificar PIN
+              if (!verifyPin(pin, user.pin_hash)) {
+                response.statusCode = 401;
+                response.end(JSON.stringify({
+                  ok: false,
+                  error: 'INVALID_CREDENTIALS',
+                  message: 'Usuario o PIN incorrectos'
+                }));
+                return;
+              }
+
+              console.log('[LOGIN] Authentication successful for user:', user.username);
+
+              // Generar token JWT
+              const jwt = require('jsonwebtoken');
+              const token = jwt.sign(
+                { id: user.id, username: user.username },
+                process.env.JWT_SECRET || 'your-jwt-secret-change-this',
+                { expiresIn: '7d' }
+              );
+
+              response.statusCode = 200;
+              response.end(JSON.stringify({
+                ok: true,
+                user: { id: user.id, username: user.username },
+                token: token,
+                message: 'Login exitoso'
+              }));
+
+            } catch (dbError) {
+              console.error('[LOGIN] Database error:', dbError);
+              response.statusCode = 500;
+              response.end(JSON.stringify({
+                ok: false,
+                error: 'DATABASE_ERROR',
+                message: 'Error interno del servidor'
+              }));
+            }
+          } else {
+            // Fallback a modo demo
+            console.log('[LOGIN] Using demo mode');
+            const userId = Date.now();
+            const tokenData = { id: userId, username: username, timestamp: Date.now() };
+            const token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+            response.statusCode = 200;
+            response.end(JSON.stringify({
+              ok: true,
+              user: { id: userId, username: username },
+              token: token,
+              message: 'Login exitoso (demo mode)'
+            }));
+          }
 
         } catch (parseError) {
           console.error('[LOGIN] JSON parse error:', parseError);
@@ -294,13 +489,67 @@ export default function handler(request, response) {
       console.error('[WORLD] Error decoding token:', error);
     }
 
-    // Simular respuesta de personajes (en producción buscaría en BD)
-    response.statusCode = 200;
-    response.end(JSON.stringify({
-      ok: true,
-      character: null, // No hay personaje guardado aún
-      message: `No character found for user: ${username}`
-    }));
+    // Intentar buscar personaje en base de datos
+    if (pool) {
+      try {
+        console.log('[WORLD] Searching character for user:', username);
+
+        // Buscar personaje del usuario
+        const result = await pool.query(`
+          SELECT c.*, u.username
+          FROM characters c
+          JOIN users u ON c.user_id = u.id
+          WHERE u.username = $1
+        `, [username]);
+
+        if (result.rows.length > 0) {
+          const character = result.rows[0];
+          console.log('[WORLD] Found character:', character.name);
+
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            character: {
+              id: character.id,
+              name: character.name,
+              species: character.species,
+              role: character.role,
+              publicProfile: character.public_profile,
+              lastLocation: character.last_location,
+              createdAt: character.created_at,
+              updatedAt: character.updated_at
+            },
+            message: 'Personaje encontrado'
+          }));
+        } else {
+          console.log('[WORLD] No character found for user:', username);
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            character: null,
+            message: `No character found for user: ${username}`
+          }));
+        }
+
+      } catch (dbError) {
+        console.error('[WORLD] Database error:', dbError);
+        response.statusCode = 500;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'DATABASE_ERROR',
+          message: 'Error interno del servidor'
+        }));
+      }
+    } else {
+      // Fallback a modo demo
+      console.log('[WORLD] Using demo mode');
+      response.statusCode = 200;
+      response.end(JSON.stringify({
+        ok: true,
+        character: null,
+        message: `No character found for user: ${username} (demo mode)`
+      }));
+    }
     return;
   }
 
@@ -326,13 +575,73 @@ export default function handler(request, response) {
       return;
     }
 
-    // Simular historial vacío (en producción vendría de BD)
-    response.statusCode = 200;
-    response.end(JSON.stringify({
-      ok: true,
-      messages: [],
-      message: 'Chat history loaded'
-    }));
+    // Intentar cargar historial desde base de datos
+    if (pool) {
+      try {
+        console.log('[CHAT] Loading chat history...');
+
+        // Decodificar token para obtener información del usuario
+        let userId = null;
+        try {
+          const jwt = require('jsonwebtoken');
+          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
+          userId = decoded.id;
+        } catch (tokenError) {
+          console.error('[CHAT] Token verification error:', tokenError);
+          response.statusCode = 401;
+          response.end(JSON.stringify({
+            ok: false,
+            error: 'UNAUTHORIZED',
+            message: 'Token inválido'
+          }));
+          return;
+        }
+
+        // Buscar mensajes del usuario ordenados por fecha
+        const result = await pool.query(`
+          SELECT cm.*, c.name as character_name, u.username
+          FROM chat_messages cm
+          LEFT JOIN characters c ON cm.character_id = c.id
+          JOIN users u ON cm.user_id = u.id
+          WHERE cm.user_id = $1
+          ORDER BY cm.ts ASC
+        `, [userId]);
+
+        const messages = result.rows.map(row => ({
+          role: row.role,
+          text: row.text,
+          ts: row.ts.toISOString(),
+          characterName: row.character_name || 'Tú'
+        }));
+
+        console.log('[CHAT] Loaded', messages.length, 'messages from database');
+
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          messages: messages,
+          message: 'Chat history loaded'
+        }));
+
+      } catch (dbError) {
+        console.error('[CHAT] Database error:', dbError);
+        response.statusCode = 500;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'DATABASE_ERROR',
+          message: 'Error interno del servidor'
+        }));
+      }
+    } else {
+      // Fallback a modo demo
+      console.log('[CHAT] Using demo mode');
+      response.statusCode = 200;
+      response.end(JSON.stringify({
+        ok: true,
+        messages: [],
+        message: 'Chat history loaded (demo mode)'
+      }));
+    }
     return;
   }
 
