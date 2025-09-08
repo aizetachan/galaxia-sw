@@ -1,4 +1,2 @@
-// Función ultra-simple
-module.exports = (req, res) => {
-  res.status(200).send('OK');
-};
+// Función test ultra-simple
+module.exports = () => ({ statusCode: 200, body: 'TEST' });

@@ -1,9 +1,2 @@
-// Función health mínima
-const handler = () => {
-  return {
-    statusCode: 200,
-    body: '{"ok":true}'
-  };
-};
-
-module.exports = handler;
+// Función health ultra-mínima
+module.exports = () => ({ statusCode: 200, body: 'OK' });
