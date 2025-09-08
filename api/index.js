@@ -1,52 +1,62 @@
-// Handler funcional con base de datos (opcional)
+// Función para inicializar base de datos de manera lazy
 let pool = null;
-let hasDatabase = false;
 let bcrypt = null;
-
-try {
-  if (process.env.DATABASE_URL) {
-    const { Pool } = require('pg');
-    bcrypt = require('bcrypt');
-
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-    });
-
-    hasDatabase = true;
-    console.log('[DB] Database connection configured');
-
-    // Inicializar base de datos
-    pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        pin_hash VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS sessions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        token VARCHAR(255) UNIQUE NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `).then(() => {
-      console.log('[DB] Database initialized successfully');
-    }).catch(error => {
-      console.error('[DB] Error initializing database:', error);
-    });
-  } else {
-    console.log('[DB] No DATABASE_URL configured - using demo mode');
-  }
-} catch (error) {
-  console.log('[DB] Database setup failed, using demo mode:', error.message);
-}
+let databaseReady = false;
 
 // Almacenamiento en memoria para modo demo
 const demoUsers = new Map();
+
+async function ensureDatabase() {
+  if (databaseReady) return true;
+
+  try {
+    if (process.env.DATABASE_URL) {
+      console.log('[DB] Initializing database connection...');
+
+      // Cargar dependencias solo cuando se necesiten
+      const { Pool } = require('pg');
+      bcrypt = require('bcrypt');
+
+      pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+      });
+
+      // Probar conexión
+      await pool.query('SELECT 1');
+
+      // Crear tablas si no existen
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(255) UNIQUE NOT NULL,
+          pin_hash VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          token VARCHAR(255) UNIQUE NOT NULL,
+          expires_at TIMESTAMP NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      databaseReady = true;
+      console.log('[DB] Database initialized successfully');
+      return true;
+    } else {
+      console.log('[DB] No DATABASE_URL configured - using demo mode');
+      return false;
+    }
+  } catch (error) {
+    console.error('[DB] Database initialization failed:', error.message);
+    console.log('[DB] Falling back to demo mode');
+    return false;
+  }
+}
 
 export default function handler(request, response) {
   console.log('Handler called with:', request.method, request.url);
@@ -77,32 +87,32 @@ export default function handler(request, response) {
     response.setHeader('Access-Control-Allow-Origin', '*');
 
     try {
-      if (!process.env.DATABASE_URL) {
-        response.statusCode = 500;
+      const dbReady = await ensureDatabase();
+      if (dbReady) {
+        response.statusCode = 200;
         response.end(JSON.stringify({
-          ok: false,
-          error: 'DATABASE_URL not configured',
-          message: 'Please configure DATABASE_URL in Vercel environment variables'
+          ok: true,
+          message: 'Database connection successful',
+          mode: 'database'
         }));
-        return;
+      } else {
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          message: 'Demo mode active',
+          mode: 'demo',
+          database_url: !!process.env.DATABASE_URL
+        }));
       }
-
-      // Probar conexión a la base de datos
-      await pool.query('SELECT 1');
-      response.statusCode = 200;
-      response.end(JSON.stringify({
-        ok: true,
-        message: 'Database connection successful',
-        database_url: !!process.env.DATABASE_URL
-      }));
 
     } catch (error) {
       console.error('[TEST-DB] Database error:', error);
       response.statusCode = 500;
       response.end(JSON.stringify({
         ok: false,
-        error: 'Database connection failed',
-        message: error.message
+        error: 'Database initialization failed',
+        message: error.message,
+        mode: 'error'
       }));
     }
     return;
@@ -142,7 +152,8 @@ export default function handler(request, response) {
         return;
       }
 
-      if (hasDatabase && pool && bcrypt) {
+      const dbReady = await ensureDatabase();
+      if (dbReady && pool && bcrypt) {
         // Modo base de datos
         console.log('[AUTH] Using database mode for registration');
 
@@ -233,7 +244,8 @@ export default function handler(request, response) {
         return;
       }
 
-      if (hasDatabase && pool && bcrypt) {
+      const dbReady = await ensureDatabase();
+      if (dbReady && pool && bcrypt) {
         // Modo base de datos
         console.log('[AUTH] Using database mode for login');
 
