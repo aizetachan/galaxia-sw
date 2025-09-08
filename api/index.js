@@ -1,9 +1,14 @@
 // Handler funcional con autenticación
 export default function handler(request, response) {
   console.log('Handler called with:', request.method, request.url);
+  console.log('Full URL:', request.url);
+  console.log('Pathname:', request.url ? request.url.split('?')[0] : 'none');
 
-  // Health check
-  if (request.method === 'GET' && request.url === '/api/health') {
+  const path = request.url ? request.url.split('?')[0] : '';
+
+  // Health check - probar diferentes formatos
+  if (request.method === 'GET' && (path === '/api/health' || path === '/health')) {
+    console.log('[HEALTH] Health endpoint called');
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.statusCode = 200;
@@ -11,9 +16,9 @@ export default function handler(request, response) {
     return;
   }
 
-  // Register endpoint
-  if (request.method === 'POST' && request.url === '/api/auth/register') {
-    console.log('[REGISTER] Register endpoint called');
+  // Register endpoint - probar diferentes formatos
+  if (request.method === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
+    console.log('[REGISTER] Register endpoint called for path:', path);
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Methods', 'POST');
@@ -23,9 +28,9 @@ export default function handler(request, response) {
     return;
   }
 
-  // Login endpoint
-  if (request.method === 'POST' && request.url === '/api/auth/login') {
-    console.log('[LOGIN] Login endpoint called');
+  // Login endpoint - probar diferentes formatos
+  if (request.method === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
+    console.log('[LOGIN] Login endpoint called for path:', path);
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Methods', 'POST');
@@ -36,7 +41,7 @@ export default function handler(request, response) {
   }
 
   // Test endpoint
-  if (request.method === 'GET' && request.url === '/api/test') {
+  if (request.method === 'GET' && (path === '/api/test' || path === '/test')) {
     console.log('[TEST] Test endpoint called');
     response.setHeader('Content-Type', 'text/plain');
     response.setHeader('Access-Control-Allow-Origin', '*');
@@ -46,8 +51,9 @@ export default function handler(request, response) {
   }
 
   // Default 404
+  console.log('[DEFAULT] Route not found for method:', request.method, 'path:', path);
   response.setHeader('Content-Type', 'application/json');
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.statusCode = 404;
-  response.end('{"ok":false,"error":"Not found","method":"' + request.method + '","url":"' + request.url + '"}');
+  response.end('{"ok":false,"error":"Not found","method":"' + request.method + '","path":"' + path + '","fullUrl":"' + request.url + '"}');
 }
