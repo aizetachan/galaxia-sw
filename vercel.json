@@ -3,17 +3,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.js": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 10
-    },
-    "api/auth/route.js": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 5
-    },
-    "api/health.js": {
-      "runtime": "nodejs18.x",
-      "maxDuration": 5
+    "api/**/*.js": {
+      "runtime": "node@20.x"
     }
   },
   "rewrites": [
