@@ -1,5 +1,5 @@
 // Handler ultra-simple para debugging
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   console.log('[SIMPLE] Request received:', req.method, req.url);
 
   // Health check
@@ -65,4 +65,4 @@ module.exports = async (req, res) => {
     method: req.method,
     url: req.url
   }));
-};
+}
