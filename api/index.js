@@ -1,112 +1,129 @@
 // Función serverless básica sin dependencias pesadas
 exports.handler = async (event, context) => {
-  console.log('[BASIC] Handler called with method:', event.httpMethod, 'path:', event.path);
-  console.log('[BASIC] Raw path:', event.rawPath || 'not available');
-  console.log('[BASIC] RequestContext:', JSON.stringify(event.requestContext || {}));
+  try {
+    console.log('[BASIC] Handler called');
+    console.log('[BASIC] Event keys:', Object.keys(event));
+    console.log('[BASIC] Method:', event.httpMethod || event.method || 'unknown');
+    console.log('[BASIC] Path:', event.path || event.rawPath || 'unknown');
 
-  // Normalizar la ruta para manejar diferentes formatos de Vercel
-  let path = event.path;
-  if (event.rawPath) {
-    path = event.rawPath;
-  }
+    // Normalizar la ruta para manejar diferentes formatos de Vercel
+    let path = event.path || event.rawPath || '';
+    let method = event.httpMethod || event.method || '';
 
-  console.log('[BASIC] Normalized path:', path);
+    console.log('[BASIC] Normalized method:', method, 'path:', path);
 
-  // Health check
-  if (event.httpMethod === 'GET' && (path === '/api/health' || path === '/health')) {
-    console.log('[HEALTH] Health check called');
+    // Health check
+    if (method === 'GET' && (path === '/api/health' || path === '/health')) {
+      console.log('[HEALTH] Health check called');
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: JSON.stringify({
+          ok: true,
+          message: 'API working',
+          timestamp: Date.now(),
+          path: path
+        })
+      };
+    }
+
+    // Register endpoint (simplified)
+    if (method === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
+      console.log('[AUTH] Register called for path:', path);
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: JSON.stringify({
+          ok: true,
+          user: { id: 123, username: 'testuser' },
+          message: 'User registered successfully'
+        })
+      };
+    }
+
+    // Login endpoint (simplified)
+    if (method === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
+      console.log('[AUTH] Login called for path:', path);
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: JSON.stringify({
+          ok: true,
+          user: { id: 123, username: 'testuser' },
+          message: 'Login successful'
+        })
+      };
+    }
+
+    // Test endpoint
+    if (method === 'GET' && path === '/api/test') {
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: 'TEST'
+      };
+    }
+
+    // OPTIONS para CORS
+    if (method === 'OPTIONS') {
+      return {
+        statusCode: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        },
+        body: ''
+      };
+    }
+
+    // Respuesta por defecto
+    console.log('[BASIC] Route not found for method:', method, 'path:', path);
     return {
-      statusCode: 200,
+      statusCode: 404,
       headers: {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      },
-      body: JSON.stringify({
-        ok: true,
-        message: 'API working',
-        timestamp: Date.now(),
-        path: path
-      })
-    };
-  }
-
-  // Register endpoint (simplified)
-  if (event.httpMethod === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
-    console.log('[AUTH] Register called for path:', path);
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      },
-      body: JSON.stringify({
-        ok: true,
-        user: { id: 123, username: 'testuser' },
-        message: 'User registered successfully'
-      })
-    };
-  }
-
-  // Login endpoint (simplified)
-  if (event.httpMethod === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
-    console.log('[AUTH] Login called for path:', path);
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      },
-      body: JSON.stringify({
-        ok: true,
-        user: { id: 123, username: 'testuser' },
-        message: 'Login successful'
-      })
-    };
-  }
-
-  // Test endpoint
-  if (event.httpMethod === 'GET' && event.path === '/api/test') {
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'text/plain',
         'Access-Control-Allow-Origin': '*'
       },
-      body: 'TEST'
+      body: JSON.stringify({
+        ok: false,
+        error: 'Not found',
+        path: path,
+        method: method
+      })
     };
-  }
 
-  // OPTIONS para CORS
-  if (event.httpMethod === 'OPTIONS') {
+  } catch (error) {
+    console.error('[BASIC] Handler error:', error);
     return {
-      statusCode: 200,
+      statusCode: 500,
       headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
       },
-      body: ''
+      body: JSON.stringify({
+        ok: false,
+        error: 'Internal server error',
+        message: error.message
+      })
     };
   }
-
-  // Respuesta por defecto
-  return {
-    statusCode: 404,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    },
-    body: JSON.stringify({
-      ok: false,
-      error: 'Not found',
-      path: event.path,
-      method: event.httpMethod
-    })
-  };
 };
