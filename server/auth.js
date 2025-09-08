@@ -12,9 +12,11 @@ console.log('[AUTH] Using in-memory storage for testing (no database configured)
 
 // Función para generar JWT
 function generateToken(user) {
+  const secret = process.env.JWT_SECRET || 'galaxia-secret-key';
+  console.log('[AUTH] Generating token with secret length:', secret.length);
   return jwt.sign(
     { userId: user.id, username: user.username },
-    process.env.JWT_SECRET || 'galaxia-secret-key',
+    secret,
     { expiresIn: '7d' }
   );
 }
@@ -22,8 +24,10 @@ function generateToken(user) {
 // Función para verificar JWT
 function verifyToken(token) {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'galaxia-secret-key');
+    const secret = process.env.JWT_SECRET || 'galaxia-secret-key';
+    return jwt.verify(token, secret);
   } catch (error) {
+    console.log('[AUTH] Token verification failed:', error.message);
     return null;
   }
 }
@@ -47,15 +51,19 @@ function requireAuth(req, res, next) {
 
 // POST /auth/register
 router.post('/register', async (req, res) => {
+  console.log('[AUTH] Register endpoint called');
   try {
     const { username, pin } = req.body;
+    console.log('[AUTH] Register data:', { username: username ? 'present' : 'missing', pin: pin ? 'present' : 'missing' });
 
     if (!username || !pin) {
+      console.log('[AUTH] Missing username or pin');
       return res.status(400).json({ ok: false, error: 'Username and PIN are required' });
     }
 
     // Validar username
     if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+      console.log('[AUTH] Invalid username format');
       return res.status(400).json({
         ok: false,
         error: 'Username must be 3-24 characters, alphanumeric + underscore'
@@ -64,11 +72,13 @@ router.post('/register', async (req, res) => {
 
     // Validar PIN
     if (!/^\d{4}$/.test(pin)) {
+      console.log('[AUTH] Invalid PIN format');
       return res.status(400).json({ ok: false, error: 'PIN must be 4 digits' });
     }
 
     // Verificar si el usuario ya existe
     if (users.has(username)) {
+      console.log('[AUTH] Username already exists');
       return res.status(409).json({ ok: false, error: 'Username already exists' });
     }
 
@@ -82,9 +92,11 @@ router.post('/register', async (req, res) => {
     };
 
     users.set(username, user);
+    console.log(`[AUTH] User created: ${username} with ID: ${userId}`);
 
     // Generar token
     const token = generateToken(user);
+    console.log('[AUTH] Token generated successfully');
 
     // Crear sesión
     const sessionId = Date.now().toString();
@@ -104,7 +116,7 @@ router.post('/register', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
     });
 
-    console.log(`[AUTH] User registered: ${username}`);
+    console.log(`[AUTH] User registered successfully: ${username}`);
     res.json({
       ok: true,
       user: { id: user.id, username: user.username },
@@ -119,26 +131,36 @@ router.post('/register', async (req, res) => {
 
 // POST /auth/login
 router.post('/login', async (req, res) => {
+  console.log('[AUTH] Login endpoint called');
   try {
     const { username, pin } = req.body;
+    console.log('[AUTH] Login data:', { username: username ? 'present' : 'missing', pin: pin ? 'present' : 'missing' });
 
     if (!username || !pin) {
+      console.log('[AUTH] Missing username or pin');
       return res.status(400).json({ ok: false, error: 'Username and PIN are required' });
     }
 
     // Buscar usuario
     const user = users.get(username);
     if (!user) {
+      console.log('[AUTH] User not found:', username);
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
+
+    console.log('[AUTH] User found:', user.username);
 
     // Verificar PIN (comparación simple para testing)
     if (pin !== user.pin) {
+      console.log('[AUTH] PIN mismatch for user:', username);
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
     }
 
+    console.log('[AUTH] PIN verified successfully');
+
     // Generar token
     const token = generateToken(user);
+    console.log('[AUTH] Token generated for login');
 
     // Crear sesión
     const sessionId = Date.now().toString();
@@ -158,7 +180,7 @@ router.post('/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    console.log(`[AUTH] User logged in: ${username}`);
+    console.log(`[AUTH] User logged in successfully: ${username}`);
     res.json({
       ok: true,
       user: { id: user.id, username: user.username },

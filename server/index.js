@@ -30,12 +30,19 @@ app.use(cors({
 
 // Health check
 app.get('/health', (req, res) => {
+  console.log('[HEALTH] Health check called');
   res.json({
     ok: true,
     ts: Date.now(),
     env: process.env.NODE_ENV || 'development',
     db: !!process.env.DATABASE_URL
   });
+});
+
+// Test endpoint simple
+app.get('/test', (req, res) => {
+  console.log('[TEST] Test endpoint called');
+  res.json({ ok: true, message: 'Test endpoint working' });
 });
 
 // Rutas de autenticación
