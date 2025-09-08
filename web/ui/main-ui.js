@@ -21,10 +21,13 @@ if (!identityEl) {
 
 /* === Render de la barra de identidad === */
 export function setIdentityBar(userName, characterName){
+  console.log('[UI] setIdentityBar called with:', { userName, characterName });
   const u = String(userName || '').trim();
   const isGuest = /^guest$/i.test(u);
+  console.log('[UI] Processed userName:', u, 'isGuest:', isGuest);
 
   if (!u || isGuest){
+    console.log('[UI] Hiding identity bar - no user or guest');
     identityEl.classList.add('hidden');
     identityEl.innerHTML = '';
     return;

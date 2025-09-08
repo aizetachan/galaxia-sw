@@ -326,7 +326,19 @@ async function send(){
       const species = titleCase(value);
       if (species.length>=2){
         character.species = species; setCharacter(character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update species fail', e?.data||e); }
+        try{
+          console.log('[ONBOARD] Saving character after species selection:', character);
+          const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character });
+          console.log('[ONBOARD] Character save response:', r);
+          if (r?.character?.id && !character.id){
+            character.id=r.character.id;
+            setCharacter(character);
+            console.log('[ONBOARD] Character ID set:', character.id);
+          }
+        }catch(e){
+          console.error('[ONBOARD] Update species fail:', e?.data||e);
+          dlog('update species fail', e?.data||e);
+        }
         setStep('role');
 
         // ⛔️ Eliminado fallback local (antes hacía pushDM “Genial, … ahora elige rol”)
@@ -340,7 +352,19 @@ async function send(){
       const role = titleCase(value);
       if (role.length>=2){
         character.role = role; setCharacter(character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update role fail', e?.data||e); }
+        try{
+          console.log('[ONBOARD] Saving character after role selection:', character);
+          const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character });
+          console.log('[ONBOARD] Character save response:', r);
+          if (r?.character?.id && !character.id){
+            character.id=r.character.id;
+            setCharacter(character);
+            console.log('[ONBOARD] Character ID set:', character.id);
+          }
+        }catch(e){
+          console.error('[ONBOARD] Update role fail:', e?.data||e);
+          dlog('update role fail', e?.data||e);
+        }
         setStep('done');
 
         // ⛔️ Eliminado fallback local (“¡Listo! Preparando escena…”)
@@ -486,11 +510,54 @@ async function doAuth(kind) {
 
     migrateGuestToUser(response.user.id);
 
-    // Cargamos estado local "limpio"
-    setMsgs(load(KEY_MSGS, []));
-    setCharacter(load(KEY_CHAR, null));
-    setStep(load(KEY_STEP, 'name'));
-    setPendingConfirm(load(KEY_CONFIRM, null));
+    // Intentar cargar datos existentes del usuario primero
+    console.log('[AUTH] Checking for existing user data...');
+    let userCharacter = null;
+    let userMsgs = [];
+    let userStep = 'name';
+
+    try {
+      // Verificar si el usuario ya tiene un personaje guardado
+      const meResponse = await apiGet('/world/characters/me');
+      if (meResponse?.character) {
+        userCharacter = meResponse.character;
+        userStep = 'done'; // Usuario ya completó onboarding
+        console.log('[AUTH] Found existing character:', userCharacter);
+      }
+    } catch (error) {
+      console.log('[AUTH] No existing character found, will start onboarding');
+    }
+
+    // Cargar mensajes del usuario o usar mensajes limpios
+    if (userCharacter) {
+      userMsgs = load(KEY_MSGS, []);
+      // Si no hay mensajes pero tiene personaje, cargar historial
+      if (userMsgs.length === 0) {
+        try {
+          const historyResponse = await apiGet('/chat/history');
+          if (historyResponse?.messages) {
+            const mappedMsgs = historyResponse.messages.map((m) => ({
+              user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
+              text: m.text,
+              kind: m.role === 'user' ? 'user' : 'dm',
+              ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+            }));
+            userMsgs = mappedMsgs;
+            console.log('[AUTH] Loaded chat history:', userMsgs.length, 'messages');
+          }
+        } catch (error) {
+          console.log('[AUTH] Could not load chat history:', error);
+        }
+      }
+    } else {
+      userMsgs = load(KEY_MSGS, []);
+    }
+
+    // Configurar estado del usuario
+    setMsgs(userMsgs);
+    setCharacter(userCharacter);
+    setStep(userStep);
+    setPendingConfirm(null);
 
     // Quitar "bienvenida de invitado" si quedó
     {
@@ -513,6 +580,7 @@ async function doAuth(kind) {
       await loadHistory({ force: true });
       await showResumeIfAny();
 
+      console.log('[AUTH] Setting identity bar - User:', response.user.username, 'Character:', character?.name);
       if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
       setIdentityBar(response.user.username, character?.name || '');
       updateAuthUI();
@@ -526,6 +594,7 @@ async function doAuth(kind) {
     setStep('name');
     setPendingConfirm(null);
 
+    console.log('[AUTH] Setting identity bar for new user - User:', response.user.username);
     if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
     setIdentityBar(response.user.username, '');
     updateAuthUI();
