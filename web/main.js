@@ -84,19 +84,18 @@ async function boot(){
         console.error('[BOOT] /auth/me failed:', e);
         if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e;
       });
-      setMsgs(load(KEY_MSGS, []));
-      setCharacter(load(KEY_CHAR, null));
-      setStep(load(KEY_STEP, 'name'));
-      setPendingConfirm(load(KEY_CONFIRM, null));
-      await loadHistory({ force: true });
-      await showResumeIfAny();
+
+      // Cargar datos del usuario desde el servidor
+      await loadUserData();
+
+      // Mostrar mensaje de bienvenida
       if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
     } else {
       setAuth(null);
       localStorage.removeItem('sw:auth');
-      setMsgs(load(KEY_MSGS, []));
-      setCharacter(load(KEY_CHAR, null));
-      setStep(load(KEY_STEP, 'name'));
+      setMsgs([]);
+      setCharacter(null);
+      setStep('name');
       setPendingConfirm(null);
     }
   } catch(e){
@@ -414,6 +413,72 @@ async function resolveRoll(){
   }
 }
 
+// Función para cargar datos del usuario desde el servidor
+async function loadUserData() {
+  console.log('[BOOT] Loading user data from server...');
+
+  try {
+    // Verificar si el usuario ya tiene un personaje guardado
+    console.log('[BOOT] Checking for existing character...');
+    const meResponse = await apiGet('/world/characters/me');
+    console.log('[BOOT] Character response:', meResponse);
+
+    let userCharacter = null;
+    let userMsgs = [];
+    let userStep = 'name';
+
+    if (meResponse?.character) {
+      userCharacter = meResponse.character;
+      userStep = 'done'; // Usuario ya completó onboarding
+      console.log('[BOOT] Found existing character:', userCharacter);
+
+      // Si tiene personaje, intentar cargar historial
+      try {
+        console.log('[BOOT] Loading chat history...');
+        const historyResponse = await apiGet('/chat/history');
+        console.log('[BOOT] History response:', historyResponse);
+
+        if (historyResponse?.messages && Array.isArray(historyResponse.messages)) {
+          userMsgs = historyResponse.messages.map((m) => ({
+            user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
+            text: m.text,
+            kind: m.role === 'user' ? 'user' : 'dm',
+            ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+          }));
+          console.log('[BOOT] Loaded', userMsgs.length, 'messages from history');
+        }
+      } catch (historyError) {
+        console.error('[BOOT] Error loading chat history:', historyError);
+        // Si falla la carga del historial, usar mensajes locales como fallback
+        userMsgs = load(KEY_MSGS, []);
+      }
+    } else {
+      console.log('[BOOT] No character found, will start onboarding');
+      userMsgs = load(KEY_MSGS, []);
+    }
+
+    // Configurar el estado del usuario
+    console.log('[BOOT] Setting user state - Character:', !!userCharacter, 'Messages:', userMsgs.length, 'Step:', userStep);
+    setMsgs(userMsgs);
+    setCharacter(userCharacter);
+    setStep(userStep);
+    setPendingConfirm(null);
+
+    // Guardar en localStorage para futuras sesiones
+    if (userCharacter) {
+      save(KEY_CHAR, userCharacter);
+      save(KEY_STEP, userStep);
+    }
+
+  } catch (error) {
+    console.error('[BOOT] Error loading user data:', error);
+    // En caso de error, usar datos locales como fallback
+    setMsgs(load(KEY_MSGS, []));
+    setCharacter(load(KEY_CHAR, null));
+    setStep(load(KEY_STEP, 'name'));
+    setPendingConfirm(load(KEY_CONFIRM, null));
+  }
+}
 
 /* ============================================================
  *           Migración guest → user y helpers de historia
@@ -534,66 +599,9 @@ async function doAuth(kind) {
 
     migrateGuestToUser(response.user.id);
 
-    // Intentar cargar datos existentes del usuario primero
-    console.log('[AUTH] Checking for existing user data...');
-    let userCharacter = null;
-    let userMsgs = [];
-    let userStep = 'name';
-
-    try {
-      // Verificar si el usuario ya tiene un personaje guardado
-      console.log('[AUTH] Calling /world/characters/me...');
-      const meResponse = await apiGet('/world/characters/me');
-      console.log('[AUTH] /world/characters/me response:', meResponse);
-      if (meResponse?.character) {
-        userCharacter = meResponse.character;
-        userStep = 'done'; // Usuario ya completó onboarding
-        console.log('[AUTH] Found existing character:', userCharacter);
-      } else {
-        console.log('[AUTH] No character found in response');
-      }
-    } catch (error) {
-      console.log('[AUTH] Error loading character:', error);
-      console.error('[AUTH] Character loading error details:', error);
-    }
-
-    // Cargar mensajes del usuario o usar mensajes limpios
-    if (userCharacter) {
-      userMsgs = load(KEY_MSGS, []);
-      // Si no hay mensajes pero tiene personaje, cargar historial
-      if (userMsgs.length === 0) {
-        try {
-          console.log('[AUTH] Loading chat history for user with character...');
-          const historyResponse = await apiGet('/chat/history');
-          console.log('[AUTH] Chat history response:', historyResponse);
-          if (historyResponse?.messages) {
-            const mappedMsgs = historyResponse.messages.map((m) => ({
-              user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
-              text: m.text,
-              kind: m.role === 'user' ? 'user' : 'dm',
-              ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-            }));
-            userMsgs = mappedMsgs;
-            console.log('[AUTH] Loaded chat history:', userMsgs.length, 'messages');
-          } else {
-            console.log('[AUTH] No messages in chat history response');
-          }
-        } catch (error) {
-          console.log('[AUTH] Could not load chat history:', error);
-          console.error('[AUTH] Chat history error details:', error);
-        }
-      } else {
-        console.log('[AUTH] User has local messages, skipping history load');
-      }
-    } else {
-      userMsgs = load(KEY_MSGS, []);
-    }
-
-    // Configurar estado del usuario
-    setMsgs(userMsgs);
-    setCharacter(userCharacter);
-    setStep(userStep);
-    setPendingConfirm(null);
+    // Cargar datos del usuario desde el servidor usando la nueva función centralizada
+    console.log('[AUTH] Loading user data after authentication...');
+    await loadUserData();
 
     // Quitar "bienvenida de invitado" si quedó
     {
