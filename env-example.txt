@@ -1,0 +1,21 @@
+# Variables de entorno para el servidor
+
+# Base de datos Neon PostgreSQL
+DATABASE_URL=postgresql://username:password@host:port/database?sslmode=require
+
+# OpenAI API Key (para el Máster IA)
+OPENAI_API_KEY=sk-your-openai-api-key-here
+OPENAI_PROJECT=your-project-id-optional
+
+# JWT Secret para tokens de autenticación
+JWT_SECRET=your-very-secure-jwt-secret-here
+
+# Configuración del servidor
+PORT=3001
+NODE_ENV=development
+
+# CORS - orígenes permitidos (separados por coma)
+ALLOWED_ORIGIN=http://localhost:3000,https://your-domain.vercel.app
+
+# Modelo de OpenAI (opcional, por defecto gpt-4o-mini)
+LLM_MODEL=gpt-4o-mini
