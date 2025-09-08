@@ -1,16 +1,23 @@
-// Handler funcional con base de datos
-const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+// Handler funcional con base de datos (opcional)
+let pool = null;
+let hasDatabase = false;
+let bcrypt = null;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+try {
+  if (process.env.DATABASE_URL) {
+    const { Pool } = require('pg');
+    bcrypt = require('bcrypt');
 
-// Inicializar base de datos
-async function initDatabase() {
-  try {
-    await pool.query(`
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
+
+    hasDatabase = true;
+    console.log('[DB] Database connection configured');
+
+    // Inicializar base de datos
+    pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(255) UNIQUE NOT NULL,
@@ -26,14 +33,20 @@ async function initDatabase() {
         expires_at TIMESTAMP NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    console.log('[DB] Database initialized successfully');
-  } catch (error) {
-    console.error('[DB] Error initializing database:', error);
+    `).then(() => {
+      console.log('[DB] Database initialized successfully');
+    }).catch(error => {
+      console.error('[DB] Error initializing database:', error);
+    });
+  } else {
+    console.log('[DB] No DATABASE_URL configured - using demo mode');
   }
+} catch (error) {
+  console.log('[DB] Database setup failed, using demo mode:', error.message);
 }
 
-initDatabase();
+// Almacenamiento en memoria para modo demo
+const demoUsers = new Map();
 
 export default function handler(request, response) {
   console.log('Handler called with:', request.method, request.url);
@@ -95,7 +108,7 @@ export default function handler(request, response) {
     return;
   }
 
-  // Register endpoint con base de datos
+  // Register endpoint con base de datos o demo
   if (request.method === 'POST' && (path === '/api/auth/register' || path === '/auth/register')) {
     console.log('[REGISTER] Register endpoint called for path:', path);
 
@@ -129,32 +142,68 @@ export default function handler(request, response) {
         return;
       }
 
-      // Verificar si el usuario ya existe
-      const existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
-      if (existingUser.rows.length > 0) {
-        response.statusCode = 409;
-        response.end(JSON.stringify({ ok: false, error: 'Username already exists' }));
-        return;
+      if (hasDatabase && pool && bcrypt) {
+        // Modo base de datos
+        console.log('[AUTH] Using database mode for registration');
+
+        // Verificar si el usuario ya existe
+        const existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+        if (existingUser.rows.length > 0) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ ok: false, error: 'Username already exists' }));
+          return;
+        }
+
+        // Hash del PIN
+        const pinHash = await bcrypt.hash(pin, 10);
+
+        // Crear usuario
+        const result = await pool.query(
+          'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id, username',
+          [username, pinHash]
+        );
+
+        const user = result.rows[0];
+
+        console.log(`[AUTH] User registered in DB: ${username} with ID: ${user.id}`);
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          user: { id: user.id, username: user.username },
+          message: 'User registered successfully'
+        }));
+
+      } else {
+        // Modo demo
+        console.log('[AUTH] Using demo mode for registration');
+
+        // Verificar si el usuario ya existe en demo
+        if (demoUsers.has(username)) {
+          response.statusCode = 409;
+          response.end(JSON.stringify({ ok: false, error: 'Username already exists' }));
+          return;
+        }
+
+        // Crear usuario en demo
+        const userId = Date.now();
+        const user = {
+          id: userId,
+          username,
+          pin, // En demo no hasheamos
+          createdAt: new Date()
+        };
+
+        demoUsers.set(username, user);
+
+        console.log(`[AUTH] User registered in demo: ${username} with ID: ${userId}`);
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          user: { id: user.id, username: user.username },
+          message: 'User registered successfully (demo mode)',
+          mode: 'demo'
+        }));
       }
-
-      // Hash del PIN
-      const pinHash = await bcrypt.hash(pin, 10);
-
-      // Crear usuario
-      const result = await pool.query(
-        'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id, username',
-        [username, pinHash]
-      );
-
-      const user = result.rows[0];
-
-      console.log(`[AUTH] User registered: ${username} with ID: ${user.id}`);
-      response.statusCode = 200;
-      response.end(JSON.stringify({
-        ok: true,
-        user: { id: user.id, username: user.username },
-        message: 'User registered successfully'
-      }));
 
     } catch (error) {
       console.error('[AUTH] Register error:', error);
@@ -164,7 +213,7 @@ export default function handler(request, response) {
     return;
   }
 
-  // Login endpoint con base de datos
+  // Login endpoint con base de datos o demo
   if (request.method === 'POST' && (path === '/api/auth/login' || path === '/auth/login')) {
     console.log('[LOGIN] Login endpoint called for path:', path);
 
@@ -184,31 +233,64 @@ export default function handler(request, response) {
         return;
       }
 
-      // Buscar usuario
-      const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-      if (result.rows.length === 0) {
-        response.statusCode = 401;
-        response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
-        return;
+      if (hasDatabase && pool && bcrypt) {
+        // Modo base de datos
+        console.log('[AUTH] Using database mode for login');
+
+        // Buscar usuario
+        const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+        if (result.rows.length === 0) {
+          response.statusCode = 401;
+          response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
+          return;
+        }
+
+        const user = result.rows[0];
+
+        // Verificar PIN
+        const isValidPin = await bcrypt.compare(pin, user.pin_hash);
+        if (!isValidPin) {
+          response.statusCode = 401;
+          response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
+          return;
+        }
+
+        console.log(`[AUTH] User logged in from DB: ${username} with ID: ${user.id}`);
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          user: { id: user.id, username: user.username },
+          message: 'Login successful'
+        }));
+
+      } else {
+        // Modo demo
+        console.log('[AUTH] Using demo mode for login');
+
+        // Buscar usuario en demo
+        const user = demoUsers.get(username);
+        if (!user) {
+          response.statusCode = 401;
+          response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
+          return;
+        }
+
+        // Verificar PIN (sin hash en demo)
+        if (pin !== user.pin) {
+          response.statusCode = 401;
+          response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
+          return;
+        }
+
+        console.log(`[AUTH] User logged in from demo: ${username} with ID: ${user.id}`);
+        response.statusCode = 200;
+        response.end(JSON.stringify({
+          ok: true,
+          user: { id: user.id, username: user.username },
+          message: 'Login successful (demo mode)',
+          mode: 'demo'
+        }));
       }
-
-      const user = result.rows[0];
-
-      // Verificar PIN
-      const isValidPin = await bcrypt.compare(pin, user.pin_hash);
-      if (!isValidPin) {
-        response.statusCode = 401;
-        response.end(JSON.stringify({ ok: false, error: 'Invalid credentials' }));
-        return;
-      }
-
-      console.log(`[AUTH] User logged in: ${username} with ID: ${user.id}`);
-      response.statusCode = 200;
-      response.end(JSON.stringify({
-        ok: true,
-        user: { id: user.id, username: user.username },
-        message: 'Login successful'
-      }));
 
     } catch (error) {
       console.error('[AUTH] Login error:', error);
