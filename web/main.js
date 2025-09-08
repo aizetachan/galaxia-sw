@@ -470,14 +470,15 @@ async function doAuth(kind) {
     const response = await api(url, { username, pin });
     console.log('[AUTH] API response:', response);
     
-    // El backend devuelve { ok: true, user: {...} } y el token se envía como cookie
+    // El backend devuelve { ok: true, user: {...}, token: '...' }
     if (response.ok && response.user) {
       console.log('[AUTH] Success! User:', response.user);
-      // Para compatibilidad, creamos un token dummy ya que usamos cookies
-      const token = 'cookie-based-auth';
+      // Usar el token JWT real del backend, o crear uno dummy si no viene
+      const token = response.token || 'cookie-based-auth';
       setAuth({ token, user: response.user });
       localStorage.setItem('sw:auth', JSON.stringify({ token, user: response.user }));
       console.log('[AUTH] Auth state set, user stored in localStorage');
+      console.log('[AUTH] Token received:', !!response.token);
     } else {
       console.error('[AUTH] Invalid response:', response);
       throw new Error('Invalid response from server');

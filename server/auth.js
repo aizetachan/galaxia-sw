@@ -7,16 +7,26 @@ const router = express.Router();
 
 // Configuración de la base de datos
 let pool = null;
+let dbConnected = false;
+
 if (process.env.DATABASE_URL) {
   try {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     });
-    console.log('[AUTH] Database connected for auth');
+    console.log('[AUTH] Database pool created for auth');
+    console.log('[AUTH] DATABASE_URL exists:', !!process.env.DATABASE_URL);
+    console.log('[AUTH] NODE_ENV:', process.env.NODE_ENV);
+    dbConnected = true;
   } catch (error) {
     console.error('[AUTH] Database connection error:', error.message);
+    console.error('[AUTH] DATABASE_URL:', process.env.DATABASE_URL ? 'EXISTS' : 'MISSING');
+    pool = null;
+    dbConnected = false;
   }
+} else {
+  console.log('[AUTH] No DATABASE_URL found, will use demo mode');
 }
 
 // JWT Secret
@@ -85,6 +95,9 @@ function authenticateToken(req, res, next) {
 // POST /auth/register
 router.post('/register', async (req, res) => {
   console.log('[AUTH] Register called');
+  console.log('[AUTH] Database URL exists:', !!process.env.DATABASE_URL);
+  console.log('[AUTH] Pool exists:', !!pool);
+  console.log('[AUTH] Database connected:', dbConnected);
 
   try {
     const { username, pin } = req.body;
@@ -116,7 +129,11 @@ router.post('/register', async (req, res) => {
       });
     }
 
+    console.log('[AUTH] About to check pool for registration');
+    console.log('[AUTH] Pool status:', !!pool);
+
     if (pool) {
+      console.log('[AUTH] Using database mode for registration');
       // Verificar si usuario ya existe
       const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
       if (existing.rows.length > 0) {
@@ -149,10 +166,12 @@ router.post('/register', async (req, res) => {
       res.json({
         ok: true,
         user: { id: user.id, username: user.username },
+        token: token, // Enviar token JWT al frontend
         message: 'Usuario registrado exitosamente'
       });
     } else {
       // Modo demo - usuario falso
+      console.log('[AUTH] Using demo mode - no database connection');
       console.log('[AUTH] Demo mode - fake registration for:', username);
       const user = { id: Math.floor(Math.random() * 10000), username };
       const token = generateToken(user);
@@ -167,6 +186,7 @@ router.post('/register', async (req, res) => {
       res.json({
         ok: true,
         user,
+        token: token, // Enviar token JWT al frontend
         message: 'Usuario registrado (modo demo)'
       });
     }
@@ -183,6 +203,9 @@ router.post('/register', async (req, res) => {
 // POST /auth/login
 router.post('/login', async (req, res) => {
   console.log('[AUTH] Login called');
+  console.log('[AUTH] Database URL exists:', !!process.env.DATABASE_URL);
+  console.log('[AUTH] Pool exists:', !!pool);
+  console.log('[AUTH] Database connected:', dbConnected);
 
   try {
     const { username, pin } = req.body;
@@ -196,7 +219,11 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    console.log('[AUTH] About to check pool for login');
+    console.log('[AUTH] Pool status:', !!pool);
+
     if (pool) {
+      console.log('[AUTH] Using database mode for login');
       // Buscar usuario
       const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
       if (result.rows.length === 0) {
@@ -236,10 +263,12 @@ router.post('/login', async (req, res) => {
       res.json({
         ok: true,
         user: { id: user.id, username: user.username },
+        token: token, // Enviar token JWT al frontend
         message: 'Login exitoso'
       });
     } else {
       // Modo demo
+      console.log('[AUTH] Using demo mode - no database connection');
       console.log('[AUTH] Demo mode - fake login for:', username);
       const user = { id: Math.floor(Math.random() * 10000), username };
       const token = generateToken(user);
@@ -254,6 +283,7 @@ router.post('/login', async (req, res) => {
       res.json({
         ok: true,
         user,
+        token: token, // Enviar token JWT al frontend
         message: 'Login exitoso (modo demo)'
       });
     }

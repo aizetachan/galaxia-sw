@@ -29,13 +29,38 @@ app.use(cors({
 }));
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   console.log('[HEALTH] Health check called');
+
+  let dbStatus = false;
+  if (process.env.DATABASE_URL) {
+    try {
+      // Intentar una conexión simple a la base de datos
+      const { Pool } = require('pg');
+      const testPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+      });
+
+      const result = await testPool.query('SELECT 1');
+      await testPool.end();
+
+      if (result) {
+        dbStatus = true;
+        console.log('[HEALTH] Database connection successful');
+      }
+    } catch (error) {
+      console.error('[HEALTH] Database connection failed:', error.message);
+      dbStatus = false;
+    }
+  }
+
   res.json({
     ok: true,
     ts: Date.now(),
     env: process.env.NODE_ENV || 'development',
-    db: !!process.env.DATABASE_URL
+    db: dbStatus,
+    dbUrl: !!process.env.DATABASE_URL
   });
 });
 
