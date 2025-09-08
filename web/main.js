@@ -611,20 +611,13 @@ async function doAuth(kind) {
       if (esSoloBienvenida) { resetMsgs(); }
     }
 
-    // ¿Ya tiene personaje? → login con partida previa
-    let me = null;
-    try { me = await apiGet('/world/characters/me'); }
-    catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
+    // ✅ La función loadUserData() ya determinó si el usuario tiene personaje o no
+    // Si tiene personaje, ya está en step='done' y listo para jugar
+    // Si no tiene personaje, está en step='name' y necesita onboarding
 
-    if (me?.character) {
-      // Jugador existente: forzamos historial
-      setCharacter(me.character);
-      setStep('done');
-
-      await loadHistory({ force: true });
-      await showResumeIfAny();
-
-      console.log('[AUTH] Setting identity bar - User:', response.user.username, 'Character:', character?.name);
+    if (step === 'done') {
+      // Usuario existente con personaje - mostrar info completa
+      console.log('[AUTH] Existing user with character - ready to play');
       if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
       setIdentityBar(response.user.username, character?.name || '');
       updateAuthUI();
@@ -632,7 +625,10 @@ async function doAuth(kind) {
       return; // listo para seguir jugando
     }
 
-    // === Registro nuevo: empezamos onboarding ===
+    // === Usuario nuevo sin personaje: empezamos onboarding ===
+    console.log('[AUTH] New user without character - starting onboarding');
+
+    // Limpiar estado para onboarding limpio
     resetMsgs();
     setCharacter(null);
     setStep('name');

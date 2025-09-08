@@ -58,6 +58,7 @@ export async function dmSay(message){
 /**
  * Kickoff del onboarding:
  * - NO inyecta ningún texto de bienvenida local.
+ * - Después de CLIENT_HELLO exitoso, cambia el estado para permitir chat normal.
  * - Solo muestra un banner de error si el backend responde 4xx/5xx o viene vacío.
  */
 async function startOnboardingKickoff(){ // ← interna (sin export)
@@ -73,6 +74,17 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
 
     if (kick?.text && String(kick.text).trim()) {
       handleIncomingDMText(kick.text);
+
+      // ✅ Después de CLIENT_HELLO exitoso, permitir chat normal
+      // Cambiar el estado para que el placeholder sea "Habla con el Máster…" en lugar de "Tu nombre en el HoloNet…"
+      console.log('[ONBOARDING] CLIENT_HELLO successful, enabling chat mode');
+      setStep('done'); // Esto hace que el placeholder cambie a "Habla con el Máster…"
+
+      // Importar y llamar render para actualizar la UI
+      import('./main.js').then(module => {
+        if (module.render) module.render();
+      }).catch(e => console.error('[ONBOARDING] Failed to update UI:', e));
+
     } else {
       showConnectionErrorBanner('Respuesta vacía del Máster');
     }
