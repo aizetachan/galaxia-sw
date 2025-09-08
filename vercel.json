@@ -1,17 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/test.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/health.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/auth/route.js": {
-      "runtime": "nodejs18.x"
-    },
-    "api/[...all].js": {
-      "runtime": "nodejs18.x"
-    }
-  }
+  "version": 2
 }
