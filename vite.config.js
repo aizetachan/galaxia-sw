@@ -10,6 +10,8 @@ export default defineConfig({
   publicDir: 'assets', // Copiar assets estáticos
   define: {
     global: 'globalThis',
+    'process.env': {},
+    'process.env.NODE_ENV': JSON.stringify('development'),
   },
   resolve: {
     alias: {
