@@ -45,6 +45,19 @@ app.get('/test', (req, res) => {
   res.json({ ok: true, message: 'Test endpoint working' });
 });
 
+// Test endpoint para verificar módulos
+app.get('/test-auth', (req, res) => {
+  console.log('[TEST-AUTH] Testing auth module import');
+  try {
+    const auth = require('./auth');
+    console.log('[TEST-AUTH] Auth module imported successfully');
+    res.json({ ok: true, message: 'Auth module import successful' });
+  } catch (error) {
+    console.error('[TEST-AUTH] Error importing auth module:', error);
+    res.status(500).json({ ok: false, error: 'Auth module import failed', details: error.message });
+  }
+});
+
 // Rutas de autenticación
 app.use('/auth', auth);
 

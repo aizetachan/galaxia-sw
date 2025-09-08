@@ -1,6 +1,6 @@
 // Autenticación temporal sin base de datos (para testing)
 const express = require('express');
-const jwt = require('jsonwebtoken');
+// const jwt = require('jsonwebtoken'); // Temporalmente comentado para debugging
 
 const router = express.Router();
 
@@ -10,42 +10,41 @@ const sessions = new Map();
 
 console.log('[AUTH] Using in-memory storage for testing (no database configured)');
 
-// Función para generar JWT
+// Función para generar token simple (temporal)
 function generateToken(user) {
-  const secret = process.env.JWT_SECRET || 'galaxia-secret-key';
-  console.log('[AUTH] Generating token with secret length:', secret.length);
-  return jwt.sign(
-    { userId: user.id, username: user.username },
-    secret,
-    { expiresIn: '7d' }
-  );
+  const token = `simple-token-${user.id}-${Date.now()}`;
+  console.log('[AUTH] Generated simple token:', token.substring(0, 20) + '...');
+  return token;
 }
 
-// Función para verificar JWT
+// Función para verificar token simple
 function verifyToken(token) {
-  try {
-    const secret = process.env.JWT_SECRET || 'galaxia-secret-key';
-    return jwt.verify(token, secret);
-  } catch (error) {
-    console.log('[AUTH] Token verification failed:', error.message);
-    return null;
+  if (token && token.startsWith('simple-token-')) {
+    console.log('[AUTH] Token verified successfully');
+    return { userId: token.split('-')[2] };
   }
+  console.log('[AUTH] Token verification failed');
+  return null;
 }
 
 // Middleware de autenticación
 function requireAuth(req, res, next) {
   const token = req.cookies.sid || req.headers.authorization?.replace('Bearer ', '');
+  console.log('[AUTH] requireAuth called, token present:', !!token);
 
   if (!token) {
+    console.log('[AUTH] No token provided');
     return res.status(401).json({ ok: false, error: 'No token provided' });
   }
 
   const decoded = verifyToken(token);
   if (!decoded) {
+    console.log('[AUTH] Invalid token');
     return res.status(401).json({ ok: false, error: 'Invalid token' });
   }
 
   req.user = decoded;
+  console.log('[AUTH] Authentication successful for user:', decoded.userId);
   next();
 }
 
