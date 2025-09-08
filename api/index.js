@@ -1,68 +1,19 @@
-// Handler ultra-simple para debugging
-export default async function handler(req, res) {
-  console.log('[SIMPLE] Request received:', req.method, req.url);
+// Handler mínimo para testing
+export default function handler(request, response) {
+  console.log('Handler called with:', request.method, request.url);
 
-  // Health check
-  if (req.method === 'GET' && req.url === '/api/health') {
-    console.log('[HEALTH] Health endpoint called');
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.statusCode = 200;
-    res.end(JSON.stringify({
-      ok: true,
-      message: 'Health check working',
-      timestamp: Date.now()
-    }));
+  // Solo health check por ahora
+  if (request.method === 'GET' && request.url === '/api/health') {
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.statusCode = 200;
+    response.end('{"ok":true,"message":"Working"}');
     return;
   }
 
-  // Register endpoint
-  if (req.method === 'POST' && req.url === '/api/auth/register') {
-    console.log('[REGISTER] Register endpoint called');
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.statusCode = 200;
-    res.end(JSON.stringify({
-      ok: true,
-      user: { id: 123, username: 'testuser' },
-      message: 'User registered successfully'
-    }));
-    return;
-  }
-
-  // Login endpoint
-  if (req.method === 'POST' && req.url === '/api/auth/login') {
-    console.log('[LOGIN] Login endpoint called');
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.statusCode = 200;
-    res.end(JSON.stringify({
-      ok: true,
-      user: { id: 123, username: 'testuser' },
-      message: 'Login successful'
-    }));
-    return;
-  }
-
-  // Test endpoint
-  if (req.method === 'GET' && req.url === '/api/test') {
-    console.log('[TEST] Test endpoint called');
-    res.setHeader('Content-Type', 'text/plain');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.statusCode = 200;
-    res.end('TEST');
-    return;
-  }
-
-  // Default response
-  console.log('[DEFAULT] Route not found:', req.method, req.url);
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.statusCode = 404;
-  res.end(JSON.stringify({
-    ok: false,
-    error: 'Not found',
-    method: req.method,
-    url: req.url
-  }));
+  // Default 404
+  response.setHeader('Content-Type', 'application/json');
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.statusCode = 404;
+  response.end('{"ok":false,"error":"Not found"}');
 }
