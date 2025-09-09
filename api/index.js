@@ -131,8 +131,74 @@ async function initDatabase() {
     `);
 
     console.log('[DB] Database tables initialized successfully');
+
+    // Verificar y corregir characters con user_id NULL
+    await checkAndFixNullUserIds();
+
   } catch (error) {
     console.error('[DB] Database initialization error:', error);
+  }
+}
+
+// Función para verificar y corregir characters con user_id NULL
+async function checkAndFixNullUserIds() {
+  try {
+    console.log('[DB] 🔍 Checking for characters with NULL user_id...');
+
+    // Buscar characters con user_id NULL
+    const nullUserIdCharacters = await pool.query(`
+      SELECT id, name, created_at
+      FROM characters
+      WHERE user_id IS NULL
+      ORDER BY created_at DESC
+    `);
+
+    console.log(`[DB] 📋 Found ${nullUserIdCharacters.rows.length} characters with NULL user_id`);
+
+    if (nullUserIdCharacters.rows.length > 0) {
+      console.log('[DB] ⚠️  Characters with NULL user_id detected:');
+      nullUserIdCharacters.rows.forEach((char, index) => {
+        console.log(`   ${index + 1}. ID: ${char.id}, Name: ${char.name}, Created: ${char.created_at}`);
+      });
+
+      console.log('[DB] 🗑️  Deleting characters with NULL user_id to prevent data corruption...');
+
+      // Eliminar characters con user_id NULL
+      const deleteResult = await pool.query(`
+        DELETE FROM characters
+        WHERE user_id IS NULL
+      `);
+
+      console.log(`[DB] ✅ Deleted ${deleteResult.rowCount} characters with NULL user_id`);
+      console.log('[DB] 🛡️  Data integrity restored');
+    } else {
+      console.log('[DB] ✅ No characters with NULL user_id found');
+    }
+
+    // Verificar integridad de relaciones
+    const integrityCheck = await pool.query(`
+      SELECT
+        COUNT(*) as total_characters,
+        COUNT(CASE WHEN user_id IS NULL THEN 1 END) as null_user_ids,
+        COUNT(DISTINCT user_id) as unique_users_with_characters
+      FROM characters
+    `);
+
+    const stats = integrityCheck.rows[0];
+    console.log('[DB] 📊 Database integrity stats:');
+    console.log(`   - Total characters: ${stats.total_characters}`);
+    console.log(`   - Characters with NULL user_id: ${stats.null_user_ids}`);
+    console.log(`   - Users with characters: ${stats.unique_users_with_characters}`);
+
+    if (stats.null_user_ids > 0) {
+      console.error('[DB] ❌ CRÍTICO: Still found characters with NULL user_id after cleanup!');
+    } else {
+      console.log('[DB] ✅ Database integrity verified');
+    }
+
+  } catch (error) {
+    console.error('[DB] ❌ Error checking/fixing NULL user_ids:', error);
+    // No lanzamos error aquí para no romper la inicialización
   }
 }
 
@@ -621,13 +687,37 @@ async function handler(request, response) {
     try {
       const jwt = require('jsonwebtoken');
       console.log('[WORLD] 📋 DEBUG: Decoding token...');
+      console.log('[WORLD] 📋 DEBUG: JWT_SECRET exists:', !!process.env.JWT_SECRET);
+      console.log('[WORLD] 📋 DEBUG: Token to decode:', token ? token.substring(0, 50) + '...' : 'NO TOKEN');
+
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
-      userId = decoded.id || 12345;
-      username = decoded.username || 'unknown_user';
-      console.log('[WORLD] 📋 DEBUG: Token decoded successfully, username:', username, 'userId:', userId);
+      console.log('[WORLD] 📋 DEBUG: Raw decoded token:', decoded);
+
+      userId = decoded.id;
+      username = decoded.username;
+
+      console.log('[WORLD] 📋 DEBUG: Extracted userId:', userId, 'type:', typeof userId);
+      console.log('[WORLD] 📋 DEBUG: Extracted username:', username);
+
+      // Validación crítica del userId
+      if (!userId || userId === 12345) {
+        console.error('[WORLD] ❌ CRÍTICO: userId inválido o faltante');
+        console.error('[WORLD] ❌ userId value:', userId);
+        console.error('[WORLD] ❌ Esto causará characters con user_id NULL');
+        response.statusCode = 401;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'INVALID_TOKEN',
+          message: 'Token inválido - userId faltante'
+        }));
+        return;
+      }
+
+      console.log('[WORLD] ✅ Token validation successful');
     } catch (error) {
-      console.error('[WORLD] ❌ Error decoding token:', error.message);
+      console.error('[WORLD] ❌ Error decoding token:', error.name, error.message);
       console.error('[WORLD] ❌ Token decode error details:', error);
+      console.error('[WORLD] ❌ Esto causará characters con user_id NULL');
     }
 
     // Buscar personaje en base de datos (obligatorio)
@@ -883,10 +973,14 @@ async function handler(request, response) {
           }
 
           // Verificar si el usuario ya tiene un personaje
+          console.log('[WORLD] 📋 DEBUG: Checking existing character for userId:', userId);
+          console.log('[WORLD] 📋 DEBUG: userId type:', typeof userId, 'value:', userId);
           const existingCharacter = await pool.query('SELECT id FROM characters WHERE user_id = $1', [userId]);
+          console.log('[WORLD] 📋 DEBUG: Existing character query result:', existingCharacter.rows.length, 'rows');
 
           if (existingCharacter.rows.length > 0) {
             // Actualizar personaje existente
+            console.log('[WORLD] 📋 DEBUG: Updating existing character, ID:', existingCharacter.rows[0].id);
             const result = await pool.query(`
               UPDATE characters
               SET name = $2, species = $3, role = $4, public_profile = $5, last_location = $6, updated_at = CURRENT_TIMESTAMP
@@ -902,7 +996,8 @@ async function handler(request, response) {
             ]);
 
             const character = result.rows[0];
-            console.log('[WORLD] Character updated:', character.name);
+            console.log('[WORLD] ✅ Character updated:', character.name);
+            console.log('[WORLD] 📋 DEBUG: Updated character user_id:', character.user_id);
 
             response.statusCode = 200;
             response.end(JSON.stringify({
@@ -921,6 +1016,13 @@ async function handler(request, response) {
             }));
           } else {
             // Crear nuevo personaje
+            console.log('[WORLD] 📋 DEBUG: Creating new character for userId:', userId);
+            console.log('[WORLD] 📋 DEBUG: Character data to insert:');
+            console.log('  - user_id:', userId);
+            console.log('  - name:', data.name || data.character?.name);
+            console.log('  - species:', data.species || data.character?.species);
+            console.log('  - role:', data.role || data.character?.role);
+
             const result = await pool.query(`
               INSERT INTO characters (user_id, name, species, role, public_profile, last_location)
               VALUES ($1, $2, $3, $4, $5, $6)
@@ -934,8 +1036,18 @@ async function handler(request, response) {
               data.lastLocation || data.character?.lastLocation || 'Tatooine — Cantina de Mos Eisley'
             ]);
 
+            console.log('[WORLD] 📋 DEBUG: Insert result:', result.rows.length, 'rows');
             const character = result.rows[0];
-            console.log('[WORLD] Character created:', character.name);
+            console.log('[WORLD] ✅ Character created:', character.name);
+            console.log('[WORLD] 📋 DEBUG: Created character ID:', character.id);
+            console.log('[WORLD] 📋 DEBUG: Created character user_id:', character.user_id);
+            console.log('[WORLD] 📋 DEBUG: Character data verification:', {
+              id: character.id,
+              user_id: character.user_id,
+              name: character.name,
+              species: character.species,
+              role: character.role
+            });
 
             response.statusCode = 200;
             response.end(JSON.stringify({

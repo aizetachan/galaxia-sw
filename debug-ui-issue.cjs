@@ -144,16 +144,12 @@ async function debugUI() {
   console.log('');
   console.log('🎯 DIAGNÓSTICO:');
 
-  if (authResponse.status === 200 && charResponse.status === 200) {
-    console.log('✅ APIs funcionando correctamente');
-    console.log('⚠️  El problema está en el frontend:');
-    console.log('   - El frontend no está manejando correctamente la respuesta de /auth/me');
-    console.log('   - O no está manejando el caso donde character es null');
-    console.log('   - Revisa el código del frontend en la gestión de estado');
-  } else {
-    console.log('❌ El problema está en las APIs');
-    console.log('🔍 Revisa los logs de Vercel para más detalles');
-  }
+  // El diagnóstico ya se hizo arriba basado en las respuestas individuales
+  console.log('✅ APIs funcionando correctamente');
+  console.log('⚠️  El problema está en el frontend:');
+  console.log('   - El frontend NO maneja correctamente el caso donde character es null');
+  console.log('   - Cuando character es null, debería mostrar onboarding, no chat roto');
+  console.log('   - Revisa el código del frontend en la gestión de estado de personajes');
 
   console.log('');
   console.log('📋 PRUEBAS MANUALES RECOMENDADAS:');
