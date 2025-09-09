@@ -103,7 +103,7 @@ async function boot(){
     if (authStatusEl) authStatusEl.textContent = 'Sin conexión para validar sesión';
   }
 
-  await loadHistory();
+  // No llamar loadHistory() aquí porque ya se hace en loadUserData()
   updateAuthUI();
 
   // ⬇️ Cambio clave: arrancar onboarding SOLO UNA VEZ y sin mensajes locales duplicados
@@ -127,6 +127,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   if (cancelBtn) cancelBtn.addEventListener('click', ()=>{ pushDM('🎲 Tirada cancelada (… )'); setPendingRoll(null); updateRollCta(); });
 
   render();
+  updatePlaceholder();
   dlog('Boot done');
 }
 
@@ -141,6 +142,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
  *                         Render
  * ========================================================== */
 function render(){
+  console.log('[RENDER] Starting render with:', { msgsCount: msgs.length, step, character: !!character, pendingConfirm });
   dgroup('render', ()=>console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   let html = msgs.map((m,i)=>{
@@ -230,8 +232,11 @@ function updatePlaceholder(){
   };
   if (inputEl) {
     const newPlaceholder = placeholders[step] || placeholders.done;
-    console.log('[PLACEHOLDER] Setting placeholder for step:', step, '->', newPlaceholder);
+    console.log('[PLACEHOLDER] Setting placeholder for step:', step, '->', newPlaceholder, 'inputEl found:', !!inputEl);
     inputEl.placeholder = newPlaceholder;
+    console.log('[PLACEHOLDER] Placeholder set successfully:', inputEl.placeholder);
+  } else {
+    console.warn('[PLACEHOLDER] inputEl not found!');
   }
 }
 function updateRollCta(){
@@ -468,6 +473,12 @@ async function loadUserData() {
     setStep(userStep);
     setPendingConfirm(null);
 
+    // Forzar render y actualización de UI después de configurar el estado
+    console.log('[BOOT] Forcing render and UI update...');
+    render();
+    updatePlaceholder();
+    updateAuthUI();
+
     // Guardar en localStorage para futuras sesiones
     if (userCharacter) {
       save(KEY_CHAR, userCharacter);
@@ -578,20 +589,9 @@ async function doAuth(kind) {
       const token = response.token || 'dummy-token';
       const userData = { token, user: response.user };
 
-      // Intentar decodificar el token para obtener información adicional
-      if (response.token) {
-        try {
-          const decoded = JSON.parse(atob(response.token));
-          console.log('[AUTH] Token decoded:', decoded);
-          // Actualizar user con información del token si es necesario
-          if (decoded.username && decoded.username !== response.user.username) {
-            userData.user.username = decoded.username;
-            console.log('[AUTH] Updated username from token:', decoded.username);
-          }
-        } catch (error) {
-          console.log('[AUTH] Could not decode token:', error.message);
-        }
-      }
+      // El token JWT ya está listo para usar - no necesitamos decodificarlo aquí
+      console.log('[AUTH] Token received and ready to use');
+      console.log('[AUTH] Token length:', response.token?.length || 0);
 
       setAuth(userData);
       localStorage.setItem('sw:auth', JSON.stringify(userData));
@@ -701,5 +701,6 @@ if ('serviceWorker' in navigator){
   });
 }
 
-// Exportar render globalmente para que pueda ser llamado desde otros módulos
+// Exportar funciones globalmente para que puedan ser llamadas desde otros módulos
 window.render = render;
+window.updatePlaceholder = updatePlaceholder;

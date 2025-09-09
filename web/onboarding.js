@@ -6,7 +6,7 @@ import { api } from './api-client.js';
 import { dlog } from './api.js';
 
 export let character = load(KEY_CHAR, null);
-export let step = load(KEY_STEP, 'name');
+export let step = character ? 'done' : load(KEY_STEP, 'name'); // Si hay personaje, step es 'done'
 export let pendingConfirm = load(KEY_CONFIRM, null);
 
 export function setCharacter(c){ character = c; save(KEY_CHAR, c); }
@@ -80,7 +80,7 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
       console.log('[ONBOARDING] CLIENT_HELLO successful, enabling chat mode');
       setStep('done'); // Esto hace que el placeholder cambie a "Habla con el Máster…"
 
-      // Llamar render para actualizar la UI
+      // Llamar render y actualizar placeholder para reflejar el nuevo estado
       try {
         // Intentar acceder a render desde el contexto global
         if (window.render) {
@@ -88,8 +88,14 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
         } else {
           console.warn('[ONBOARDING] render function not available globally');
         }
+        // Actualizar placeholder después de cambiar el step
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        } else {
+          console.warn('[ONBOARDING] updatePlaceholder function not available globally');
+        }
       } catch (e) {
-        console.error('[ONBOARDING] Failed to call render:', e);
+        console.error('[ONBOARDING] Failed to call render/updatePlaceholder:', e);
       }
 
     } else {
@@ -156,6 +162,11 @@ export async function handleConfirmDecision(decision){
         // No inyectar mensajes locales → evita duplicados
         ui.render?.();
 
+        // Actualizar placeholder después de cambiar step
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        }
+
         // Avisamos al Máster del avance de subpaso
         dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`).catch(()=>{});
 
@@ -181,6 +192,11 @@ export async function handleConfirmDecision(decision){
           if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character); }
         }catch(e){ dlog('upsert build fail', e?.data||e); }
         setStep('done');
+
+        // Actualizar placeholder después de completar onboarding
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        }
       }
     }
 
