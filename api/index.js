@@ -745,25 +745,20 @@ async function handler(request, response) {
         return;
       }
 
+      // Simplificar la consulta para debugging
+      console.log('[WORLD] 📋 DEBUG: Testing simple character query...');
       const result = await pool.query(`
-        SELECT c.*, u.username
-        FROM characters c
-        JOIN users u ON c.user_id = u.id
-        WHERE c.user_id = $1
+        SELECT * FROM characters WHERE user_id = $1
       `, [numericUserId]);
+
+      console.log('[WORLD] 📋 DEBUG: Simple query result:', result.rows.length, 'rows');
+      console.log('[WORLD] 📋 DEBUG: Character IDs found:', result.rows.map(r => r.id));
 
       console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
 
       if (result.rows.length > 0) {
         const character = result.rows[0];
         console.log('[WORLD] ✅ Found character:', character.name, 'ID:', character.id);
-        console.log('[WORLD] 📋 DEBUG: Character data:', {
-          name: character.name,
-          species: character.species,
-          role: character.role,
-          publicProfile: character.public_profile,
-          lastLocation: character.last_location
-        });
 
         response.statusCode = 200;
         response.end(JSON.stringify({
