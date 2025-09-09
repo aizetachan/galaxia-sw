@@ -750,6 +750,16 @@ async function handler(request, response) {
       const testResult = await pool.query('SELECT 1 as test');
       console.log('[WORLD] 📋 DEBUG: Ultra-simple query result:', testResult.rows);
 
+      // Primero verificar estructura de la tabla
+      console.log('[WORLD] 📋 DEBUG: Checking table structure...');
+      const tableInfo = await pool.query(`
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = 'characters'
+        ORDER BY ordinal_position
+      `);
+      console.log('[WORLD] 📋 DEBUG: Characters table columns:', tableInfo.rows);
+
       // Ahora probar la consulta real
       console.log('[WORLD] 📋 DEBUG: Testing character query...');
       const result = await pool.query(`
