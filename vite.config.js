@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: 'web',
   build: {
     outDir: '../dist',
@@ -21,7 +21,7 @@ export default defineConfig({
   define: {
     global: 'globalThis',
     'process.env': {},
-    'process.env.NODE_ENV': JSON.stringify('development'),
+    'process.env.NODE_ENV': JSON.stringify(mode || 'development'),
   },
   resolve: {
     alias: {
@@ -30,5 +30,9 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['process']
-  }
-});
+  },
+  esbuild: {
+    // Configuración para compatibilidad con ESM
+    target: 'es2020',
+  },
+}));

@@ -78,6 +78,8 @@ console.log('window.isLogged:', typeof window.isLogged);
 // Verificar API_BASE
 console.log('\n🌐 6. Configuración API:');
 console.log('API_BASE:', window.API_BASE || 'N/A');
+console.log('Location origin:', window.location.origin);
+console.log('Expected API URL:', (window.API_BASE || '/api').replace(/\/$/, ''));
 
 // Probar health check
 console.log('\n🏥 7. Health check:');

@@ -7,9 +7,17 @@ if (process.env.DATABASE_URL) {
     const { Pool } = require('pg');
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+      ssl: process.env.NODE_ENV === 'production' ? {
+        rejectUnauthorized: false,
+        ca: undefined // Permitir certificados autofirmados
+      } : false,
+      // Configuración optimizada para Vercel
+      connectionTimeoutMillis: 15000,
+      query_timeout: 15000,
+      idleTimeoutMillis: 30000,
+      max: 5, // Limitar conexiones para Vercel
     });
-    console.log('[DB] Database configured');
+    console.log('[DB] Database configured for Vercel');
 
     // Inicializar tablas automáticamente
     initDatabase().catch(error => {
@@ -96,7 +104,7 @@ function verifyPin(pin, hash) {
   return hashPin(pin) === hash;
 }
 
-export default function handler(request, response) {
+function handler(request, response) {
   console.log('Handler called with:', request.method, request.url);
   console.log('Full URL:', request.url);
   console.log('Pathname:', request.url ? request.url.split('?')[0] : 'none');
@@ -1038,3 +1046,5 @@ export default function handler(request, response) {
   response.statusCode = 404;
   response.end('{"ok":false,"error":"Not found","method":"' + request.method + '","path":"' + path + '","fullUrl":"' + request.url + '"}');
 }
+
+module.exports = handler;
