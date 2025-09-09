@@ -116,7 +116,6 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
  * - Llama al kickoff (única fuente de verdad: el Máster).
  */
 export async function startOnboarding({ hard=false } = {}){
-  try{ document.getElementById('guest-card')?.setAttribute('hidden','hidden'); }catch{}
   if (hard) resetMsgs();
 
   setCharacter(null);

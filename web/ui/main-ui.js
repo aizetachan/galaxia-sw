@@ -71,8 +71,6 @@ export function updateAuthUI(){
   if (card) {
     console.log('[UI] Guest card found, setting visibility - logged:', logged);
     card.hidden = !!logged;
-    card.classList.toggle('hidden', !!logged);
-    card.style.display = logged ? 'none' : '';
   } else {
     console.warn('[UI] Guest card element not found!');
   }
