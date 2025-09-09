@@ -795,12 +795,25 @@ async function handler(request, response) {
       console.error('[WORLD] ❌ Database error:', dbError.message);
       console.error('[WORLD] ❌ Database error details:', dbError);
       console.error('[WORLD] ❌ Database error stack:', dbError.stack);
+      console.error('[WORLD] ❌ SQL State:', dbError.code);
+      console.error('[WORLD] ❌ SQL Position:', dbError.position);
       console.error('[WORLD] ❌ This error prevents character data from being retrieved');
+
+      // Proporcionar más detalles del error para debugging
+      const errorDetails = {
+        message: dbError.message,
+        code: dbError.code,
+        position: dbError.position,
+        severity: dbError.severity,
+        detail: dbError.detail
+      };
+
       response.statusCode = 500;
       response.end(JSON.stringify({
         ok: false,
         error: 'DATABASE_ERROR',
-        message: 'Error interno del servidor'
+        message: 'Error interno del servidor',
+        debug: errorDetails
       }));
     }
     return;
