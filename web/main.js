@@ -74,33 +74,121 @@ async function boot(){
   console.log('[BOOT] Server status set, continuing with auth...');
 
   try{
-    const saved = JSON.parse(localStorage.getItem('sw:auth')||'null');
-    console.log('[BOOT] Saved auth data:', saved);
-    if (saved?.token && saved?.user?.id){
-      console.log('[BOOT] Setting auth from localStorage:', saved.user.username);
-      setAuth(saved);
-      console.log('[BOOT] AUTH after setAuth:', AUTH);
-      await apiGet('/auth/me').catch(e => {
-        console.error('[BOOT] /auth/me failed:', e);
-        if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e;
-      });
+    console.log('[BOOT] 🔍 Attempting to load auth from localStorage...');
+    const rawAuthData = localStorage.getItem('sw:auth');
+    console.log('[BOOT] 📋 Raw auth data from localStorage:', rawAuthData);
 
-      // Cargar datos del usuario desde el servidor
-      await loadUserData();
-
-      // Mostrar mensaje de bienvenida
-      if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
-    } else {
+    if (!rawAuthData || rawAuthData === 'null' || rawAuthData === 'undefined') {
+      console.log('[BOOT] 📋 No auth data in localStorage, starting as guest');
       setAuth(null);
       localStorage.removeItem('sw:auth');
       setMsgs([]);
       setCharacter(null);
       setStep('name');
       setPendingConfirm(null);
+    } else {
+      // Validación robusta del JSON
+      let saved = null;
+      try {
+        saved = JSON.parse(rawAuthData);
+        console.log('[BOOT] ✅ Auth data parsed successfully:', saved);
+      } catch (parseError) {
+        console.error('[BOOT] ❌ CRÍTICO: Auth data corrupted in localStorage!');
+        console.error('[BOOT] ❌ Raw corrupted data:', rawAuthData);
+        console.error('[BOOT] ❌ Parse error:', parseError.message);
+
+        // Limpiar datos corruptos
+        console.log('[BOOT] 🧹 Cleaning corrupted auth data...');
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      // Validar estructura del auth data
+      if (!saved || typeof saved !== 'object') {
+        console.error('[BOOT] ❌ Auth data is not a valid object:', saved);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      if (!saved.token || !saved.user?.id) {
+        console.log('[BOOT] 📋 Auth data incomplete, missing token or user.id:', saved);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      // Validar que el token se vea como un JWT
+      if (typeof saved.token !== 'string' || !saved.token.includes('.')) {
+        console.error('[BOOT] ❌ Token format invalid:', saved.token);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      console.log('[BOOT] ✅ Auth data validation passed, setting auth...');
+      console.log('[BOOT] 📋 Setting auth for user:', saved.user.username);
+      setAuth(saved);
+      console.log('[BOOT] 📋 AUTH after setAuth:', AUTH);
+
+      // Validar el token con el servidor
+      try {
+        console.log('[BOOT] 🔍 Validating token with server...');
+        await apiGet('/auth/me');
+        console.log('[BOOT] ✅ Token validated with server');
+
+        // Cargar datos del usuario desde el servidor
+        console.log('[BOOT] 📥 Loading user data from server...');
+        await loadUserData();
+
+        // Mostrar mensaje de bienvenida
+        if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
+        console.log('[BOOT] ✅ User authentication restored successfully');
+
+      } catch (validationError) {
+        console.error('[BOOT] ❌ Token validation failed:', validationError.message);
+        console.log('[BOOT] 🧹 Removing invalid auth data...');
+
+        // Limpiar auth inválido
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+      }
     }
   } catch(e){
+    console.error('[BOOT] ❌ Unexpected error in auth restoration:', e);
+    console.log('[BOOT] 🧹 Cleaning up due to unexpected error...');
+
+    // Limpiar todo en caso de error inesperado
+    localStorage.removeItem('sw:auth');
+    setAuth(null);
+    setMsgs([]);
+    setCharacter(null);
+    setStep('name');
+    setPendingConfirm(null);
+
     dlog('Auth restore error:', e);
-    if (authStatusEl) authStatusEl.textContent = 'Sin conexión para validar sesión';
+    if (authStatusEl) authStatusEl.textContent = 'Error al restaurar sesión';
   }
 
   // No llamar loadHistory() aquí porque ya se hace en loadUserData()
@@ -593,9 +681,16 @@ async function doAuth(kind) {
       console.log('[AUTH] Token received and ready to use');
       console.log('[AUTH] Token length:', response.token?.length || 0);
 
+      console.log('[AUTH] 📋 About to save auth data to localStorage...');
+      console.log('[AUTH] 📋 userData to save:', userData);
+      console.log('[AUTH] 📋 userData.token length:', userData.token?.length || 0);
+
       setAuth(userData);
+      console.log('[AUTH] ✅ setAuth called successfully');
+
       localStorage.setItem('sw:auth', JSON.stringify(userData));
-      console.log('[AUTH] Auth state set, user stored in localStorage');
+      console.log('[AUTH] 💾 Auth data saved to localStorage');
+      console.log('[AUTH] 📋 localStorage content after save:', localStorage.getItem('sw:auth'));
     } else {
       console.error('[AUTH] Invalid response:', response);
       throw new Error('Invalid response from server');

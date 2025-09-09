@@ -44,7 +44,7 @@ async function checkDBIntegrity() {
   // Paso 1: Crear usuario de prueba
   console.log('\n1️⃣ PASO 1: Creando usuario de prueba...');
   try {
-    const username = `integrity_check_${Date.now()}`;
+    const username = `int_chk_${Date.now().toString().slice(-6)}`;
     const registerResponse = await makeRequest({
       hostname: 'galaxia-sw-kepe.vercel.app',
       port: 443,
