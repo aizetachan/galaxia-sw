@@ -760,10 +760,21 @@ async function handler(request, response) {
       `);
       console.log('[WORLD] 📋 DEBUG: Characters table columns:', tableInfo.rows);
 
-      // Ahora probar la consulta real
+      // Intentar encontrar la columna correcta para user_id
+      const userIdColumn = tableInfo.rows.find(col =>
+        col.column_name.includes('user') ||
+        col.column_name.includes('owner')
+      );
+      console.log('[WORLD] 📋 DEBUG: Found potential user column:', userIdColumn);
+
+      // Usar la columna correcta encontrada
+      const userColumnName = userIdColumn ? userIdColumn.column_name : 'user_id';
+      console.log('[WORLD] 📋 DEBUG: Using column name:', userColumnName);
+
+      // Ahora probar la consulta real con la columna correcta
       console.log('[WORLD] 📋 DEBUG: Testing character query...');
       const result = await pool.query(`
-        SELECT * FROM characters WHERE user_id = $1
+        SELECT * FROM characters WHERE ${userColumnName} = $1
       `, [numericUserId]);
 
       console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
