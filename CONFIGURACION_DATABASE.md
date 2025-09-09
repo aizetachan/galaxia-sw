@@ -1,30 +1,35 @@
 # 🗄️ Configuración de Base de Datos PostgreSQL
 
 ## Estado Actual
-✅ **Sistema funcionando correctamente en ambos entornos:**
+✅ **Sistema funcionando con base de datos PostgreSQL obligatoria**
 
-### 🏠 Desarrollo Local (Modo Demo)
-- ✅ **DATABASE_URL no configurada** → Funciona en **modo demo**
-- ✅ **Validaciones pasan** (7/7 tests exitosos)
-- ✅ **Fallback automático** cuando no hay conexión a BD
+### 🚫 Modo Demo Eliminado
+- ❌ **MODO DEMO COMPLETAMENTE ELIMINADO**
+- ✅ **DATABASE_URL es OBLIGATORIA** para que funcione la aplicación
+- ✅ **Sin fallbacks** - la aplicación requiere PostgreSQL para operar
 
-### 🚀 Producción Vercel (Base de Datos Real)
-- ✅ **DATABASE_URL configurada** en variables de entorno de Vercel
+### 🏠 Desarrollo Local
+- ⚠️ **Requiere configuración manual** de DATABASE_URL
+- ✅ **Funciona solo con PostgreSQL**
+- ✅ **No hay modo demo disponible**
+
+### 🚀 Producción Vercel
+- ✅ **DATABASE_URL configurada** en variables de entorno
 - ✅ **PostgreSQL conectado** automáticamente
 - ✅ **Funcionalidad completa** disponible
 
 ## Arquitectura del Sistema
 
-El sistema está diseñado para funcionar en **ambos modos automáticamente**:
+El sistema ahora requiere **PostgreSQL obligatorio**:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐
 │   Desarrollo    │    │   Producción     │
 │   Local         │    │   Vercel         │
 ├─────────────────┤    ├──────────────────┤
-│ Sin DATABASE_URL│    │ DATABASE_URL     │
-│ → Modo Demo     │    │ → PostgreSQL     │
-│ ✅ Funciona      │    │ ✅ Funciona      │
+│ DATABASE_URL    │    │ DATABASE_URL     │
+│ → PostgreSQL    │    │ → PostgreSQL     │
+│ ⚠️ Manual        │    │ ✅ Automático    │
 └─────────────────┘    └──────────────────┘
 ```
 
@@ -37,22 +42,30 @@ curl http://localhost:3001/health
 ```json
 {
   "ok": true,
-  "db": false,
-  "dbUrl": false,
-  "env": "development"
+  "message": "API working with database",
+  "database": {
+    "configured": true,
+    "status": "connected",
+    "url": "[CONFIGURED]"
+  },
+  "environment": "development"
 }
 ```
 
 ### En Producción Vercel:
 ```bash
-curl https://tu-dominio.vercel.app/health
+curl https://galaxia-sw-kepe.vercel.app/health
 ```
 ```json
 {
   "ok": true,
-  "db": true,
-  "dbUrl": true,
-  "env": "production"
+  "message": "API working with database",
+  "database": {
+    "configured": true,
+    "status": "connected",
+    "url": "[CONFIGURED]"
+  },
+  "environment": "production"
 }
 ```
 

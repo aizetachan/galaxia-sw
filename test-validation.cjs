@@ -80,8 +80,8 @@ async function runAllTests() {
     }
   });
 
-  // Test 2: Verificar registro en modo demo
-  await runTest('Registro de usuario (modo demo)', async () => {
+  // Test 2: Verificar registro con base de datos
+  await runTest('Registro de usuario (base de datos)', async () => {
     const response = await makeRequest({
       hostname: 'localhost',
       port: 3001,
@@ -93,11 +93,7 @@ async function runAllTests() {
     if (response.status !== 200) throw new Error(`Status code: ${response.status}`);
     if (!response.body.ok) throw new Error(response.body.message || 'Registration failed');
 
-    if (response.body.message.includes('modo demo')) {
-      return 'Registro en modo demo funciona correctamente';
-    } else {
-      return 'Registro funciona correctamente';
-    }
+    return 'Registro con base de datos funciona correctamente';
   });
 
   // Test 3: Verificar login
@@ -116,7 +112,7 @@ async function runAllTests() {
     if (!response.body.token) throw new Error('No token received');
 
     authToken = response.body.token;
-    return 'Login funciona correctamente';
+    return 'Login con base de datos funciona correctamente';
   });
 
   // Test 4: Verificar endpoint /auth/me con token válido
