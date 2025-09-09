@@ -1,9 +1,12 @@
 // Configuración de base de datos completa
 let pool = null;
 const demoUsers = new Map();
+let dbMode = 'demo'; // 'database' o 'demo'
 
-if (process.env.DATABASE_URL) {
+// Validación explícita de DATABASE_URL
+if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim() !== '') {
   try {
+    console.log('[DB] Attempting database connection with DATABASE_URL...');
     const { Pool } = require('pg');
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
@@ -17,17 +20,40 @@ if (process.env.DATABASE_URL) {
       idleTimeoutMillis: 30000,
       max: 5, // Limitar conexiones para Vercel
     });
-    console.log('[DB] Database configured for Vercel');
+
+    // Verificar conexión inmediatamente
+    pool.on('connect', () => {
+      console.log('[DB] Database connection established successfully');
+      dbMode = 'database';
+    });
+
+    pool.on('error', (err) => {
+      console.error('[DB] Database connection error:', err.message);
+      console.log('[DB] Falling back to demo mode due to database error');
+      pool = null;
+      dbMode = 'demo';
+    });
 
     // Inicializar tablas automáticamente
-    initDatabase().catch(error => {
+    initDatabase().then(() => {
+      console.log('[DB] Database initialization completed successfully');
+    }).catch(error => {
       console.error('[DB] Failed to initialize database:', error);
+      console.log('[DB] Continuing in demo mode due to initialization failure');
+      pool = null;
+      dbMode = 'demo';
     });
+
   } catch (error) {
     console.error('[DB] Database setup error:', error.message);
+    console.log('[DB] DATABASE_URL provided but connection failed - using demo mode');
+    pool = null;
+    dbMode = 'demo';
   }
 } else {
-  console.log('[DB] No DATABASE_URL - using demo mode');
+  console.log('[DB] DATABASE_URL not configured - running in demo mode');
+  console.log('[DB] Set DATABASE_URL environment variable to enable database mode');
+  dbMode = 'demo';
 }
 
 // Función para inicializar la base de datos
@@ -82,16 +108,7 @@ async function initDatabase() {
   }
 }
 
-// Función para verificar token JWT
-function authenticateToken(token) {
-  try {
-    const jwt = require('jsonwebtoken');
-    return jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
-  } catch (error) {
-    console.error('[AUTH] Token verification error:', error);
-    return null;
-  }
-}
+// Función para verificar token JWT (eliminada - usar la de server/auth.js)
 
 // Función para hashear PIN
 function hashPin(pin) {
@@ -104,12 +121,27 @@ function verifyPin(pin, hash) {
   return hashPin(pin) === hash;
 }
 
-function handler(request, response) {
+async function handler(request, response) {
   console.log('Handler called with:', request.method, request.url);
   console.log('Full URL:', request.url);
   console.log('Pathname:', request.url ? request.url.split('?')[0] : 'none');
 
   const path = request.url ? request.url.split('?')[0] : '';
+
+  // Manejo global de preflight CORS (OPTIONS)
+  if (request.method === 'OPTIONS') {
+    console.log('[CORS] Handling preflight OPTIONS request for path:', path);
+
+    // Headers CORS estándar
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    response.setHeader('Access-Control-Max-Age', '86400'); // 24 horas
+
+    response.statusCode = 200;
+    response.end();
+    return;
+  }
 
   // Health check - probar diferentes formatos
   if (request.method === 'GET' && (path === '/api/health' || path === '/health')) {
@@ -119,13 +151,11 @@ function handler(request, response) {
     response.statusCode = 200;
 
     // Verificar estado de la base de datos
-    let dbStatus = 'not_configured';
-    if (process.env.DATABASE_URL) {
-      if (pool) {
-        dbStatus = 'connected';
-      } else {
-        dbStatus = 'configured_but_not_connected';
-      }
+    let dbStatus = 'demo_mode';
+    if (dbMode === 'database') {
+      dbStatus = 'connected';
+    } else if (process.env.DATABASE_URL) {
+      dbStatus = 'configured_but_failed';
     }
 
     response.end(JSON.stringify({
@@ -148,13 +178,13 @@ function handler(request, response) {
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
 
-    if (pool) {
-      response.statusCode = 200;
-      response.end('{"ok":true,"message":"Database configured","mode":"database"}');
-    } else {
-      response.statusCode = 200;
-      response.end('{"ok":true,"message":"Demo mode","mode":"demo"}');
-    }
+    response.statusCode = 200;
+    response.end(JSON.stringify({
+      ok: true,
+      message: dbMode === 'database' ? 'Database configured' : 'Demo mode',
+      mode: dbMode,
+      database_url_configured: !!process.env.DATABASE_URL
+    }));
     return;
   }
 
@@ -169,7 +199,7 @@ function handler(request, response) {
         body += chunk.toString();
       });
 
-      request.on('end', () => {
+      request.on('end', async () => {
         try {
           const data = JSON.parse(body);
           const { username, pin } = data;
@@ -214,7 +244,7 @@ function handler(request, response) {
           }
 
           // Intentar registrar en base de datos
-          if (pool) {
+          if (dbMode === 'database') {
             try {
               console.log('[REGISTER] Attempting database registration for:', username);
 
@@ -314,7 +344,7 @@ function handler(request, response) {
         body += chunk.toString();
       });
 
-      request.on('end', () => {
+      request.on('end', async () => {
         try {
           const data = JSON.parse(body);
           const { username, pin } = data;
@@ -338,7 +368,7 @@ function handler(request, response) {
           }
 
           // Intentar autenticar con base de datos
-          if (pool) {
+          if (dbMode === 'database') {
             try {
               console.log('[LOGIN] Attempting database authentication for:', username);
 
@@ -455,21 +485,45 @@ function handler(request, response) {
       return;
     }
 
-    // Extraer información del token
-    let username = 'unknown_user';
-    let userId = 12345;
+    // Decodificar y validar token JWT
+    let userId, username;
 
     try {
-      // Decodificar token JWT correctamente
       const jwt = require('jsonwebtoken');
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
-      userId = decoded.id || 12345;
-      username = decoded.username || 'unknown_user';
+
+      if (!decoded.id || !decoded.username) {
+        console.error('[AUTH] Token missing required fields (id or username)');
+        response.statusCode = 401;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'INVALID_TOKEN',
+          message: 'Token inválido - faltan campos requeridos'
+        }));
+        return;
+      }
+
+      userId = decoded.id;
+      username = decoded.username;
       console.log('[AUTH] Token decoded successfully:', { userId, username });
+
     } catch (error) {
-      console.error('[AUTH] Error decoding token:', error);
-      username = 'unknown_user';
-      userId = 12345;
+      console.error('[AUTH] Token verification failed:', error.message);
+
+      let errorMessage = 'Token inválido';
+      if (error.name === 'TokenExpiredError') {
+        errorMessage = 'Token expirado';
+      } else if (error.name === 'JsonWebTokenError') {
+        errorMessage = 'Token malformado';
+      }
+
+      response.statusCode = 401;
+      response.end(JSON.stringify({
+        ok: false,
+        error: 'UNAUTHORIZED',
+        message: errorMessage
+      }));
+      return;
     }
 
     response.statusCode = 200;
@@ -516,7 +570,7 @@ function handler(request, response) {
     }
 
     // Intentar buscar personaje en base de datos
-    if (pool) {
+    if (dbMode === 'database') {
       try {
         console.log('[WORLD] Searching character for user:', username);
 
@@ -602,7 +656,7 @@ function handler(request, response) {
     }
 
     // Intentar cargar historial desde base de datos
-    if (pool) {
+    if (dbMode === 'database') {
       try {
         console.log('[CHAT] Loading chat history...');
 
@@ -754,7 +808,7 @@ function handler(request, response) {
         console.log('[WORLD] Character data:', data);
 
         // Intentar guardar personaje en base de datos
-        if (pool) {
+        if (dbMode === 'database') {
           try {
             console.log('[WORLD] Saving character to database...');
 
@@ -922,7 +976,7 @@ function handler(request, response) {
         console.log('[DM] DM request data:', data);
 
         // Procesar la solicitud del DM y guardar mensajes
-        if (pool) {
+        if (dbMode === 'database') {
           try {
             console.log('[DM] Processing DM request with database...');
 

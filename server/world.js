@@ -60,23 +60,8 @@ async function initWorldDatabase() {
 // Inicializar base de datos
 initWorldDatabase();
 
-// Middleware para verificar autenticación
-function authenticateToken(req, res, next) {
-  const token = req.cookies.token || req.headers.authorization?.replace('Bearer ', '');
-
-  if (!token) {
-    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token requerido' });
-  }
-
-  try {
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
-    req.user = decoded;
-    next();
-  } catch (error) {
-    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token inválido' });
-  }
-}
+// Importar middleware de autenticación desde auth.js (evita duplicación)
+const { authenticateToken } = require('./auth');
 
 // GET /world/state
 router.get('/state', (req, res) => {

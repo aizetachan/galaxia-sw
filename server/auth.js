@@ -317,3 +317,4 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 module.exports = router;
+module.exports.authenticateToken = authenticateToken;

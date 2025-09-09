@@ -75,10 +75,12 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
     if (kick?.text && String(kick.text).trim()) {
       handleIncomingDMText(kick.text);
 
-      // ✅ Después de CLIENT_HELLO exitoso, permitir chat normal
-      // Cambiar el estado para que el placeholder sea "Habla con el Máster…" en lugar de "Tu nombre en el HoloNet…"
-      console.log('[ONBOARDING] CLIENT_HELLO successful, enabling chat mode');
-      setStep('done'); // Esto hace que el placeholder cambie a "Habla con el Máster…"
+      // ✅ Después de CLIENT_HELLO exitoso, mantener el flujo de onboarding
+      // NO marcar como 'done' hasta completar nombre/especie/rol
+      console.log('[ONBOARDING] CLIENT_HELLO successful, starting onboarding flow');
+
+      // Mantener el step como 'name' para que el placeholder siga siendo "Tu nombre en el HoloNet…"
+      // Solo marcar 'done' cuando se complete el flujo completo en handleConfirmDecision
 
       // Llamar render y actualizar placeholder para reflejar el nuevo estado
       try {
@@ -88,7 +90,7 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
         } else {
           console.warn('[ONBOARDING] render function not available globally');
         }
-        // Actualizar placeholder después de cambiar el step
+        // Actualizar placeholder después de cambiar el step (si fuera necesario)
         if (window.updatePlaceholder) {
           window.updatePlaceholder();
         } else {
