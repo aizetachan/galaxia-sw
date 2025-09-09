@@ -732,6 +732,19 @@ async function handler(request, response) {
       const numericUserId = parseInt(userId, 10);
       console.log('[WORLD] 📋 DEBUG: Converted userId to:', numericUserId, 'type:', typeof numericUserId);
 
+      // Validar que la conversión fue exitosa
+      if (isNaN(numericUserId)) {
+        console.error('[WORLD] ❌ CRÍTICO: userId conversion failed');
+        console.error('[WORLD] ❌ Original userId:', userId, 'type:', typeof userId);
+        response.statusCode = 400;
+        response.end(JSON.stringify({
+          ok: false,
+          error: 'INVALID_USER_ID',
+          message: 'userId inválido en el token'
+        }));
+        return;
+      }
+
       const result = await pool.query(`
         SELECT c.*, u.username
         FROM characters c
