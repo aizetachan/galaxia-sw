@@ -646,15 +646,29 @@ async function doAuth(kind) {
   
   const username = (authUserEl?.value || '').trim();
   const pin = (authPinEl?.value || '').trim();
-  console.log('[AUTH] Username:', username);
-  console.log('[AUTH] PIN:', pin);
+  console.log('[AUTH] ===== INPUT VALIDATION =====');
+  console.log('[AUTH] Raw username from input:', authUserEl?.value);
+  console.log('[AUTH] Raw PIN from input:', authPinEl?.value);
+  console.log('[AUTH] Trimmed username:', username);
+  console.log('[AUTH] Trimmed PIN:', pin);
+  console.log('[AUTH] Username length:', username.length);
+  console.log('[AUTH] PIN length:', pin.length);
+  console.log('[AUTH] Username regex test:', /^[a-zA-Z0-9_]{3,24}$/.test(username));
   console.log('[AUTH] PIN regex test:', /^\d{4}$/.test(pin));
-  
-  if (!username || !/^\d{4}$/.test(pin)) {
-    console.log('[AUTH] Invalid input, setting error message');
-    if (authStatusEl) authStatusEl.textContent = 'Usuario y PIN (4 dígitos)';
+
+  if (!username || !/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+    console.log('[AUTH] ❌ Invalid username');
+    if (authStatusEl) authStatusEl.textContent = 'Usuario inválido (3-24 caracteres, letras/números/_)';
     return;
   }
+
+  if (!pin || !/^\d{4}$/.test(pin)) {
+    console.log('[AUTH] ❌ Invalid PIN');
+    if (authStatusEl) authStatusEl.textContent = 'PIN inválido (4 dígitos)';
+    return;
+  }
+
+  console.log('[AUTH] ✅ Input validation passed');
 
   dlog('doAuth', { kind, username });
   console.log('[AUTH] Setting auth loading to true');
@@ -664,9 +678,15 @@ async function doAuth(kind) {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
     console.log('[AUTH] Starting', kind, 'for user:', username);
     console.log('[AUTH] Calling API:', url, { username, pin });
-    
+    console.log('[AUTH] API_BASE:', API_BASE);
+    console.log('[AUTH] Full URL:', `${API_BASE}${url}`);
+
     const response = await api(url, { username, pin });
-    console.log('[AUTH] API response:', response);
+    console.log('[AUTH] API response received:', response);
+    console.log('[AUTH] Response status:', response?.status || 'unknown');
+    console.log('[AUTH] Response ok:', response?.ok);
+    console.log('[AUTH] Response user:', response?.user);
+    console.log('[AUTH] Response token exists:', !!response?.token);
     
     // El backend devuelve { ok: true, user: {...}, token: '...' }
     if (response.ok && response.user) {
