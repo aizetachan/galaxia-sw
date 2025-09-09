@@ -745,13 +745,18 @@ async function handler(request, response) {
         return;
       }
 
-      // Simplificar la consulta para debugging
-      console.log('[WORLD] 📋 DEBUG: Testing simple character query...');
+      // Prueba ultra-simple: solo SELECT 1
+      console.log('[WORLD] 📋 DEBUG: Testing ultra-simple query...');
+      const testResult = await pool.query('SELECT 1 as test');
+      console.log('[WORLD] 📋 DEBUG: Ultra-simple query result:', testResult.rows);
+
+      // Ahora probar la consulta real
+      console.log('[WORLD] 📋 DEBUG: Testing character query...');
       const result = await pool.query(`
         SELECT * FROM characters WHERE user_id = $1
       `, [numericUserId]);
 
-      console.log('[WORLD] 📋 DEBUG: Simple query result:', result.rows.length, 'rows');
+      console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
       console.log('[WORLD] 📋 DEBUG: Character IDs found:', result.rows.map(r => r.id));
 
       console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
