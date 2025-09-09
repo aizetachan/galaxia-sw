@@ -124,20 +124,104 @@ echo "DATABASE_URL=postgresql://localhost:5432/galaxia_db" > .env
 - Eliminadas duplicaciones
 - Imports actualizados correctamente
 
+## Debugging y Logs
+
+### 🚨 Problema Detectado: UI Rota
+
+**Síntomas:**
+- ✅ Usuarios se crean correctamente en BD
+- ✅ Base de datos funciona
+- ❌ Contenedor del chat aparece "roto" (más estrecho)
+- ❌ Frontend no lee correctamente la información
+
+**Posibles Causas:**
+1. **Token inválido** en localStorage del navegador
+2. **Problema de CORS** bloqueando requests
+3. **Error en endpoint `/auth/me`** devolviendo datos incorrectos
+4. **Problema en consulta de personajes** (`/world/characters/me`)
+
+### 🔍 Logs de Debugging Añadidos
+
+Se han añadido logs extensivos con prefijos específicos:
+
+```
+[DB] 📋 DEBUG: - Inicialización de base de datos
+[REGISTER] 📋 DEBUG: - Registro de usuarios
+[LOGIN] 📋 DEBUG: - Login de usuarios
+[AUTH] 📋 DEBUG: - Validación de tokens (/auth/me)
+[WORLD] 📋 DEBUG: - Consulta de personajes
+[HEALTH] 📋 DEBUG: - Estado del sistema
+```
+
+### 📋 Scripts de Debugging
+
+#### 1. Debugging en Producción
+```bash
+node debug-production.cjs
+```
+
+#### 2. Validaciones Locales
+```bash
+node test-validation.cjs
+```
+
+#### 3. Monitoreo de Logs en Vercel
+1. Ve a https://vercel.com/dashboard
+2. Selecciona proyecto `galaxia-sw`
+3. Ve a **Functions** → `api/index.js`
+4. **Revisa los Function Logs** durante el uso de la app
+
+### 🧪 Pruebas Específicas
+
+#### Probar Token Validation
+```bash
+# Obtener token
+TOKEN=$(curl -s -X POST https://galaxia-sw-kepe.vercel.app/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser","pin":"1234"}' | jq -r .token)
+
+# Probar /auth/me
+curl -s https://galaxia-sw-kepe.vercel.app/api/auth/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### Probar Consulta de Personajes
+```bash
+curl -s https://galaxia-sw-kepe.vercel.app/api/world/characters/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 🔧 Solución del Problema de UI
+
+Si la UI aparece rota, probablemente sea porque:
+
+1. **El usuario no tiene personaje** → Debe hacer onboarding
+2. **Token expirado/inválido** → Debe hacer login nuevamente
+3. **Error en la consulta** → Revisar logs de Vercel
+
+### 📊 Estado Actual
+
+**✅ Base de Datos:** Funcionando correctamente
+**✅ Usuarios:** Se crean correctamente
+**✅ Autenticación:** Funciona correctamente
+**⚠️ UI:** Problema detectado - requiere debugging con logs
+
+---
+
 ## Comandos Útiles
 
 ```bash
 # Ver estado actual
-curl http://localhost:3001/health
+curl https://galaxia-sw-kepe.vercel.app/api/health
 
-# Ejecutar validaciones
+# Ejecutar debugging completo
+node debug-production.cjs
+
+# Ejecutar validaciones locales
 node test-validation.cjs
 
-# Ver logs del servidor
-tail -f server/index.js # (o donde esté corriendo)
-
 # Probar registro/login
-curl -X POST http://localhost:3001/auth/register \
+curl -X POST https://galaxia-sw-kepe.vercel.app/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"test","pin":"1234"}'
 ```
