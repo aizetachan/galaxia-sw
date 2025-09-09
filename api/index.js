@@ -1,47 +1,60 @@
 // Configuración de base de datos - SOLO MODO DATABASE (sin demo)
 let pool = null;
+let dbInitialized = false;
 
-// Verificación obligatoria de DATABASE_URL
-if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim() === '') {
-  console.error('[DB] ❌ CRÍTICO: DATABASE_URL no está configurada');
-  console.error('[DB] La aplicación requiere una conexión a PostgreSQL para funcionar');
-  console.error('[DB] Configure DATABASE_URL en las variables de entorno de Vercel');
-  throw new Error('DATABASE_URL is required. Configure it in Vercel environment variables.');
-}
+// Función para inicializar la base de datos (lazy initialization)
+async function initializeDatabase() {
+  if (dbInitialized) return;
+  if (dbInitialized === 'failed') throw new Error('Database initialization failed previously');
 
-try {
-  console.log('[DB] 🔄 Establishing database connection...');
-  const { Pool } = require('pg');
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? {
-      rejectUnauthorized: false,
-      ca: undefined // Permitir certificados autofirmados
-    } : false,
-    // Configuración optimizada para Vercel
-    connectionTimeoutMillis: 15000,
-    query_timeout: 15000,
-    idleTimeoutMillis: 30000,
-    max: 5, // Limitar conexiones para Vercel
-  });
+  try {
+    dbInitialized = 'initializing';
+    console.log('[DB] 🔄 Establishing database connection...');
 
-  // Verificar conexión
-  pool.on('connect', () => {
-    console.log('[DB] ✅ Database connection established successfully');
-  });
+    // Verificación obligatoria de DATABASE_URL
+    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim() === '') {
+      console.error('[DB] ❌ CRÍTICO: DATABASE_URL no está configurada');
+      console.error('[DB] La aplicación requiere una conexión a PostgreSQL para funcionar');
+      console.error('[DB] Configure DATABASE_URL en las variables de entorno de Vercel');
+      dbInitialized = 'failed';
+      throw new Error('DATABASE_URL is required. Configure it in Vercel environment variables.');
+    }
 
-  pool.on('error', (err) => {
-    console.error('[DB] ❌ Database connection error:', err.message);
-    throw new Error(`Database connection failed: ${err.message}`);
-  });
+    const { Pool } = require('pg');
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? {
+        rejectUnauthorized: false,
+        ca: undefined // Permitir certificados autofirmados
+      } : false,
+      // Configuración optimizada para Vercel
+      connectionTimeoutMillis: 15000,
+      query_timeout: 15000,
+      idleTimeoutMillis: 30000,
+      max: 5, // Limitar conexiones para Vercel
+    });
 
-  // Inicializar tablas automáticamente
-  await initDatabase();
-  console.log('[DB] ✅ Database initialization completed successfully');
+    // Verificar conexión
+    pool.on('connect', () => {
+      console.log('[DB] ✅ Database connection established successfully');
+    });
 
-} catch (error) {
-  console.error('[DB] ❌ Database setup failed:', error.message);
-  throw new Error(`Failed to initialize database: ${error.message}`);
+    pool.on('error', (err) => {
+      console.error('[DB] ❌ Database connection error:', err.message);
+      dbInitialized = 'failed';
+      throw new Error(`Database connection failed: ${err.message}`);
+    });
+
+    // Inicializar tablas automáticamente
+    await initDatabase();
+    console.log('[DB] ✅ Database initialization completed successfully');
+    dbInitialized = true;
+
+  } catch (error) {
+    console.error('[DB] ❌ Database setup failed:', error.message);
+    dbInitialized = 'failed';
+    throw new Error(`Failed to initialize database: ${error.message}`);
+  }
 }
 
 // Función para inicializar la base de datos
@@ -116,6 +129,21 @@ async function handler(request, response) {
 
   const path = request.url ? request.url.split('?')[0] : '';
 
+  // Inicializar base de datos si no está inicializada
+  try {
+    await initializeDatabase();
+  } catch (dbError) {
+    console.error('[HANDLER] Database initialization failed:', dbError.message);
+    response.setHeader('Content-Type', 'application/json');
+    response.statusCode = 500;
+    response.end(JSON.stringify({
+      ok: false,
+      error: 'DATABASE_ERROR',
+      message: 'Error interno del servidor - Base de datos no disponible'
+    }));
+    return;
+  }
+
   // Manejo global de preflight CORS (OPTIONS)
   if (request.method === 'OPTIONS') {
     console.log('[CORS] Handling preflight OPTIONS request for path:', path);
@@ -138,15 +166,15 @@ async function handler(request, response) {
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.statusCode = 200;
 
-    // La aplicación siempre debe tener base de datos configurada
+    // Estado de la base de datos
     response.end(JSON.stringify({
       ok: true,
-      message: 'API working with database',
+      message: dbInitialized === true ? 'API working with database' : 'Database initializing...',
       timestamp: Date.now(),
       database: {
-        configured: true,
-        status: 'connected',
-        url: '[CONFIGURED]'
+        configured: !!process.env.DATABASE_URL,
+        status: dbInitialized === true ? 'connected' : 'initializing',
+        url: process.env.DATABASE_URL ? '[CONFIGURED]' : '[NOT_SET]'
       },
       environment: process.env.NODE_ENV || 'production'
     }));
@@ -165,9 +193,9 @@ async function handler(request, response) {
       message: 'Database connected and ready',
       mode: 'database',
       database: {
-        configured: true,
-        connected: true,
-        url: '[CONFIGURED]'
+        configured: !!process.env.DATABASE_URL,
+        connected: dbInitialized === true,
+        url: process.env.DATABASE_URL ? '[CONFIGURED]' : '[NOT_SET]'
       },
       environment: process.env.NODE_ENV || 'production'
     }));
@@ -736,7 +764,7 @@ async function handler(request, response) {
       body += chunk.toString();
     });
 
-    request.on('end', () => {
+    request.on('end', async () => {
       try {
         const data = JSON.parse(body);
         console.log('[WORLD] Character data:', data);
@@ -885,7 +913,7 @@ async function handler(request, response) {
       body += chunk.toString();
     });
 
-    request.on('end', () => {
+    request.on('end', async () => {
       try {
         const data = JSON.parse(body);
         console.log('[DM] DM request data:', data);
