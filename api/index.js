@@ -726,13 +726,18 @@ async function handler(request, response) {
       console.log('[WORLD] 📋 DEBUG: Pool exists:', !!pool);
 
       // Buscar personaje del usuario
-      console.log('[WORLD] 📋 DEBUG: Executing character query for userId:', userId);
+      console.log('[WORLD] 📋 DEBUG: Executing character query for userId:', userId, 'type:', typeof userId);
+
+      // Convertir userId a integer para asegurar compatibilidad con BD
+      const numericUserId = parseInt(userId, 10);
+      console.log('[WORLD] 📋 DEBUG: Converted userId to:', numericUserId, 'type:', typeof numericUserId);
+
       const result = await pool.query(`
         SELECT c.*, u.username
         FROM characters c
         JOIN users u ON c.user_id = u.id
         WHERE c.user_id = $1
-      `, [userId]);
+      `, [numericUserId]);
 
       console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
 
@@ -763,7 +768,7 @@ async function handler(request, response) {
           message: 'Personaje encontrado'
         }));
       } else {
-        console.log('[WORLD] 📋 DEBUG: No character found for userId:', userId, 'username:', username);
+        console.log('[WORLD] 📋 DEBUG: No character found for userId:', numericUserId, 'original:', userId, 'username:', username);
         console.log('[WORLD] 📋 DEBUG: This might indicate onboarding is needed');
         response.statusCode = 200;
         response.end(JSON.stringify({
