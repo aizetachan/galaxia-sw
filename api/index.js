@@ -4,23 +4,42 @@ let dbInitialized = false;
 
 // Función para inicializar la base de datos (lazy initialization)
 async function initializeDatabase() {
-  if (dbInitialized) return;
-  if (dbInitialized === 'failed') throw new Error('Database initialization failed previously');
+  console.log('[DB] 📋 DEBUG: initializeDatabase called');
+  console.log('[DB] 📋 DEBUG: dbInitialized current state:', dbInitialized);
+  console.log('[DB] 📋 DEBUG: DATABASE_URL exists:', !!process.env.DATABASE_URL);
+  console.log('[DB] 📋 DEBUG: DATABASE_URL length:', process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0);
+  console.log('[DB] 📋 DEBUG: NODE_ENV:', process.env.NODE_ENV);
+
+  if (dbInitialized) {
+    console.log('[DB] 📋 DEBUG: Database already initialized, returning');
+    return;
+  }
+
+  if (dbInitialized === 'failed') {
+    console.log('[DB] 📋 DEBUG: Database initialization failed previously, throwing error');
+    throw new Error('Database initialization failed previously');
+  }
 
   try {
+    console.log('[DB] 🔄 Starting database initialization...');
     dbInitialized = 'initializing';
-    console.log('[DB] 🔄 Establishing database connection...');
 
     // Verificación obligatoria de DATABASE_URL
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim() === '') {
       console.error('[DB] ❌ CRÍTICO: DATABASE_URL no está configurada');
+      console.error('[DB] ❌ CRÍTICO: process.env.DATABASE_URL:', process.env.DATABASE_URL);
+      console.error('[DB] ❌ CRÍTICO: Available env vars:', Object.keys(process.env).filter(key => key.includes('DATABASE') || key.includes('URL')));
       console.error('[DB] La aplicación requiere una conexión a PostgreSQL para funcionar');
       console.error('[DB] Configure DATABASE_URL en las variables de entorno de Vercel');
       dbInitialized = 'failed';
       throw new Error('DATABASE_URL is required. Configure it in Vercel environment variables.');
     }
 
+    console.log('[DB] 📋 DEBUG: DATABASE_URL validated successfully');
+
     const { Pool } = require('pg');
+    console.log('[DB] 📋 DEBUG: Creating PostgreSQL pool...');
+
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.NODE_ENV === 'production' ? {
@@ -34,6 +53,8 @@ async function initializeDatabase() {
       max: 5, // Limitar conexiones para Vercel
     });
 
+    console.log('[DB] 📋 DEBUG: Pool created, setting up event listeners...');
+
     // Verificar conexión
     pool.on('connect', () => {
       console.log('[DB] ✅ Database connection established successfully');
@@ -41,17 +62,23 @@ async function initializeDatabase() {
 
     pool.on('error', (err) => {
       console.error('[DB] ❌ Database connection error:', err.message);
+      console.error('[DB] ❌ Database connection error details:', err);
       dbInitialized = 'failed';
       throw new Error(`Database connection failed: ${err.message}`);
     });
 
+    console.log('[DB] 📋 DEBUG: Calling initDatabase()...');
+
     // Inicializar tablas automáticamente
     await initDatabase();
     console.log('[DB] ✅ Database initialization completed successfully');
+    console.log('[DB] 📋 DEBUG: Tables created successfully');
     dbInitialized = true;
 
   } catch (error) {
     console.error('[DB] ❌ Database setup failed:', error.message);
+    console.error('[DB] ❌ Database setup error details:', error);
+    console.error('[DB] ❌ Database setup stack:', error.stack);
     dbInitialized = 'failed';
     throw new Error(`Failed to initialize database: ${error.message}`);
   }
@@ -259,11 +286,18 @@ async function handler(request, response) {
 
           // Registrar en base de datos (obligatorio)
           try {
-            console.log('[REGISTER] Attempting database registration for:', username);
+            console.log('[REGISTER] 📋 DEBUG: Starting database registration for:', username);
+            console.log('[REGISTER] 📋 DEBUG: PIN provided:', !!pin);
+            console.log('[REGISTER] 📋 DEBUG: Pool exists:', !!pool);
+            console.log('[REGISTER] 📋 DEBUG: Pool state:', pool ? 'connected' : 'null');
 
             // Verificar si usuario ya existe
+            console.log('[REGISTER] 📋 DEBUG: Checking if user exists...');
             const existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+            console.log('[REGISTER] 📋 DEBUG: Existing user query result:', existingUser.rows.length, 'rows');
+
             if (existingUser.rows.length > 0) {
+              console.log('[REGISTER] 📋 DEBUG: User already exists, returning 409');
               response.statusCode = 409;
               response.end(JSON.stringify({
                 ok: false,
@@ -274,23 +308,30 @@ async function handler(request, response) {
             }
 
             // Crear nuevo usuario
+            console.log('[REGISTER] 📋 DEBUG: Creating new user...');
             const pinHash = hashPin(pin);
+            console.log('[REGISTER] 📋 DEBUG: PIN hashed successfully');
+
             const result = await pool.query(
               'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id',
               [username, pinHash]
             );
 
+            console.log('[REGISTER] 📋 DEBUG: Insert query result:', result.rows.length, 'rows');
             const userId = result.rows[0].id;
-            console.log('[REGISTER] User created with ID:', userId);
+            console.log('[REGISTER] ✅ User created with ID:', userId);
 
             // Generar token JWT
+            console.log('[REGISTER] 📋 DEBUG: Generating JWT token...');
             const jwt = require('jsonwebtoken');
             const token = jwt.sign(
               { id: userId, username: username },
               process.env.JWT_SECRET || 'your-jwt-secret-change-this',
               { expiresIn: '7d' }
             );
+            console.log('[REGISTER] 📋 DEBUG: JWT token generated successfully');
 
+            console.log('[REGISTER] ✅ Registration completed successfully');
             response.statusCode = 200;
             response.end(JSON.stringify({
               ok: true,
@@ -300,7 +341,9 @@ async function handler(request, response) {
             }));
 
           } catch (dbError) {
-            console.error('[REGISTER] Database error:', dbError);
+            console.error('[REGISTER] ❌ Database error:', dbError.message);
+            console.error('[REGISTER] ❌ Database error details:', dbError);
+            console.error('[REGISTER] ❌ Database error stack:', dbError.stack);
             response.statusCode = 500;
             response.end(JSON.stringify({
               ok: false,
@@ -368,12 +411,17 @@ async function handler(request, response) {
 
           // Autenticar con base de datos (obligatorio)
           try {
-            console.log('[LOGIN] Attempting database authentication for:', username);
+            console.log('[LOGIN] 📋 DEBUG: Starting database authentication for:', username);
+            console.log('[LOGIN] 📋 DEBUG: PIN provided:', !!pin);
+            console.log('[LOGIN] 📋 DEBUG: Pool exists:', !!pool);
 
             // Buscar usuario en base de datos
+            console.log('[LOGIN] 📋 DEBUG: Querying user from database...');
             const result = await pool.query('SELECT id, username, pin_hash FROM users WHERE username = $1', [username]);
+            console.log('[LOGIN] 📋 DEBUG: User query result:', result.rows.length, 'rows');
 
             if (result.rows.length === 0) {
+              console.log('[LOGIN] 📋 DEBUG: User not found, returning 401');
               response.statusCode = 401;
               response.end(JSON.stringify({
                 ok: false,
@@ -384,9 +432,15 @@ async function handler(request, response) {
             }
 
             const user = result.rows[0];
+            console.log('[LOGIN] 📋 DEBUG: User found:', user.username, 'ID:', user.id);
 
             // Verificar PIN
-            if (!verifyPin(pin, user.pin_hash)) {
+            console.log('[LOGIN] 📋 DEBUG: Verifying PIN...');
+            const pinValid = verifyPin(pin, user.pin_hash);
+            console.log('[LOGIN] 📋 DEBUG: PIN verification result:', pinValid);
+
+            if (!pinValid) {
+              console.log('[LOGIN] 📋 DEBUG: Invalid PIN, returning 401');
               response.statusCode = 401;
               response.end(JSON.stringify({
                 ok: false,
@@ -396,16 +450,19 @@ async function handler(request, response) {
               return;
             }
 
-            console.log('[LOGIN] Authentication successful for user:', user.username);
+            console.log('[LOGIN] ✅ Authentication successful for user:', user.username);
 
             // Generar token JWT
+            console.log('[LOGIN] 📋 DEBUG: Generating JWT token...');
             const jwt = require('jsonwebtoken');
             const token = jwt.sign(
               { id: user.id, username: user.username },
               process.env.JWT_SECRET || 'your-jwt-secret-change-this',
               { expiresIn: '7d' }
             );
+            console.log('[LOGIN] 📋 DEBUG: JWT token generated successfully');
 
+            console.log('[LOGIN] ✅ Login completed successfully');
             response.statusCode = 200;
             response.end(JSON.stringify({
               ok: true,
@@ -415,7 +472,9 @@ async function handler(request, response) {
             }));
 
           } catch (dbError) {
-            console.error('[LOGIN] Database error:', dbError);
+            console.error('[LOGIN] ❌ Database error:', dbError.message);
+            console.error('[LOGIN] ❌ Database error details:', dbError);
+            console.error('[LOGIN] ❌ Database error stack:', dbError.stack);
             response.statusCode = 500;
             response.end(JSON.stringify({
               ok: false,
@@ -449,17 +508,22 @@ async function handler(request, response) {
 
   // Auth me endpoint
   if (request.method === 'GET' && path === '/api/auth/me') {
-    console.log('[AUTH] Me endpoint called');
+    console.log('[AUTH] 📋 DEBUG: Me endpoint called');
+    console.log('[AUTH] 📋 DEBUG: Request headers:', Object.keys(request.headers));
+    console.log('[AUTH] 📋 DEBUG: Authorization header exists:', !!request.headers.authorization || !!request.headers.Authorization);
 
     // Verificar token en headers
     const authHeader = request.headers.authorization || request.headers.Authorization;
+    console.log('[AUTH] 📋 DEBUG: Auth header:', authHeader ? 'present' : 'missing');
     const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    console.log('[AUTH] 📋 DEBUG: Token extracted:', token ? 'present' : 'missing');
 
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (!token) {
+      console.log('[AUTH] 📋 DEBUG: No token provided, returning 401');
       response.statusCode = 401;
       response.end(JSON.stringify({
         ok: false,
@@ -471,13 +535,17 @@ async function handler(request, response) {
 
     // Decodificar y validar token JWT
     let userId, username;
+    console.log('[AUTH] 📋 DEBUG: Starting token verification...');
 
     try {
       const jwt = require('jsonwebtoken');
+      console.log('[AUTH] 📋 DEBUG: JWT_SECRET exists:', !!process.env.JWT_SECRET);
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
+      console.log('[AUTH] 📋 DEBUG: Token decoded successfully:', decoded);
 
       if (!decoded.id || !decoded.username) {
-        console.error('[AUTH] Token missing required fields (id or username)');
+        console.error('[AUTH] ❌ Token missing required fields (id or username)');
+        console.error('[AUTH] ❌ Decoded token:', decoded);
         response.statusCode = 401;
         response.end(JSON.stringify({
           ok: false,
@@ -489,10 +557,11 @@ async function handler(request, response) {
 
       userId = decoded.id;
       username = decoded.username;
-      console.log('[AUTH] Token decoded successfully:', { userId, username });
+      console.log('[AUTH] ✅ Token validation successful:', { userId, username });
 
     } catch (error) {
-      console.error('[AUTH] Token verification failed:', error.message);
+      console.error('[AUTH] ❌ Token verification failed:', error.name, error.message);
+      console.error('[AUTH] ❌ Token verification error details:', error);
 
       let errorMessage = 'Token inválido';
       if (error.name === 'TokenExpiredError') {
@@ -510,6 +579,7 @@ async function handler(request, response) {
       return;
     }
 
+    console.log('[AUTH] 📋 DEBUG: Returning user data for:', username);
     response.statusCode = 200;
     response.end(JSON.stringify({
       ok: true,
@@ -520,17 +590,21 @@ async function handler(request, response) {
 
   // World characters/me endpoint
   if (request.method === 'GET' && (path === '/api/world/characters/me' || path === '/world/characters/me')) {
-    console.log('[WORLD] Characters/me endpoint called');
+    console.log('[WORLD] 📋 DEBUG: Characters/me endpoint called');
+    console.log('[WORLD] 📋 DEBUG: Request path:', path);
 
     // Verificar token
     const authHeader = request.headers.authorization || request.headers.Authorization;
+    console.log('[WORLD] 📋 DEBUG: Auth header exists:', !!authHeader);
     const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    console.log('[WORLD] 📋 DEBUG: Token extracted:', !!token);
 
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (!token) {
+      console.log('[WORLD] 📋 DEBUG: No token provided, returning 401');
       response.statusCode = 401;
       response.end(JSON.stringify({
         ok: false,
@@ -546,18 +620,23 @@ async function handler(request, response) {
 
     try {
       const jwt = require('jsonwebtoken');
+      console.log('[WORLD] 📋 DEBUG: Decoding token...');
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
       userId = decoded.id || 12345;
       username = decoded.username || 'unknown_user';
+      console.log('[WORLD] 📋 DEBUG: Token decoded successfully, username:', username, 'userId:', userId);
     } catch (error) {
-      console.error('[WORLD] Error decoding token:', error);
+      console.error('[WORLD] ❌ Error decoding token:', error.message);
+      console.error('[WORLD] ❌ Token decode error details:', error);
     }
 
     // Buscar personaje en base de datos (obligatorio)
     try {
-      console.log('[WORLD] Searching character for user:', username);
+      console.log('[WORLD] 📋 DEBUG: Searching character for user:', username);
+      console.log('[WORLD] 📋 DEBUG: Pool exists:', !!pool);
 
       // Buscar personaje del usuario
+      console.log('[WORLD] 📋 DEBUG: Executing character query for username:', username);
       const result = await pool.query(`
         SELECT c.*, u.username
         FROM characters c
@@ -565,9 +644,18 @@ async function handler(request, response) {
         WHERE u.username = $1
       `, [username]);
 
+      console.log('[WORLD] 📋 DEBUG: Character query result:', result.rows.length, 'rows');
+
       if (result.rows.length > 0) {
         const character = result.rows[0];
-        console.log('[WORLD] Found character:', character.name);
+        console.log('[WORLD] ✅ Found character:', character.name, 'ID:', character.id);
+        console.log('[WORLD] 📋 DEBUG: Character data:', {
+          name: character.name,
+          species: character.species,
+          role: character.role,
+          publicProfile: character.public_profile,
+          lastLocation: character.last_location
+        });
 
         response.statusCode = 200;
         response.end(JSON.stringify({
@@ -585,7 +673,8 @@ async function handler(request, response) {
           message: 'Personaje encontrado'
         }));
       } else {
-        console.log('[WORLD] No character found for user:', username);
+        console.log('[WORLD] 📋 DEBUG: No character found for user:', username);
+        console.log('[WORLD] 📋 DEBUG: This might indicate onboarding is needed');
         response.statusCode = 200;
         response.end(JSON.stringify({
           ok: true,
@@ -595,7 +684,10 @@ async function handler(request, response) {
       }
 
     } catch (dbError) {
-      console.error('[WORLD] Database error:', dbError);
+      console.error('[WORLD] ❌ Database error:', dbError.message);
+      console.error('[WORLD] ❌ Database error details:', dbError);
+      console.error('[WORLD] ❌ Database error stack:', dbError.stack);
+      console.error('[WORLD] ❌ This error prevents character data from being retrieved');
       response.statusCode = 500;
       response.end(JSON.stringify({
         ok: false,
