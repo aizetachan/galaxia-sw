@@ -452,8 +452,9 @@ export default function handler(request, response) {
     let userId = 12345;
 
     try {
-      // Decodificar token base64
-      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+      // Decodificar token JWT correctamente
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
       userId = decoded.id || 12345;
       username = decoded.username || 'unknown_user';
       console.log('[AUTH] Token decoded successfully:', { userId, username });
@@ -498,7 +499,8 @@ export default function handler(request, response) {
     let userId = 12345;
 
     try {
-      const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
       userId = decoded.id || 12345;
       username = decoded.username || 'unknown_user';
     } catch (error) {
@@ -743,21 +745,127 @@ export default function handler(request, response) {
         const data = JSON.parse(body);
         console.log('[WORLD] Character data:', data);
 
-        // Simular guardado exitoso
-        response.statusCode = 200;
-        response.end(JSON.stringify({
-          ok: true,
-          character: {
-            id: Date.now(),
-            name: data.name || data.character?.name,
-            species: data.species || data.character?.species,
-            role: data.role || data.character?.role,
-            publicProfile: data.publicProfile || data.character?.publicProfile || true,
-            lastLocation: data.lastLocation || data.character?.lastLocation,
-            userId: 12345
-          },
-          message: 'Personaje guardado exitosamente'
-        }));
+        // Intentar guardar personaje en base de datos
+        if (pool) {
+          try {
+            console.log('[WORLD] Saving character to database...');
+
+            // Decodificar token para obtener información del usuario
+            let userId = null;
+            try {
+              const jwt = require('jsonwebtoken');
+              const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
+              userId = decoded.id;
+            } catch (tokenError) {
+              console.error('[WORLD] Token verification error:', tokenError);
+              response.statusCode = 401;
+              response.end(JSON.stringify({
+                ok: false,
+                error: 'UNAUTHORIZED',
+                message: 'Token inválido'
+              }));
+              return;
+            }
+
+            // Verificar si el usuario ya tiene un personaje
+            const existingCharacter = await pool.query('SELECT id FROM characters WHERE user_id = $1', [userId]);
+
+            if (existingCharacter.rows.length > 0) {
+              // Actualizar personaje existente
+              const result = await pool.query(`
+                UPDATE characters
+                SET name = $2, species = $3, role = $4, public_profile = $5, last_location = $6, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = $1
+                RETURNING *
+              `, [
+                userId,
+                data.name || data.character?.name,
+                data.species || data.character?.species,
+                data.role || data.character?.role,
+                data.publicProfile || data.character?.publicProfile || true,
+                data.lastLocation || data.character?.lastLocation || 'Tatooine — Cantina de Mos Eisley'
+              ]);
+
+              const character = result.rows[0];
+              console.log('[WORLD] Character updated:', character.name);
+
+              response.statusCode = 200;
+              response.end(JSON.stringify({
+                ok: true,
+                character: {
+                  id: character.id,
+                  name: character.name,
+                  species: character.species,
+                  role: character.role,
+                  publicProfile: character.public_profile,
+                  lastLocation: character.last_location,
+                  createdAt: character.created_at,
+                  updatedAt: character.updated_at
+                },
+                message: 'Personaje actualizado exitosamente'
+              }));
+            } else {
+              // Crear nuevo personaje
+              const result = await pool.query(`
+                INSERT INTO characters (user_id, name, species, role, public_profile, last_location)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING *
+              `, [
+                userId,
+                data.name || data.character?.name,
+                data.species || data.character?.species,
+                data.role || data.character?.role,
+                data.publicProfile || data.character?.publicProfile || true,
+                data.lastLocation || data.character?.lastLocation || 'Tatooine — Cantina de Mos Eisley'
+              ]);
+
+              const character = result.rows[0];
+              console.log('[WORLD] Character created:', character.name);
+
+              response.statusCode = 200;
+              response.end(JSON.stringify({
+                ok: true,
+                character: {
+                  id: character.id,
+                  name: character.name,
+                  species: character.species,
+                  role: character.role,
+                  publicProfile: character.public_profile,
+                  lastLocation: character.last_location,
+                  createdAt: character.created_at,
+                  updatedAt: character.updated_at
+                },
+                message: 'Personaje creado exitosamente'
+              }));
+            }
+
+          } catch (dbError) {
+            console.error('[WORLD] Database error:', dbError);
+            response.statusCode = 500;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'DATABASE_ERROR',
+              message: 'Error interno del servidor'
+            }));
+          }
+        } else {
+          // Fallback a modo demo
+          console.log('[WORLD] Using demo mode for character save');
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            character: {
+              id: Date.now(),
+              name: data.name || data.character?.name,
+              species: data.species || data.character?.species,
+              role: data.role || data.character?.role,
+              publicProfile: data.publicProfile || data.character?.publicProfile || true,
+              lastLocation: data.lastLocation || data.character?.lastLocation,
+              userId: 12345
+            },
+            message: 'Personaje guardado exitosamente (demo mode)'
+          }));
+        }
       } catch (parseError) {
         console.error('[WORLD] JSON parse error:', parseError);
         response.statusCode = 400;
@@ -805,13 +913,101 @@ export default function handler(request, response) {
         const data = JSON.parse(body);
         console.log('[DM] DM request data:', data);
 
-        // Simular respuesta del DM
-        response.statusCode = 200;
-        response.end(JSON.stringify({
-          ok: true,
-          text: "¡Hola! Soy el Máster de la Galaxia. ¿Estás listo para tu aventura?",
-          stage: "name"
-        }));
+        // Procesar la solicitud del DM y guardar mensajes
+        if (pool) {
+          try {
+            console.log('[DM] Processing DM request with database...');
+
+            // Decodificar token para obtener información del usuario
+            let userId = null;
+            let username = 'unknown_user';
+            try {
+              const jwt = require('jsonwebtoken');
+              const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret-change-this');
+              userId = decoded.id;
+              username = decoded.username;
+            } catch (tokenError) {
+              console.error('[DM] Token verification error:', tokenError);
+              response.statusCode = 401;
+              response.end(JSON.stringify({
+                ok: false,
+                error: 'UNAUTHORIZED',
+                message: 'Token inválido'
+              }));
+              return;
+            }
+
+            // Guardar mensaje del usuario si existe
+            if (data.message && !data.message.includes('<<CLIENT_HELLO>>') && !data.message.includes('<<ONBOARD')) {
+              try {
+                // Obtener el ID del personaje del usuario
+                const characterResult = await pool.query('SELECT id FROM characters WHERE user_id = $1', [userId]);
+                const characterId = characterResult.rows.length > 0 ? characterResult.rows[0].id : null;
+
+                await pool.query(`
+                  INSERT INTO chat_messages (user_id, character_id, role, text)
+                  VALUES ($1, $2, $3, $4)
+                `, [userId, characterId, 'user', data.message]);
+                console.log('[DM] User message saved to database');
+              } catch (msgError) {
+                console.error('[DM] Error saving user message:', msgError);
+              }
+            }
+
+            // Simular respuesta del DM (aquí iría la lógica real del LLM)
+            let dmResponse = "¡Hola! Soy el Máster de la Galaxia. ¿Estás listo para tu aventura?";
+
+            // Responder basado en el tipo de mensaje
+            if (data.message.includes('<<CLIENT_HELLO>>')) {
+              dmResponse = "¡Bienvenido a la Galaxia! Soy tu Máster. ¿Cuál es tu nombre?";
+            } else if (data.message.includes('<<ONBOARD STEP="species"')) {
+              dmResponse = "Excelente nombre. Ahora dime, ¿de qué especie eres? Elige entre: Humano, Zabrak, Twi'lek, Chiss, o cualquier otra especie de Star Wars.";
+            } else if (data.message.includes('<<ONBOARD STEP="role"')) {
+              dmResponse = "¡Genial! Ahora elige tu rol en la galaxia: ¿Eres un Jedi, un contrabandista, un cazarrecompensas, un diplomático, o algo más?";
+            } else if (data.message.includes('<<ONBOARD DONE')) {
+              dmResponse = "¡Perfecto! Tu personaje está completo. Ahora comienza tu aventura en la galaxia. ¿Qué deseas hacer primero?";
+            }
+
+            // Guardar respuesta del DM en la base de datos
+            try {
+              const characterResult = await pool.query('SELECT id FROM characters WHERE user_id = $1', [userId]);
+              const characterId = characterResult.rows.length > 0 ? characterResult.rows[0].id : null;
+
+              await pool.query(`
+                INSERT INTO chat_messages (user_id, character_id, role, text)
+                VALUES ($1, $2, $3, $4)
+              `, [userId, characterId, 'dm', dmResponse]);
+              console.log('[DM] DM response saved to database');
+            } catch (msgError) {
+              console.error('[DM] Error saving DM message:', msgError);
+            }
+
+            response.statusCode = 200;
+            response.end(JSON.stringify({
+              ok: true,
+              text: dmResponse,
+              stage: data.clientState?.step || "name"
+            }));
+
+          } catch (dbError) {
+            console.error('[DM] Database error:', dbError);
+            response.statusCode = 500;
+            response.end(JSON.stringify({
+              ok: false,
+              error: 'DATABASE_ERROR',
+              message: 'Error interno del servidor'
+            }));
+          }
+        } else {
+          // Fallback a modo demo
+          console.log('[DM] Using demo mode for DM respond');
+          response.statusCode = 200;
+          response.end(JSON.stringify({
+            ok: true,
+            text: "¡Hola! Soy el Máster de la Galaxia. ¿Estás listo para tu aventura?",
+            stage: "name"
+          }));
+        }
       } catch (parseError) {
         console.error('[DM] JSON parse error:', parseError);
         response.statusCode = 400;

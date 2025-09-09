@@ -226,9 +226,13 @@ function updatePlaceholder(){
     name:'Tu nombre en el HoloNet…',
     species:'Elige especie… (el Máster te da opciones)',
     role:'Elige rol… (el Máster te da opciones)',
-    done:'Habla con el Máster'
+    done:'Habla con el Máster… (usa /restart para reiniciar)'
   };
-  if (inputEl) inputEl.placeholder = placeholders[step] || placeholders.done;
+  if (inputEl) {
+    const newPlaceholder = placeholders[step] || placeholders.done;
+    console.log('[PLACEHOLDER] Setting placeholder for step:', step, '->', newPlaceholder);
+    inputEl.placeholder = newPlaceholder;
+  }
 }
 function updateRollCta(){
   if (!rollCta || !rollSkillEl) return;

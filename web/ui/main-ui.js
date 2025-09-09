@@ -62,13 +62,19 @@ export function updateIdentityFromState(auth, character){
 
 export function updateAuthUI(){
   const logged = isLogged();
+  console.log('[UI] updateAuthUI called - isLogged:', logged, 'AUTH:', !!AUTH);
+
   document.body.classList.toggle('is-guest', !logged);
   document.body.classList.toggle('is-logged', logged);
+
   const card = document.getElementById('guest-card');
   if (card) {
+    console.log('[UI] Guest card found, setting visibility - logged:', logged);
     card.hidden = !!logged;
     card.classList.toggle('hidden', !!logged);
     card.style.display = logged ? 'none' : '';
+  } else {
+    console.warn('[UI] Guest card element not found!');
   }
 }
 
