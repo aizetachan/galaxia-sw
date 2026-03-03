@@ -6,7 +6,7 @@ import { api } from './api-client.js';
 import { dlog } from './api.js';
 
 export let character = load(KEY_CHAR, null);
-export let step = load(KEY_STEP, 'name');
+export let step = character ? 'done' : load(KEY_STEP, 'name'); // Si hay personaje, step es 'done'
 export let pendingConfirm = load(KEY_CONFIRM, null);
 
 export function setCharacter(c){ character = c; save(KEY_CHAR, c); }
@@ -58,6 +58,7 @@ export async function dmSay(message){
 /**
  * Kickoff del onboarding:
  * - NO inyecta ningún texto de bienvenida local.
+ * - Después de CLIENT_HELLO exitoso, cambia el estado para permitir chat normal.
  * - Solo muestra un banner de error si el backend responde 4xx/5xx o viene vacío.
  */
 async function startOnboardingKickoff(){ // ← interna (sin export)
@@ -73,6 +74,32 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
 
     if (kick?.text && String(kick.text).trim()) {
       handleIncomingDMText(kick.text);
+
+      // ✅ Después de CLIENT_HELLO exitoso, mantener el flujo de onboarding
+      // NO marcar como 'done' hasta completar nombre/especie/rol
+      console.log('[ONBOARDING] CLIENT_HELLO successful, starting onboarding flow');
+
+      // Mantener el step como 'name' para que el placeholder siga siendo "Tu nombre en el HoloNet…"
+      // Solo marcar 'done' cuando se complete el flujo completo en handleConfirmDecision
+
+      // Llamar render y actualizar placeholder para reflejar el nuevo estado
+      try {
+        // Intentar acceder a render desde el contexto global
+        if (window.render) {
+          window.render();
+        } else {
+          console.warn('[ONBOARDING] render function not available globally');
+        }
+        // Actualizar placeholder después de cambiar el step (si fuera necesario)
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        } else {
+          console.warn('[ONBOARDING] updatePlaceholder function not available globally');
+        }
+      } catch (e) {
+        console.error('[ONBOARDING] Failed to call render/updatePlaceholder:', e);
+      }
+
     } else {
       showConnectionErrorBanner('Respuesta vacía del Máster');
     }
@@ -89,7 +116,6 @@ async function startOnboardingKickoff(){ // ← interna (sin export)
  * - Llama al kickoff (única fuente de verdad: el Máster).
  */
 export async function startOnboarding({ hard=false } = {}){
-  try{ document.getElementById('guest-card')?.setAttribute('hidden','hidden'); }catch{}
   if (hard) resetMsgs();
 
   setCharacter(null);
@@ -137,8 +163,13 @@ export async function handleConfirmDecision(decision){
         // No inyectar mensajes locales → evita duplicados
         ui.render?.();
 
-        // Avisamos al Máster del avance de subpaso
-        dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`).catch(()=>{});
+        // Actualizar placeholder después de cambiar step
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        }
+
+        // IMPORTANTE: no llamar dmSay aquí para evitar duplicado.
+        // La respuesta del ACK (CONFIRM_ACK) ya trae el siguiente prompt del Máster.
 
       } else if (type==='build'){
         // Guardar en el cliente
@@ -162,6 +193,11 @@ export async function handleConfirmDecision(decision){
           if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character); }
         }catch(e){ dlog('upsert build fail', e?.data||e); }
         setStep('done');
+
+        // Actualizar placeholder después de completar onboarding
+        if (window.updatePlaceholder) {
+          window.updatePlaceholder();
+        }
       }
     }
 

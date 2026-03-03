@@ -11,96 +11,91 @@ export function dgroup(label, fn) {
   try { fn?.(); } finally { console.groupEnd(); }
 }
 
-export const API_STORE_KEY = 'sw:api_base';
+// API base para compatibilidad
+export const API_BASE = '/api';
 
-// Helpers seguros (sin duplicados)
-function getMetaSafe(name) {
-  try { return document.querySelector(`meta[name="${name}"]`)?.content || ''; } catch { return ''; }
-}
-function getQuerySafe(name) {
-  try { return new URL(location.href).searchParams.get(name) || ''; } catch { return ''; }
-}
-
-// Normaliza un base asegurando que termine en "/api"
-function normalizeApiBase(base) {
-  try {
-    const url = new URL(base, window.location.href);
-    if (url.pathname === '/' || url.pathname === '') url.pathname = '/api';
-    if (!url.pathname.endsWith('/api') && !/\/api(\/|$)/.test(url.pathname)) {
-      url.pathname = url.pathname.replace(/\/$/, '') + '/api';
-    }
-    return url.toString().replace(/\/+$/, '');
-  } catch {
-    return (base && base !== '/') ? base : '/api';
-  }
-}
+// Helper para unir URLs
 export function joinUrl(base, path) {
-  const b = String(base || '').replace(/\/+$/,'');
+  const b = String(base || '').replace(/\/+$/, '');
   const p = String(path || '').replace(/^\/+/, '');
   return `${b}/${p}`;
 }
 
-// Resolución de API base (orden: ?api → <meta api_base> → localStorage si coincide host → window.API_BASE → fallback same-origin)
-export function resolveApiBase() {
-  const q = getQuerySafe('api');
-  if (q) { const n = normalizeApiBase(q); try { localStorage.setItem(API_STORE_KEY, n); } catch {} return n; }
-
-  const meta = getMetaSafe('api_base');
-  if (meta) return normalizeApiBase(meta); // ← ahora el <meta> manda
-
-  // Si había un valor cacheado, solo úsalo si coincide de host con la página actual
-  const cached = (() => { try { return localStorage.getItem(API_STORE_KEY) || ''; } catch { return ''; } })();
-  try {
-    if (cached) {
-      const loc = new URL(window.location.href);
-      const api = new URL(cached, loc);
-      if (api.origin === loc.origin) return normalizeApiBase(api.toString()); // mismo host → ok
-    }
-  } catch {} // si falla el parseo, seguimos
-
-  const win = (typeof window !== 'undefined' && window.API_BASE) ? String(window.API_BASE) : '';
-  if (win) return normalizeApiBase(win);
-
-  // Fallback: misma origin + /api
-  try {
-    const loc = new URL(window.location.href);
-    return normalizeApiBase(new URL('/api', loc).toString());
-  } catch {
-    return '/api';
-  }
-}
-
-export let API_BASE = resolveApiBase();
-
 // UI: pinta estado del server en la badgita
 export function setServerStatus(ok, msg) {
+  console.log('[setServerStatus] Called with:', { ok, msg });
+  
   const el = document.getElementById('server-status');
-  if (!el) return;
+  console.log('[setServerStatus] Element found:', !!el);
+  
+  if (!el) {
+    console.warn('[setServerStatus] No server-status element found');
+    return;
+  }
+  
   const mode = (typeof window !== 'undefined' && typeof window.getDmMode === 'function')
     ? window.getDmMode()
     : 'rich';
+  console.log('[setServerStatus] DM mode:', mode);
+  
   const label = ok ? (msg || `Server: OK — M: ${mode}`) : (msg || 'Server: FAIL');
+  console.log('[setServerStatus] Setting label:', label);
+  console.log('[setServerStatus] Setting classes - ok:', !!ok, 'bad:', !ok);
+  
   el.textContent = label;
   el.classList.toggle('ok', !!ok);
   el.classList.toggle('bad', !ok);
+  
+  console.log('[setServerStatus] Element classes after:', el.className);
+  console.log('[setServerStatus] Element text after:', el.textContent);
 }
 
-export async function probeHealth(base) {
-  const url = joinUrl(base, '/health');
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
+// Health check optimizado para máxima velocidad
+export async function probeHealth() {
+  let ctrl;
+  let timer;
+
   try {
-    const r = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' }, mode: 'cors', signal: ctrl.signal });
-    const ct = r.headers.get('content-type') || '';
+    ctrl = new AbortController();
+    timer = setTimeout(() => {
+      console.log('[probeHealth] Timeout after 30s');
+      ctrl.abort('timeout');
+    }, 30000);
+
+    const r = await fetch('/api/health', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      credentials: 'include',
+      signal: ctrl.signal
+    });
+
     const txt = await r.text();
-    if (!r.ok) return { ok: false, reason: `HTTP ${r.status}`, text: txt };
-    if (!ct.includes('application/json')) return { ok: false, reason: 'not-json', text: txt };
+
+    if (!r.ok) {
+      return { ok: false, reason: `HTTP ${r.status}` };
+    }
+
+    if (!r.headers.get('content-type')?.includes('application/json')) {
+      return { ok: false, reason: 'not-json' };
+    }
+
     try {
       const j = JSON.parse(txt);
-      if (j && (j.ok === true || 'ts' in j)) return { ok: true, json: j };
-      return { ok: false, reason: 'json-no-ok', json: j };
-    } catch { return { ok: false, reason: 'json-parse', text: txt }; }
+      if (j && (j.ok === true || 'ts' in j)) {
+        return { ok: true, json: j };
+      }
+      return { ok: false, reason: 'invalid-response' };
+    } catch (parseError) {
+      return { ok: false, reason: 'json-parse' };
+    }
   } catch (e) {
-    return { ok: false, reason: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'error') };
-  } finally { clearTimeout(timer); }
+    if (e?.name === 'AbortError') {
+      return { ok: false, reason: e.message || 'timeout' };
+    }
+    return { ok: false, reason: 'network-error' };
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

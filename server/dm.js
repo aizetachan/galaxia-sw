@@ -1,532 +1,468 @@
-// server/dm.js
-import { Router } from 'express';
-import { hasDb, sql } from './db.js';
-import { requireAuth } from './auth.js';
-import { getPromptSection } from './prompts.js';
-import { getOpenAI } from './openai-client.js';
+// Máster IA - versión funcional mínima para onboarding + chat base
+const express = require('express');
+const router = express.Router();
+const recommendationMemory = new Map(); // key: player name -> { species, role, at }
+const buildProposalMemory = new Map(); // key: player name -> { species, role, at }
+const sessionStoryMemory = new Map(); // key: player name -> lightweight scene memory
 
-const router = Router();
-const toInt = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-
-/* ========= Schema helpers (autodetección con caché) ========= */
-const schemaCache = new Map();
-
-async function hasColumn(table, column) {
-  const key = `has:${table}.${column}`;
-  if (schemaCache.has(key)) return schemaCache.get(key);
-  const q = await sql(
-    `SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`,
-    [table, column]
-  );
-  const ok = q.rows.length > 0;
-  schemaCache.set(key, ok);
-  return ok;
+function replyWithMemory(mem, baseText, altText) {
+  const next = String(baseText || '').trim();
+  if (!next) return '';
+  if (mem.lastReply && mem.lastReply === next) {
+    const alt = String(altText || '').trim();
+    mem.lastReply = alt || `${next}\n(La situación cambia ligeramente: se oyen pasos acercándose.)`;
+    return mem.lastReply;
+  }
+  mem.lastReply = next;
+  return next;
 }
 
-async function listColumns(table) {
-  const key = `cols:${table}`;
-  if (schemaCache.has(key)) return schemaCache.get(key);
-  const q = await sql(
-    `SELECT column_name FROM information_schema.columns WHERE table_name=$1`,
-    [table]
-  );
-  const cols = q.rows.map(r => r.column_name);
-  schemaCache.set(key, cols);
-  return cols;
+function hasTag(msg, tag) {
+  return String(msg || '').toUpperCase().includes(`<<${tag}`);
 }
 
-async function userCol(table) {
-  if (await hasColumn(table, 'owner_user_id')) return 'owner_user_id';
-  if (await hasColumn(table, 'user_id')) return 'user_id';
+function parseConfirmAck(msg = '') {
+  const m = String(msg).match(/<<CONFIRM_ACK\s+TYPE="([^"]+)"\s+DECISION="([^"]+)"\s*>>/i);
+  if (!m) return null;
+  return { type: (m[1] || '').toLowerCase(), decision: (m[2] || '').toLowerCase() };
+}
+
+function parseQuotedValue(msg = '', key = 'NAME') {
+  const re = new RegExp(`${key}="([^"]+)"`, 'i');
+  const m = String(msg).match(re);
+  return m ? m[1].trim() : null;
+}
+
+function extractNameFromText(msg = '') {
+  const s = String(msg).trim();
+  if (!s) return null;
+  if (s.startsWith('<<')) return null;
+  return s.slice(0, 42);
+}
+
+const SPECIES_CATALOG = [
+  { key: 'humano', label: 'Humano' },
+  { key: 'twilek', label: "Twi'lek" },
+  { key: 'twi lek', label: "Twi'lek" },
+  { key: 'zabrak', label: 'Zabrak' },
+  { key: 'mirialan', label: 'Mirialan' },
+  { key: 'rodiano', label: 'Rodiano' },
+  { key: 'rodian', label: 'Rodiano' },
+  { key: 'mandaloriano', label: 'Mandaloriano' },
+  { key: 'ewok', label: 'Ewok' },
+  { key: 'wookie', label: 'Wookiee' },
+  { key: 'wookiee', label: 'Wookiee' }
+];
+
+const ROLE_CATALOG = [
+  { key: 'piloto', label: 'Piloto' },
+  { key: 'contrabandista', label: 'Contrabandista' },
+  { key: 'cazarrecompensas', label: 'Cazarrecompensas' },
+  { key: 'diplomatic', label: 'Diplomátic@' },
+  { key: 'diplomatico', label: 'Diplomátic@' },
+  { key: 'diplomatica', label: 'Diplomátic@' },
+  { key: 'ingeniero', label: 'Ingenier@' },
+  { key: 'ingeniera', label: 'Ingenier@' },
+  { key: 'jedi', label: 'Jedi' },
+  { key: 'sith', label: 'Sith' },
+  { key: 'explorador', label: 'Explorador/a' },
+  { key: 'mercenario', label: 'Mercenario/a' }
+];
+
+function normalizeText(s = '') {
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s'\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectFromCatalog(text, catalog) {
+  const n = normalizeText(text);
+  for (const item of catalog) {
+    if (n.includes(item.key)) return item.label;
+  }
   return null;
 }
 
-async function storyHasCharacterId() { return await hasColumn('story_threads', 'character_id'); }
-async function chatHasUserId() { return await hasColumn('chat_messages', 'user_id'); }
+function parseBuildIntent(message = '') {
+  const raw = String(message || '').trim();
+  const n = normalizeText(raw);
 
-/** Autodetecta la columna que enlaza chat_messages → story_threads */
-async function chatThreadCol() {
-  const key = 'chat_messages.thread_fk';
-  if (schemaCache.has(key)) return schemaCache.get(key);
+  const asksOptions = /\?|opcion|opciones|raza|razas|especie|especies|rol|roles|clase|profesion|que puedo ser|que puedo hacer|que me recomiendas|recomiend|recomend/.test(n);
+  const asksClarify = /no se|no se que|duda|explica|mas info/.test(n);
 
-  const candidates = [
-    'thread_id',
-    'story_thread_id',
-    'st_id',
-    'thread',
-    'conversation_id',
-    'conv_id',
-    'tid'
-  ];
-  for (const c of candidates) {
-    // eslint-disable-next-line no-await-in-loop
-    if (await hasColumn('chat_messages', c)) {
-      schemaCache.set(key, c);
-      return c;
-    }
+  let species = detectFromCatalog(raw, SPECIES_CATALOG);
+  let role = detectFromCatalog(raw, ROLE_CATALOG);
+
+  // Refuerzo para frases naturales: "quiero ser un ewok con el rol de jedi"
+  if (!species) {
+    const m = n.match(/ser\s+(?:un|una)?\s*([a-z'\-\s]+)/);
+    if (m) species = detectFromCatalog(m[1], SPECIES_CATALOG);
+  }
+  if (!role) {
+    const m = n.match(/rol\s+(?:de)?\s*([a-z'\-\s]+)/);
+    if (m) role = detectFromCatalog(m[1], ROLE_CATALOG);
   }
 
-  const cols = (await listColumns('chat_messages')) || [];
-  const found = cols.find(c => /thread/.test(c) && /id/.test(c));
-  if (found) {
-    schemaCache.set(key, found);
-    return found;
-  }
+  const confirms = /confirm|si$|vale$|ok$|perfecto$/.test(n);
 
-  schemaCache.set(key, null);
-  return null;
-}
-// Diagnóstico de esquema (GET /api/dm/_diag)
-router.get('/_diag', async (_req, res) => {
-  try {
-    const chat_thread_fk = await chatThreadCol();
-    const chat_has_user_id = await chatHasUserId();
-    const story_has_character_id = await storyHasCharacterId();
-    console.log('[DM][schema]', { chat_thread_fk, chat_has_user_id, story_has_character_id });
-    res.json({ ok: true, chat_thread_fk, chat_has_user_id, story_has_character_id });
-  } catch (e) {
-    console.error('[DM/_diag] error:', e?.message || e);
-    res.status(500).json({ ok: false, error: 'diag_failed' });
-  }
-});
-
-/* ========= Utils ========= */
-function headLine(str = '') {
-  const i = String(str || '').indexOf('\n');
-  return i === -1 ? String(str || '') : String(str || '').slice(0, i);
-}
-function parseHeadJSON(text = '') {
-  try {
-    const head = headLine(text).trim();
-    const j = JSON.parse(head);
-    return j && j.ui && j.control ? j : null;
-  } catch { return null; }
-}
-function wantsSuggestion(userMsg = '') {
-  const t = String(userMsg || '').toLowerCase();
-  return t === 'sugerir' || t === 'sugerencia' || t.includes('sugerir') || t.includes('sugerencia');
+  return { asksOptions, asksClarify, species, role, confirms };
 }
 
-/* ========= DB helpers ========= */
+router.post('/respond', (req, res) => {
+  const message = String(req.body?.message || '').trim();
+  const stage = String(req.body?.stage || 'name').toLowerCase();
+  const state = req.body?.clientState || {};
 
-async function getOrCreateOnboardingThread(userId) {
-  if (!hasDb) throw new Error('DB not available');
-  const uid = toInt(userId);
-
-  const hasChar = await storyHasCharacterId();
-  const charUser = await userCol('characters');
-  const hasMsgUser = await chatHasUserId();
-  const cmThread = await chatThreadCol();
-
-  let row;
-
-  if (hasChar && charUser) {
-    // Buscar por personaje del usuario
-    let q = await sql(
-      `
-      SELECT st.id, st.state, st.character_id
-        FROM story_threads st
-        JOIN characters c ON c.id = st.character_id
-       WHERE c.${charUser} = $1
-       ORDER BY st.updated_at DESC
-       LIMIT 1
-      `,
-      [uid]
-    );
-    row = q.rows[0];
-  }
-
-  // Plan B: si existe relación por mensajes (y tenemos columna de thread)
-  if (!row && cmThread && hasMsgUser) {
-    const q = await sql(
-      `
-      SELECT st.id, st.state${hasChar ? ', st.character_id' : ''}
-        FROM story_threads st
-        JOIN chat_messages cm ON cm.${cmThread} = st.id
-       WHERE cm.user_id = $1
-       ORDER BY st.updated_at DESC
-       LIMIT 1
-      `,
-      [uid]
-    );
-    row = q.rows[0];
-  }
-
-  if (row && row.state?.startsWith('onboarding')) return row;
-
-  const ins = await sql(
-    `INSERT INTO story_threads (state, updated_at)
-     VALUES ('onboarding:name', now())
-     RETURNING id, state${hasChar ? ', character_id' : ''}`
-  );
-  return ins.rows[0];
-}
-
-async function getOrCreateCharacterForUser(userId) {
-  const uid = toInt(userId);
-  const charUser = await userCol('characters');
-
-  let q;
-  if (charUser) {
-    q = await sql(
-      `SELECT id, ${charUser} AS owner, name, species, role
-         FROM characters
-        WHERE ${charUser} = $1
-        ORDER BY updated_at DESC
-        LIMIT 1`,
-      [uid]
-    );
-  } else {
-    q = await sql(
-      `SELECT c.id, null as owner, c.name, c.species, c.role
-         FROM characters c
-         JOIN user_characters uc ON uc.character_id = c.id
-        WHERE uc.user_id = $1
-        ORDER BY c.updated_at DESC
-        LIMIT 1`,
-      [uid]
-    );
-  }
-  if (q.rows[0]) return q.rows[0];
-
-  // Crear
-  let ins;
-  if (charUser) {
-    ins = await sql(
-      `INSERT INTO characters (${charUser}, updated_at)
-       VALUES ($1, now())
-       RETURNING id, ${charUser} AS owner, name, species, role`,
-      [uid]
-    );
-  } else {
-    ins = await sql(
-      `INSERT INTO characters (updated_at)
-       VALUES (now())
-       RETURNING id, name, species, role`
-    );
-    try {
-      await sql(
-        `INSERT INTO user_characters (user_id, character_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [uid, ins.rows[0].id]
-      );
-    } catch {}
-  }
-  return ins.rows[0];
-}
-
-async function linkThreadCharacter(threadId, characterId) {
-  if (!(await storyHasCharacterId())) return;
-  await sql(
-    `UPDATE story_threads
-        SET character_id = $2,
-            updated_at = now()
-      WHERE id = $1`,
-    [toInt(threadId), toInt(characterId)]
-  );
-}
-
-async function setThreadState(threadId, state) {
-  await sql(
-    `UPDATE story_threads
-        SET state = $2,
-            updated_at = now()
-      WHERE id = $1`,
-    [toInt(threadId), String(state)]
-  );
-}
-
-async function loadShortHistory(threadId, limit = 8) {
-  const cmThread = await chatThreadCol();
-  if (!cmThread) return []; // no podemos filtrar → devolvemos vacío
-  const q = await sql(
-    `SELECT role, text
-       FROM chat_messages
-      WHERE ${cmThread} = $1
-      ORDER BY ts ASC
-      LIMIT $2`,
-    [toInt(threadId), limit]
-  );
-  return q.rows || [];
-}
-
-async function saveChat({ userId, threadId, role, text }) {
-  const hasUser = await chatHasUserId();
-  const cmThread = await chatThreadCol();
-
-  if (!cmThread) {
-    // No sabemos enlazar al thread → evitar fallo silenciosamente
-    return;
-  }
-
-  if (hasUser) {
-    await sql(
-      `INSERT INTO chat_messages (user_id, ${cmThread}, role, text, ts)
-       VALUES ($1, $2, $3, $4, now())`,
-      [toInt(userId), toInt(threadId), role, text]
-    );
-  } else {
-    await sql(
-      `INSERT INTO chat_messages (${cmThread}, role, text, ts)
-       VALUES ($1, $2, $3, now())`,
-      [toInt(threadId), role, text]
-    );
-  }
-}
-
-/* ========= Prompts & OpenAI ========= */
-function buildSystemFor(state) {
-  const contract = getPromptSection('prompt-master.md', 'OUTPUT_CONTRACT');
-  const style = getPromptSection('prompt-master.md', 'STYLE');
-  const onboarding = getPromptSection('prompt-master.md', 'ONBOARDING');
-  const play = getPromptSection('prompt-master.md', 'PLAY');
-
-  let body = contract + '\n\n' + style + '\n\n';
-  if (state === 'onboarding:name' || state === 'onboarding:build') body += onboarding + '\n';
-  else body += play + '\n';
-  return body;
-}
-
-function buildMessages({ state, historyMsgs = [], userText = '', suggestMode = false }) {
-  const messages = [{ role: 'system', content: buildSystemFor(state) }];
-
-  if (state === 'onboarding:name') {
-    messages.push({
-      role: 'system',
-      content:
-        'Fase: onboarding:name. Pide ÚNICAMENTE el NOMBRE. ' +
-        'No menciones especie ni rol. Emite control.confirms=[{type:"name",name:"..."}]. ' +
-        'No avances de fase. Sin bloques de código.'
-    });
-  }
-  if (state === 'onboarding:build') {
-    messages.push({
-      role: 'system',
-      content:
-        'Fase: onboarding:build. Pide ÚNICAMENTE ESPECIE y ROL. ' +
-        'No trates el nombre. Emite control.confirms=[{type:"build",species:"...",role:"..."}]. ' +
-        'No avances de fase. Sin bloques de código.'
-    });
-  }
-  if (suggestMode) {
-    messages.push({
-      role: 'system',
-      content: 'El usuario pidió sugerencias. Ofrece MÁXIMO 2 opciones sutiles en el campo "options" del JSON.'
+  // Kickoff
+  if (hasTag(message, 'CLIENT_HELLO')) {
+    return res.json({
+      ok: true,
+      text: '✨ Conexión al HoloCanal establecida. Para iniciar tu aventura, dime tu nombre en la galaxia.'
     });
   }
 
-  for (const m of (historyMsgs || []).slice(-8)) {
-    messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.text || '').slice(0, 2000) });
-  }
-  if (userText && String(userText).trim()) {
-    messages.push({ role: 'user', content: String(userText).trim() });
-  }
-  return messages;
-}
-
-async function callOpenAI({ state, userText, historyMsgs, suggestMode }) {
-  const openai = await getOpenAI();
-  const model = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
-  const messages = buildMessages({ state, userText, historyMsgs, suggestMode });
-  const t0 = Date.now();
-  const resp = await openai.chat.completions.create({
-    model,
-    messages,
-    temperature: state.startsWith('onboarding') ? 0.5 : 0.9,
-    max_tokens: 700
-  });
-  const t1 = Date.now();
-  const text = resp?.choices?.[0]?.message?.content || '';
-  console.log('[DM][OpenAI]', { model, latency_ms: t1 - t0, head: headLine(text).slice(0, 160) });
-  return text;
-}
-
-/* ========= Rutas ONBOARDING ========= */
-
-// Arranque explícito (opcional)
-router.post('/kickoff', requireAuth, async (req, res) => {
-  try {
-    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
-
-    // Logs de esquema
-    console.log('[DM][schema]', {
-      chat_thread_fk: await chatThreadCol(),
-      chat_has_user_id: await chatHasUserId(),
-      story_has_character_id: await storyHasCharacterId()
-    });
-
-    const userId = toInt(req.auth.userId);
-    const thread = await getOrCreateOnboardingThread(userId);
-    const character = await getOrCreateCharacterForUser(userId);
-    await linkThreadCharacter(thread.id, character.id);
-
-    const hist = await loadShortHistory(thread.id);
-    const modelText = await callOpenAI({
-      state: 'onboarding:name',
-      userText: 'Inicia la bienvenida y pide ÚNICAMENTE el nombre.',
-      historyMsgs: hist,
-      suggestMode: false
-    });
-    const head = parseHeadJSON(modelText);
-    if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
-
-    await saveChat({ userId, threadId: thread.id, role: 'assistant', text: modelText });
-
-    return res.json({ ok: true, text: modelText, state: 'onboarding:name', thread_id: thread.id, character_id: character.id });
-  } catch (e) {
-    console.error('[DM/kickoff] error:', e?.message || e);
-    return res.status(500).json({ ok: false, error: 'kickoff_failed' });
-  }
-});
-
-// Mensajes del usuario
-router.post('/respond', requireAuth, async (req, res) => {
-  try {
-    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
-
-    // Logs de esquema
-    console.log('[DM][schema]', {
-      chat_thread_fk: await chatThreadCol(),
-      chat_has_user_id: await chatHasUserId(),
-      story_has_character_id: await storyHasCharacterId()
-    });
-
-    const userId = toInt(req.auth.userId);
-    const { message = '' } = req.body || {};
-
-    const thread = await getOrCreateOnboardingThread(userId);
-    const state = thread.state || 'onboarding:name';
-
-    if (String(message || '').trim()) {
-      await saveChat({ userId, threadId: thread.id, role: 'user', text: String(message).trim() });
-    }
-
-    const hist = await loadShortHistory(thread.id);
-    const modelText = await callOpenAI({
-      state,
-      userText: message,
-      historyMsgs: hist,
-      suggestMode: wantsSuggestion(message)
-    });
-    const head = parseHeadJSON(modelText);
-    if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
-
-    await saveChat({ userId, threadId: thread.id, role: 'assistant', text: modelText });
-
-    return res.json({ ok: true, text: modelText, state, thread_id: thread.id });
-  } catch (e) {
-    console.error('[DM/respond] error:', e?.message || e);
-    return res.status(500).json({ ok: false, error: 'respond_failed' });
-  }
-});
-
-// Confirmaciones (Sí/No)
-router.post('/confirm', requireAuth, async (req, res) => {
-  try {
-    if (!hasDb) return res.status(500).json({ ok: false, error: 'db_unavailable' });
-
-    // Logs de esquema
-    console.log('[DM][schema]', {
-      chat_thread_fk: await chatThreadCol(),
-      chat_has_user_id: await chatHasUserId(),
-      story_has_character_id: await storyHasCharacterId()
-    });
-
-    const userId = toInt(req.auth.userId);
-    const { thread_id, confirm, accept } = req.body || {};
-    if (!thread_id || !confirm || typeof accept !== 'boolean') {
-      return res.status(400).json({ ok: false, error: 'bad_request' });
-    }
-
-    const thQ = await sql(
-      `SELECT id, state${await storyHasCharacterId() ? ', character_id' : ''}
-         FROM story_threads
-        WHERE id = $1
-        LIMIT 1`,
-      [toInt(thread_id)]
-    );
-    const th = thQ.rows[0];
-    if (!th) return res.status(404).json({ ok: false, error: 'thread_not_found' });
-
-    const ch = await getOrCreateCharacterForUser(userId);
-    await linkThreadCharacter(th.id, ch.id);
-
-    const state = th.state || 'onboarding:name';
-
-    if (!accept) {
-      await saveChat({ userId, threadId: th.id, role: 'user', text: '<<CONFIRM:NO>>' });
-      const hist = await loadShortHistory(th.id);
-      const modelText = await callOpenAI({
-        state,
-        userText: 'El usuario ha rechazado. Reformula y vuelve a pedir la info de esta fase (sin avanzar).',
-        historyMsgs: hist,
-        suggestMode: false
+  // Confirmaciones del cliente
+  const ack = parseConfirmAck(message);
+  if (ack) {
+    if (ack.type === 'name' && ack.decision === 'yes') {
+      const n = state?.name || 'viajer@';
+      return res.json({
+        ok: true,
+        text: `<<ONBOARD STEP="species">>Perfecto, ${n}. Ahora elige tu especie y rol (ejemplo: "Humano contrabandista" o "Twi'lek diplomática").`
       });
-      const head = parseHeadJSON(modelText);
-      if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
-      await saveChat({ userId, threadId: th.id, role: 'assistant', text: modelText });
-      return res.json({ ok: true, text: modelText, state, thread_id: th.id, character_id: ch.id });
     }
-
-    await saveChat({ userId, threadId: th.id, role: 'user', text: '<<CONFIRM:YES>>' });
-
-    if (state === 'onboarding:name') {
-      if (confirm.type !== 'name' || !confirm.name || !String(confirm.name).trim()) {
-        return res.status(422).json({ ok: false, error: 'invalid_confirm_payload' });
-      }
-      await sql(
-        `UPDATE characters
-            SET name = $2,
-                updated_at = now()
-          WHERE id = $1`,
-        [toInt(ch.id), String(confirm.name).trim()]
-      );
-
-      await setThreadState(th.id, 'onboarding:build');
-
-      const hist = await loadShortHistory(th.id);
-      const modelText = await callOpenAI({
-        state: 'onboarding:build',
-        userText: 'Nombre confirmado. Pide ÚNICAMENTE especie y rol. Repite y pide confirmación.',
-        historyMsgs: hist,
-        suggestMode: false
+    if (ack.type === 'name' && ack.decision === 'no') {
+      return res.json({ ok: true, text: 'Entendido. Dime de nuevo cómo quieres llamarte en la galaxia.' });
+    }
+    if (ack.type === 'build' && ack.decision === 'yes') {
+      const playerKey = (state?.name || 'anon').toLowerCase();
+      buildProposalMemory.delete(playerKey);
+      sessionStoryMemory.set(playerKey, {
+        location: 'Dock 7 de la estación orbital',
+        inventory: ['Credencial gastada', 'Comlink dañado', '42 créditos'],
+        threat: 'Alerta amarilla',
+        lastAction: 'Llegada'
       });
-      const head = parseHeadJSON(modelText);
-      if (!head) return res.status(422).json({ ok: false, error: 'invalid_model_output' });
-      await saveChat({ userId, threadId: th.id, role: 'assistant', text: modelText });
+      return res.json({
+        ok: true,
+        text: '<<ONBOARD STEP="done">>✅ Identidad confirmada. Llegas al **Dock 7** de una estación orbital en alerta amarilla. Ves guardias, un panel de salidas y un pasillo hacia la cantina. ¿Qué haces primero?'
+      });
+    }
+    if (ack.type === 'build' && ack.decision === 'no') {
+      return res.json({ ok: true, text: 'Sin problema. Reescribe especie y rol con el formato que prefieras.' });
+    }
+  }
 
-      return res.json({ ok: true, text: modelText, state: 'onboarding:build', thread_id: th.id, character_id: ch.id });
+  // Flujo por etapas
+  if (stage === 'name') {
+    const nameFromTag = parseQuotedValue(message, 'NAME');
+    const candidate = nameFromTag || extractNameFromText(message);
+    if (!candidate) {
+      return res.json({ ok: true, text: 'Para empezar, dime tu nombre en la galaxia.' });
+    }
+    return res.json({
+      ok: true,
+      text: `<<CONFIRM TYPE="name" NAME="${candidate}">>He entendido que tu nombre es **${candidate}**. ¿Lo confirmas?`
+    });
+  }
+
+  if (stage === 'build') {
+    if (!message || message.startsWith('<<')) {
+      return res.json({ ok: true, text: 'Vamos paso a paso. Dime qué te atrae más: especie, rol, o ambas cosas, y yo te ayudo a cerrarlo.' });
     }
 
-    if (state === 'onboarding:build') {
-      if (confirm.type !== 'build' || !confirm.species || !confirm.role) {
-        return res.status(422).json({ ok: false, error: 'invalid_confirm_payload' });
+    const intent = parseBuildIntent(message);
+    const nEarly = normalizeText(message);
+    const playerKey = (state?.name || 'anon').toLowerCase();
+
+    // Si el usuario responde afirmativo y había propuesta pendiente, recuperamos confirmación
+    const isAffirmative = /^(si|sí|ok|vale|perfecto|confirmo|yes)\b/.test(nEarly);
+    if (isAffirmative) {
+      const pending = buildProposalMemory.get(playerKey);
+      if (pending?.species && pending?.role) {
+        return res.json({
+          ok: true,
+          text: `<<CONFIRM TYPE="build" SPECIES="${pending.species}" ROLE="${pending.role}">>Perfecto, recupero tu elección: **${pending.species} ${pending.role}**. ¿La confirmas?`
+        });
       }
-      await sql(
-        `UPDATE characters
-            SET species = $2,
-                role = $3,
-                updated_at = now()
-          WHERE id = $1`,
-        [toInt(ch.id), String(confirm.species).trim(), String(confirm.role).trim()]
-      );
-      await setThreadState(th.id, 'play');
+    }
+
+    let speciesResolved = intent.species || detectFromCatalog(nEarly, SPECIES_CATALOG);
+    let roleResolved = intent.role || detectFromCatalog(nEarly, ROLE_CATALOG);
+
+    // Fallback explícito para frases largas: "me gustaria ser un ewok con el rol de jedi"
+    const explicitCombo = nEarly.match(/(humano|twilek|twi lek|zabrak|mirialan|rodiano|mandaloriano|ewok|wookie|wookiee).*(piloto|contrabandista|cazarrecompensas|diplomatico|diplomatica|ingeniero|ingeniera|jedi|sith|explorador|mercenario)/);
+    if (explicitCombo) {
+      speciesResolved = speciesResolved || detectFromCatalog(explicitCombo[1], SPECIES_CATALOG);
+      roleResolved = roleResolved || detectFromCatalog(explicitCombo[2], ROLE_CATALOG);
+    }
+    const acceptRecommendedEarly = /confirmo recomend|me quedo con esa|la recomendada|acepto recomend|esa me sirve/.test(nEarly);
+    if (acceptRecommendedEarly) {
+      const rec = recommendationMemory.get(playerKey);
+      if (rec?.species && rec?.role) {
+        return res.json({
+          ok: true,
+          text: `<<CONFIRM TYPE="build" SPECIES="${rec.species}" ROLE="${rec.role}">>Perfecto, usamos la recomendación: **${rec.species} ${rec.role}**. ¿La confirmas?`
+        });
+      }
+    }
+
+    // Si el usuario ya dio especie+rol en lenguaje natural, confirmar directamente
+    if (speciesResolved && roleResolved) {
+      buildProposalMemory.set(playerKey, { species: speciesResolved, role: roleResolved, at: Date.now() });
+      return res.json({
+        ok: true,
+        text: `<<CONFIRM TYPE="build" SPECIES="${speciesResolved}" ROLE="${roleResolved}">>Perfecto: especie **${speciesResolved}**, rol **${roleResolved}**. ¿Confirmas esta identidad?`
+      });
+    }
+
+    if (intent.asksOptions || intent.asksClarify) {
+      const n = normalizeText(message);
+      const askingRole = /rol|clase|profesion|que puedo hacer|funcion/.test(n);
+      const askingRecommend = /recomiend|recomend|suger|que me conviene|que me recomiendas|ayudame a elegir/.test(n);
+      const askingMoreSpecies = /mas raza|mas razas|raza mas|razas mas|otra raza|otras razas|mas especie|mas especies|especie mas|especies mas|alguna raza mas/.test(n);
+
+      if (askingRecommend) {
+        return res.json({
+          ok: true,
+          text: 'Perfecto, te propongo una recomendación personalizada. ¿Qué estilo prefieres?\n- **Combate**\n- **Sigilo**\n- **Social/negociación**\n- **Técnico/soporte**\n\nSi quieres, también puedes pedirme más info antes de elegir o crear tu combinación manual.'
+        });
+      }
+
+      if (askingRole && !speciesResolved && !roleResolved) {
+        return res.json({
+          ok: true,
+          text: 'Claro, para **rol** puedes elegir entre: **Piloto**, **Contrabandista**, **Cazarrecompensas**, **Diplomátic@**, **Ingenier@**, **Jedi**, **Explorador/a**.\n\nSi quieres, te recomiendo uno según estilo: combate, sigilo, social o técnico.'
+        });
+      }
+
+      if (askingMoreSpecies) {
+        return res.json({
+          ok: true,
+          text: 'Sí, además de las principales, también puedes usar: **Bothan**, **Chiss**, **Nautolano**, **Togruta**, **Mon Calamari**, **Kel Dor**, **Duros** o **Cathar**.\n\nSi quieres mantenerlo simple para empezar, te recomiendo elegir una de la lista base y luego ampliamos en la historia.'
+        });
+      }
 
       return res.json({
         ok: true,
-        state: 'play',
-        thread_id: th.id,
-        character_id: ch.id,
-        message: 'Onboarding completado. Personaje listo.'
+        text: 'Te ayudo a elegir 👇\n**Especies (base):** Humano, Twi\'lek, Zabrak, Mirialan, Rodiano, Mandaloriano.\n**Roles:** Piloto, Contrabandista, Cazarrecompensas, Diplomátic@, Ingenier@, Jedi, Explorador/a.\n\nSi quieres más especies, dime: "¿hay más razas?". También puedo recomendarte según tu estilo.'
       });
     }
 
-    return res.status(409).json({ ok: false, error: 'invalid_state' });
-  } catch (e) {
-    console.error('[DM/confirm] error:', e?.message || e);
-    return res.status(500).json({ ok: false, error: 'confirm_failed' });
+    // Recomendación personalizada por estilo (1-2 turnos antes de confirmar)
+    const n2 = normalizeText(message);
+    const asksMoreInfo = /mas info|explica|detalla|compar|pros|contras/.test(n2);
+    if (asksMoreInfo) {
+      return res.json({
+        ok: true,
+        text: 'Resumen rápido para decidir:\n- **Piloto**: movilidad y escapadas, ideal ritmo dinámico.\n- **Contrabandista**: sigilo, contactos y decisiones grises.\n- **Cazarrecompensas**: combate y rastreo.\n- **Diplomátic@**: influencia social y resolución por diálogo.\n- **Ingenier@**: hacks, soporte y soluciones técnicas.\n\nSi quieres, dime tu estilo y te doy una combinación lista (especie + rol).'
+      });
+    }
+
+    const styleCombat = /combate|agresiv|accion|duelo/.test(n2);
+    const styleStealth = /sigilo|sigilos|infiltr|furtiv/.test(n2);
+    const styleSocial = /social|negoci|dialog|charla|persuasi/.test(n2);
+    const styleTech = /tecnic|soporte|hack|ingenier|estrateg/.test(n2);
+
+    if (styleCombat || styleStealth || styleSocial || styleTech) {
+      let species = 'Humano';
+      let role = 'Piloto';
+      if (styleCombat) { species = 'Zabrak'; role = 'Cazarrecompensas'; }
+      else if (styleStealth) { species = "Twi'lek"; role = 'Contrabandista'; }
+      else if (styleSocial) { species = 'Mirialan'; role = 'Diplomátic@'; }
+      else if (styleTech) { species = 'Humano'; role = 'Ingenier@'; }
+
+      recommendationMemory.set(playerKey, { species, role, at: Date.now() });
+
+      return res.json({
+        ok: true,
+        text: `Mi recomendación para tu estilo es: **${species} ${role}**.\nSi te encaja, responde: **confirmo recomendación**. Si no, puedes preguntar más o crear tu combinación libremente.`
+      });
+    }
+
+    // Si el usuario solo da especie, pedimos rol de forma conversacional
+    if (speciesResolved && !roleResolved) {
+      return res.json({
+        ok: true,
+        text: `Genial, te quedas con **${speciesResolved}**. ¿Qué rol quieres para tu personaje? (ej: Piloto, Contrabandista, Ingenier@)`
+      });
+    }
+
+    // Si solo da rol, pedimos especie
+    if (!speciesResolved && roleResolved) {
+      return res.json({
+        ok: true,
+        text: `Perfecto, rol **${roleResolved}**. ¿Qué especie prefieres para encajarlo mejor en la historia?`
+      });
+    }
+
+    // fallback conversacional
+    return res.json({
+      ok: true,
+      text: 'Te leo, pero aún no tengo clara tu combinación final. Dime algo como: "Humano piloto" o "quiero ser Mandaloriano cazarrecompensas".'
+    });
   }
+
+  // stage done (chat normal, flexible + narrativa con memoria anti-loop)
+  const name = state?.name || 'agente';
+  const nDone = normalizeText(message);
+
+  const asksIdentity = /quien soy|quien era|mi personaje|mi ficha|recordame|recuerdame|como me llamo|cual es mi nombre/.test(nDone);
+  const asksSpecies = /que raza|que especie|mi raza|mi especie/.test(nDone);
+  const asksRole = /que rol|mi rol|a que me dedico|mi profesion|mi clase/.test(nDone);
+  const asksSummary = /resumen|resume|que paso|donde estoy/.test(nDone);
+
+  const species = state?.species || 'No definida';
+  const role = state?.role || 'No definido';
+  const playerKey = (state?.name || 'anon').toLowerCase();
+  const mem = sessionStoryMemory.get(playerKey) || {
+    node: 'dock',
+    location: 'Dock 7 de la estación orbital',
+    inventory: ['Comlink básico', '12 créditos', 'Llave magnética B-12'],
+    threat: 'Alerta moderada',
+    lastAction: 'Inicio de misión',
+    lastIntentSig: ''
+  };
+
+  if (asksIdentity) {
+    return res.json({ ok: true, text: `Tu identidad actual es: **${name}**, especie **${species}**, rol **${role}**.` });
+  }
+  if (asksSpecies) return res.json({ ok: true, text: `Tu especie actual es **${species}**.` });
+  if (asksRole) return res.json({ ok: true, text: `Tu rol actual es **${role}**.` });
+  if (asksSummary) {
+    return res.json({ ok: true, text: `Resumen: estás en **${mem.location}** (${mem.threat}). Última acción: ${mem.lastAction}. Inventario: ${mem.inventory.join(', ')}.` });
+  }
+
+  // Clasificación de intención de jugador (con sinónimos)
+  let intent = 'free';
+  if (/bolsillo|inventario|que tengo|que llevo/.test(nDone)) intent = 'inventory';
+  else if (/cuanto.*dinero|credito|creditos|me da para|me alcanza|cuanto tengo/.test(nDone)) intent = 'credits';
+  else if (/alrededor|observo|miro|examino|que hay|inspeccion|hay gente|gente cerca|alguien cerca|quien hay|quién hay|hay alguien/.test(nDone)) intent = 'observe';
+  else if (/hablo|pregunto|guardia|npc|dialog|droide|camarero|barman|cantinero/.test(nDone)) intent = 'talk';
+  else if (/cantina|bar|bebida/.test(nDone)) intent = 'go_cantina';
+  else if (/b-12|compuerta|mantenimiento|forzar|abrir puerta/.test(nDone)) intent = 'go_b12';
+  else if (/panel|salida|evacuacion|vuelo|transporte/.test(nDone)) intent = 'go_panel';
+  else if (/voy|camino|ir a|me muevo|entro/.test(nDone)) intent = 'move';
+
+  // Anti-loop: misma intención seguida => variar salida y avanzar micro-estado
+  const intentSig = `${mem.node}:${intent}`;
+  const repeated = mem.lastIntentSig === intentSig;
+  mem.lastIntentSig = intentSig;
+
+  const credits = (mem.inventory.join(' ').match(/(\d+)\s*credit/i) || [null, '12'])[1];
+
+  if (intent === 'inventory') {
+    mem.lastAction = 'Revisó inventario';
+    const text = replyWithMemory(mem,
+      `Llevas encima: ${mem.inventory.join(', ')}. La llave **B-12** podría abrir algo útil en mantenimiento.`,
+      `Vuelves a revisar: ${mem.inventory.join(', ')}. Notas marcas recientes en la llave **B-12**, parece usada hace poco.`
+    );
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  if (intent === 'credits') {
+    mem.lastAction = 'Consultó créditos';
+    const text = replyWithMemory(mem,
+      `Tienes **${credits} créditos**. Te alcanza para una bebida básica en la cantina y quizá sacar información.`,
+      `Sigues con **${credits} créditos**. Si gastas 10 en la cantina, aún te quedará margen para un soborno menor.`
+    );
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  if (intent === 'observe') {
+    mem.lastAction = 'Observó entorno';
+    const asksPeopleNearby = /hay gente|gente cerca|alguien cerca|hay alguien|quien hay|quién hay/.test(nDone);
+    const variant = asksPeopleNearby
+      ? `Sí. Tienes cerca a dos guardias en el panel, un técnico nervioso saliendo de mantenimiento y una comerciante en dirección a la cantina.`
+      : (repeated
+        ? `Además detectas una cámara girando hacia el pasillo B-12 y una ruta secundaria poco vigilada.`
+        : `Ves dos guardias discutiendo junto al panel de salidas, una puerta de mantenimiento entreabierta y señales de evacuación hacia cubierta C.`);
+    const text = replyWithMemory(mem, `En **${mem.location}**: ${variant}`, `En **${mem.location}** ahora detectas movimiento en una pasarela superior y un aviso de acceso restringido.`);
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  if (intent === 'talk') {
+    mem.lastAction = 'Interacción social';
+    const isDroidTalk = /droide|camarero|barman|cantinero/.test(nDone);
+
+    let variant = '';
+    let alt = '';
+
+    if (isDroidTalk && mem.node === 'cantina') {
+      variant = repeated
+        ? `El droide inclina la cabeza: "Actualización: un cliente pagó en efectivo por acceso a B-12 hace 7 minutos."`
+        : `El droide camarero te responde en binario suave y traduce: "Puedo venderte información. Tema recomendado: movimientos en B-12."`;
+      alt = 'El droide proyecta un recibo parcial: **B12-KX / mesa 6**. Parece una pista útil.';
+    } else if (isDroidTalk) {
+      variant = `Intentas hablar con un droide, pero aquí no hay ninguno operativo cerca. Ves señalética hacia la cantina de cubierta C donde sí suele haber servicio.`;
+      alt = 'Tu comlink detecta ping de servicio de cantina. Si vas allí, podrás hablar con el droide camarero.';
+    } else {
+      variant = repeated
+        ? `El guardia añade: "Si llevas credencial B-12, no uses el acceso principal; te escanearán."`
+        : `Un guardia te susurra: "Si buscas respuestas, evita el corredor iluminado y ve por mantenimiento. Hay algo raro en B-12."`;
+      alt = 'El guardia baja aún más la voz: “Si vas a B-12, no actives luces. Hay sensores térmicos inestables.”';
+    }
+
+    const text = replyWithMemory(mem, variant, alt);
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  if (intent === 'go_cantina') {
+    mem.node = 'cantina';
+    mem.location = 'Cantina de la cubierta C';
+    mem.lastAction = 'Entró en cantina';
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text: `Entras en la cantina. El ambiente está tenso. Un droide camarero te observa y en una mesa alguien menciona "el código B-12".` });
+  }
+
+  if (intent === 'go_b12' || intent === 'move') {
+    mem.node = 'b12';
+    mem.location = 'Corredor de mantenimiento B-12';
+    mem.lastAction = 'Se movió a B-12';
+    const text = replyWithMemory(mem,
+      `Avanzas hacia **B-12**. Luces parpadeando, zumbido eléctrico y una compuerta con lector magnético. Puedes usar la llave o buscar bypass.`,
+      `En **B-12** aparece un dron de mantenimiento averiado bloqueando parte del paso. Puedes apartarlo o intentar abrir la compuerta desde el panel lateral.`
+    );
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  if (intent === 'go_panel') {
+    mem.node = 'panel';
+    mem.location = 'Panel de salidas del Dock 7';
+    mem.lastAction = 'Revisó panel de salidas';
+    const text = replyWithMemory(mem,
+      `El panel muestra retrasos y una salida marcada como restringida: **Ruta KX-9**. Parece vinculada a la alerta.`,
+      `El panel se actualiza: la **Ruta KX-9** cambia a prioridad alta y aparece un código parcial: **B12-KX**.`
+    );
+    sessionStoryMemory.set(playerKey, mem);
+    return res.json({ ok: true, text });
+  }
+
+  // fallback suave, sin bloquear ni exigir formato
+  mem.lastAction = 'Acción libre';
+  sessionStoryMemory.set(playerKey, mem);
+  const fallbackBase = repeated
+    ? `Sigo tu idea y la integro en la escena. Ahora mismo estás en **${mem.location}**; hay tensión por la alerta y varias rutas abiertas.`
+    : `Entendido, ${name}. Tu acción impacta la historia. Estás en **${mem.location}** y la situación sigue en alerta.`;
+  const fallback = replyWithMemory(mem, fallbackBase, `Recibido. La escena avanza en **${mem.location}**: se activa un aviso sonoro y aparecen nuevas oportunidades de acción.`);
+  sessionStoryMemory.set(playerKey, mem);
+  return res.json({ ok: true, text: fallback });
 });
 
-export default router;
+router.get('/resume', (req, res) => {
+  res.json({
+    ok: true,
+    resume: 'Sesión activa. Usa /resumen para una síntesis contextual (placeholder v1).'
+  });
+});
+
+module.exports = router;

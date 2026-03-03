@@ -52,37 +52,146 @@ const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes
  *                          BOOT
  * ========================================================== */
 async function boot(){
+  console.log('[BOOT] ===== BOOT START =====');
   dlog('Boot start');
-  const health = await probeHealth(API_BASE);
+  
+  console.log('[BOOT] Starting health check...');
+  console.log('[BOOT] Current URL:', window.location.href);
+  console.log('[BOOT] API_BASE:', API_BASE);
+  
+  const health = await probeHealth();
+  console.log('[BOOT] Health check completed');
+  console.log('[BOOT] Health check result:', health);
+  console.log('[BOOT] Health check ok:', health.ok);
+  console.log('[BOOT] Health check reason:', health.reason);
+  
   dlog('API_BASE =', API_BASE);
-  setServerStatus(health.ok, health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL');
+  
+  const statusMessage = health.ok ? `Server: OK — M: ${getDmMode()}` : 'Server: FAIL';
+  console.log('[BOOT] Setting server status:', { ok: health.ok, message: statusMessage });
+  setServerStatus(health.ok, statusMessage);
+  
+  console.log('[BOOT] Server status set, continuing with auth...');
 
   try{
-    const saved = JSON.parse(localStorage.getItem('sw:auth')||'null');
-    if (saved?.token && saved?.user?.id){
-      setAuth(saved);
-      await apiGet('/auth/me').catch(e => { if (e.response?.status===401) throw new Error('UNAUTHORIZED'); throw e; });
-      setMsgs(load(KEY_MSGS, []));
-      setCharacter(load(KEY_CHAR, null));
-      setStep(load(KEY_STEP, 'name'));
-      setPendingConfirm(load(KEY_CONFIRM, null));
-      await loadHistory({ force: true });
-      await showResumeIfAny();
-      if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
-    } else {
+    console.log('[BOOT] 🔍 Attempting to load auth from localStorage...');
+    const rawAuthData = localStorage.getItem('sw:auth');
+    console.log('[BOOT] 📋 Raw auth data from localStorage:', rawAuthData);
+
+    if (!rawAuthData || rawAuthData === 'null' || rawAuthData === 'undefined') {
+      console.log('[BOOT] 📋 No auth data in localStorage, starting as guest');
       setAuth(null);
       localStorage.removeItem('sw:auth');
-      setMsgs(load(KEY_MSGS, []));
-      setCharacter(load(KEY_CHAR, null));
-      setStep(load(KEY_STEP, 'name'));
+      setMsgs([]);
+      setCharacter(null);
+      setStep('name');
       setPendingConfirm(null);
+    } else {
+      // Validación robusta del JSON
+      let saved = null;
+      try {
+        saved = JSON.parse(rawAuthData);
+        console.log('[BOOT] ✅ Auth data parsed successfully:', saved);
+      } catch (parseError) {
+        console.error('[BOOT] ❌ CRÍTICO: Auth data corrupted in localStorage!');
+        console.error('[BOOT] ❌ Raw corrupted data:', rawAuthData);
+        console.error('[BOOT] ❌ Parse error:', parseError.message);
+
+        // Limpiar datos corruptos
+        console.log('[BOOT] 🧹 Cleaning corrupted auth data...');
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      // Validar estructura del auth data
+      if (!saved || typeof saved !== 'object') {
+        console.error('[BOOT] ❌ Auth data is not a valid object:', saved);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      if (!saved.token || !saved.user?.id) {
+        console.log('[BOOT] 📋 Auth data incomplete, missing token or user.id:', saved);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      // Validar que el token se vea como un JWT
+      if (typeof saved.token !== 'string' || !saved.token.includes('.')) {
+        console.error('[BOOT] ❌ Token format invalid:', saved.token);
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+        return;
+      }
+
+      console.log('[BOOT] ✅ Auth data validation passed, setting auth...');
+      console.log('[BOOT] 📋 Setting auth for user:', saved.user.username);
+      setAuth(saved);
+      console.log('[BOOT] 📋 AUTH after setAuth:', AUTH);
+
+      // Validar el token con el servidor
+      try {
+        console.log('[BOOT] 🔍 Validating token with server...');
+        await apiGet('/auth/me');
+        console.log('[BOOT] ✅ Token validated with server');
+
+        // Cargar datos del usuario desde el servidor
+        console.log('[BOOT] 📥 Loading user data from server...');
+        await loadUserData();
+
+        // Mostrar mensaje de bienvenida
+        if (authStatusEl) authStatusEl.textContent = `Hola, ${saved.user.username}`;
+        console.log('[BOOT] ✅ User authentication restored successfully');
+
+      } catch (validationError) {
+        console.error('[BOOT] ❌ Token validation failed:', validationError.message);
+        console.log('[BOOT] 🧹 Removing invalid auth data...');
+
+        // Limpiar auth inválido
+        localStorage.removeItem('sw:auth');
+        setAuth(null);
+        setMsgs([]);
+        setCharacter(null);
+        setStep('name');
+        setPendingConfirm(null);
+      }
     }
   } catch(e){
+    console.error('[BOOT] ❌ Unexpected error in auth restoration:', e);
+    console.log('[BOOT] 🧹 Cleaning up due to unexpected error...');
+
+    // Limpiar todo en caso de error inesperado
+    localStorage.removeItem('sw:auth');
+    setAuth(null);
+    setMsgs([]);
+    setCharacter(null);
+    setStep('name');
+    setPendingConfirm(null);
+
     dlog('Auth restore error:', e);
-    if (authStatusEl) authStatusEl.textContent = 'Sin conexión para validar sesión';
+    if (authStatusEl) authStatusEl.textContent = 'Error al restaurar sesión';
   }
 
-  await loadHistory();
+  // No llamar loadHistory() aquí porque ya se hace en loadUserData()
   updateAuthUI();
 
   // ⬇️ Cambio clave: arrancar onboarding SOLO UNA VEZ y sin mensajes locales duplicados
@@ -106,6 +215,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   if (cancelBtn) cancelBtn.addEventListener('click', ()=>{ pushDM('🎲 Tirada cancelada (… )'); setPendingRoll(null); updateRollCta(); });
 
   render();
+  updatePlaceholder();
   dlog('Boot done');
 }
 
@@ -120,6 +230,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
  *                         Render
  * ========================================================== */
 function render(){
+  console.log('[RENDER] Starting render with:', { msgsCount: msgs.length, step, character: !!character, pendingConfirm });
   dgroup('render', ()=>console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
 
   let html = msgs.map((m,i)=>{
@@ -205,9 +316,16 @@ function updatePlaceholder(){
     name:'Tu nombre en el HoloNet…',
     species:'Elige especie… (el Máster te da opciones)',
     role:'Elige rol… (el Máster te da opciones)',
-    done:'Habla con el Máster'
+    done:'Habla con el Máster… (usa /restart para reiniciar)'
   };
-  if (inputEl) inputEl.placeholder = placeholders[step] || placeholders.done;
+  if (inputEl) {
+    const newPlaceholder = placeholders[step] || placeholders.done;
+    console.log('[PLACEHOLDER] Setting placeholder for step:', step, '->', newPlaceholder, 'inputEl found:', !!inputEl);
+    inputEl.placeholder = newPlaceholder;
+    console.log('[PLACEHOLDER] Placeholder set successfully:', inputEl.placeholder);
+  } else {
+    console.warn('[PLACEHOLDER] inputEl not found!');
+  }
 }
 function updateRollCta(){
   if (!rollCta || !rollSkillEl) return;
@@ -270,7 +388,7 @@ async function send(){
   const value = inputEl?.value?.trim?.() || '';
   if (!value) return;
 
-  if (pendingConfirm && step!=='done'){ setPendingConfirm(null); render(); }
+  // No limpiar pendingConfirm aquí: permite confirmación natural por texto (sí/no)
 
   dlog('send',{value,step});
   setSending(true);
@@ -299,6 +417,34 @@ async function send(){
 
   pushUser(value);
 
+  // Rehidratar confirmación pendiente desde el último mensaje del DM (si se perdió estado)
+  if (!pendingConfirm && step !== 'done') {
+    const lastDM = [...msgs].reverse().find(m => m.kind === 'dm' && typeof m.text === 'string');
+    const t = (lastDM?.text || '').trim();
+    const nameMatch = t.match(/nombre\s+es\s+\*\*([^*]+)\*\*|nombre\s+es\s+([^\.\?]+)/i);
+    const buildMatch = t.match(/especie\s+\*\*?([^*.,]+)\*\*?[,\s]+rol\s+\*\*?([^*\.\?]+)\*\*?/i);
+    const asksConfirm = /confirmas|lo confirmas|confirmas esta identidad/i.test(t);
+    if (asksConfirm && buildMatch) {
+      setPendingConfirm({ type:'build', species:(buildMatch[1]||'').trim(), role:(buildMatch[2]||'').trim() });
+    } else if (asksConfirm && nameMatch) {
+      const nm = (nameMatch[1] || nameMatch[2] || '').trim();
+      if (nm) setPendingConfirm({ type:'name', name:nm });
+    }
+  }
+
+  // Confirmación natural por texto cuando hay confirm pendiente (name/build)
+  const effectiveConfirm = pendingConfirm || load(KEY_CONFIRM, null);
+  if (effectiveConfirm && step !== 'done') {
+    const n = value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const isYes = /^(si|sí|ok|vale|perfecto|confirmo|yes)\b/.test(n);
+    const isNo = /^(no|nop|negativo|cambiar|nope)\b/.test(n);
+    if (isYes || isNo) {
+      await handleConfirmDecision(isYes ? 'yes' : 'no');
+      setSending(false);
+      return;
+    }
+  }
+
   if (step!=='done'){
     if (step==='name'){
       const name = value || 'Aventurer@';
@@ -306,34 +452,15 @@ async function send(){
       setPendingConfirm({ type:'name', name });
       render(); setSending(false); return;
     }
-    if (step==='species'){
-      const species = titleCase(value);
-      if (species.length>=2){
-        character.species = species; setCharacter(character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update species fail', e?.data||e); }
-        setStep('role');
 
-        // ⛔️ Eliminado fallback local (antes hacía pushDM “Genial, … ahora elige rol”)
-        // El Máster llevará la conversación en la siguiente respuesta.
-        dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`)
-          .catch(()=>{});
-
-        setSending(false); return;
-      }
-    } else if (step==='role'){
-      const role = titleCase(value);
-      if (role.length>=2){
-        character.role = role; setCharacter(character);
-        try{ const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); if (r?.character?.id && !character.id){ character.id=r.character.id; setCharacter(character);} }catch(e){ dlog('update role fail', e?.data||e); }
-        setStep('done');
-
-        // ⛔️ Eliminado fallback local (“¡Listo! Preparando escena…”)
-        dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`)
-          .catch(()=>{});
-
-        setSending(false); return;
-      }
+    // En etapa build (species/role), delegamos SIEMPRE el parseo al DM.
+    // Evita errores tipo tomar "quiero" como especie.
+    if (step==='species' || step==='role') {
+      try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
+      finally{ setSending(false); }
+      return;
     }
+
     try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
     finally{ setSending(false); }
     return;
@@ -368,6 +495,78 @@ async function resolveRoll(){
   }
 }
 
+// Función para cargar datos del usuario desde el servidor
+async function loadUserData() {
+  console.log('[BOOT] Loading user data from server...');
+
+  try {
+    // Verificar si el usuario ya tiene un personaje guardado
+    console.log('[BOOT] Checking for existing character...');
+    const meResponse = await apiGet('/world/characters/me');
+    console.log('[BOOT] Character response:', meResponse);
+
+    let userCharacter = null;
+    let userMsgs = [];
+    let userStep = 'name';
+
+    if (meResponse?.character) {
+      userCharacter = meResponse.character;
+      userStep = 'done'; // Usuario ya completó onboarding
+      console.log('[BOOT] Found existing character:', userCharacter);
+
+      // Si tiene personaje, intentar cargar historial
+      try {
+        console.log('[BOOT] Loading chat history...');
+        const historyResponse = await apiGet('/chat/history');
+        console.log('[BOOT] History response:', historyResponse);
+
+        if (historyResponse?.messages && Array.isArray(historyResponse.messages)) {
+          userMsgs = historyResponse.messages.map((m) => ({
+            user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
+            text: m.text,
+            kind: m.role === 'user' ? 'user' : 'dm',
+            ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+          }));
+          console.log('[BOOT] Loaded', userMsgs.length, 'messages from history');
+        }
+      } catch (historyError) {
+        console.error('[BOOT] Error loading chat history:', historyError);
+        // Si falla la carga del historial, usar mensajes locales como fallback
+        userMsgs = load(KEY_MSGS, []);
+      }
+    } else {
+      console.log('[BOOT] No character found, will start onboarding');
+      userMsgs = load(KEY_MSGS, []);
+    }
+
+    // Configurar el estado del usuario
+    console.log('[BOOT] Setting user state - Character:', !!userCharacter, 'Messages:', userMsgs.length, 'Step:', userStep);
+    setMsgs(userMsgs);
+    setCharacter(userCharacter);
+    setStep(userStep);
+    setPendingConfirm(null);
+
+    // Forzar render y actualización de UI después de configurar el estado
+    console.log('[BOOT] Forcing render and UI update...');
+    render();
+    updatePlaceholder();
+    updateAuthUI();
+
+    // Guardar en localStorage para futuras sesiones
+    if (userCharacter) {
+      save(KEY_CHAR, userCharacter);
+      save(KEY_STEP, userStep);
+    }
+
+  } catch (error) {
+    console.error('[BOOT] Error loading user data:', error);
+    // En caso de error, usar datos locales como fallback
+    setMsgs(load(KEY_MSGS, []));
+    setCharacter(load(KEY_CHAR, null));
+    setStep(load(KEY_STEP, 'name'));
+    setPendingConfirm(load(KEY_CONFIRM, null));
+  }
+}
 
 /* ============================================================
  *           Migración guest → user y helpers de historia
@@ -421,30 +620,92 @@ async function loadHistory({ force = false } = {}) {
 //                     Auth (robusto con 404)
 // ============================================================
 async function doAuth(kind) {
-  if (UI.authLoading) return;
+  console.log('[AUTH] ===== doAuth START =====');
+  console.log('[AUTH] Kind:', kind);
+  console.log('[AUTH] UI.authLoading:', UI.authLoading);
+  
+  if (UI.authLoading) {
+    console.log('[AUTH] Already loading, returning');
+    return;
+  }
+  
   const username = (authUserEl?.value || '').trim();
   const pin = (authPinEl?.value || '').trim();
-  if (!username || !/^\d{4}$/.test(pin)) {
-    if (authStatusEl) authStatusEl.textContent = 'Usuario y PIN (4 dígitos)';
+  console.log('[AUTH] ===== INPUT VALIDATION =====');
+  console.log('[AUTH] Raw username from input:', authUserEl?.value);
+  console.log('[AUTH] Raw PIN from input:', authPinEl?.value);
+  console.log('[AUTH] Trimmed username:', username);
+  console.log('[AUTH] Trimmed PIN:', pin);
+  console.log('[AUTH] Username length:', username.length);
+  console.log('[AUTH] PIN length:', pin.length);
+  console.log('[AUTH] Username regex test:', /^[a-zA-Z0-9_]{3,24}$/.test(username));
+  console.log('[AUTH] PIN regex test:', /^\d{4}$/.test(pin));
+
+  if (!username || !/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+    console.log('[AUTH] ❌ Invalid username');
+    if (authStatusEl) authStatusEl.textContent = 'Usuario inválido (3-24 caracteres, letras/números/_)';
     return;
   }
 
+  if (!pin || !/^\d{4}$/.test(pin)) {
+    console.log('[AUTH] ❌ Invalid PIN');
+    if (authStatusEl) authStatusEl.textContent = 'PIN inválido (4 dígitos)';
+    return;
+  }
+
+  console.log('[AUTH] ✅ Input validation passed');
+
   dlog('doAuth', { kind, username });
+  console.log('[AUTH] Setting auth loading to true');
   setAuthLoading(true, kind);
 
   try {
     const url = kind === 'register' ? '/auth/register' : '/auth/login';
-    const { token, user } = (await api(url, { username, pin }));
-    setAuth({ token, user });
-    localStorage.setItem('sw:auth', JSON.stringify({ token, user }));
+    console.log('[AUTH] Starting', kind, 'for user:', username);
+    console.log('[AUTH] Calling API:', url, { username, pin });
+    console.log('[AUTH] API_BASE:', API_BASE);
+    console.log('[AUTH] Full URL:', `${API_BASE}${url}`);
 
-    migrateGuestToUser(user.id);
+    const response = await api(url, { username, pin });
+    console.log('[AUTH] API response received:', response);
+    console.log('[AUTH] Response status:', response?.status || 'unknown');
+    console.log('[AUTH] Response ok:', response?.ok);
+    console.log('[AUTH] Response user:', response?.user);
+    console.log('[AUTH] Response token exists:', !!response?.token);
+    
+    // El backend devuelve { ok: true, user: {...}, token: '...' }
+    if (response.ok && response.user) {
+      console.log('[AUTH] Success! User:', response.user);
+      console.log('[AUTH] Token received:', !!response.token);
 
-    // Cargamos estado local "limpio"
-    setMsgs(load(KEY_MSGS, []));
-    setCharacter(load(KEY_CHAR, null));
-    setStep(load(KEY_STEP, 'name'));
-    setPendingConfirm(load(KEY_CONFIRM, null));
+      // Usar el token real del backend
+      const token = response.token || 'dummy-token';
+      const userData = { token, user: response.user };
+
+      // El token JWT ya está listo para usar - no necesitamos decodificarlo aquí
+      console.log('[AUTH] Token received and ready to use');
+      console.log('[AUTH] Token length:', response.token?.length || 0);
+
+      console.log('[AUTH] 📋 About to save auth data to localStorage...');
+      console.log('[AUTH] 📋 userData to save:', userData);
+      console.log('[AUTH] 📋 userData.token length:', userData.token?.length || 0);
+
+      setAuth(userData);
+      console.log('[AUTH] ✅ setAuth called successfully');
+
+      localStorage.setItem('sw:auth', JSON.stringify(userData));
+      console.log('[AUTH] 💾 Auth data saved to localStorage');
+      console.log('[AUTH] 📋 localStorage content after save:', localStorage.getItem('sw:auth'));
+    } else {
+      console.error('[AUTH] Invalid response:', response);
+      throw new Error('Invalid response from server');
+    }
+
+    migrateGuestToUser(response.user.id);
+
+    // Cargar datos del usuario desde el servidor usando la nueva función centralizada
+    console.log('[AUTH] Loading user data after authentication...');
+    await loadUserData();
 
     // Quitar "bienvenida de invitado" si quedó
     {
@@ -454,34 +715,32 @@ async function doAuth(kind) {
       if (esSoloBienvenida) { resetMsgs(); }
     }
 
-    // ¿Ya tiene personaje? → login con partida previa
-    let me = null;
-    try { me = await apiGet('/world/characters/me'); }
-    catch (e) { if (e?.response?.status !== 404) throw e; dlog('characters/me not found', e?.data || e); }
+    // ✅ La función loadUserData() ya determinó si el usuario tiene personaje o no
+    // Si tiene personaje, ya está en step='done' y listo para jugar
+    // Si no tiene personaje, está en step='name' y necesita onboarding
 
-    if (me?.character) {
-      // Jugador existente: forzamos historial
-      setCharacter(me.character);
-      setStep('done');
-
-      await loadHistory({ force: true });
-      await showResumeIfAny();
-
-      if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
-      setIdentityBar(user.username, character?.name || '');
+    if (step === 'done') {
+      // Usuario existente con personaje - mostrar info completa
+      console.log('[AUTH] Existing user with character - ready to play');
+      if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
+      setIdentityBar(response.user.username, character?.name || '');
       updateAuthUI();
       render();
       return; // listo para seguir jugando
     }
 
-    // === Registro nuevo: empezamos onboarding ===
+    // === Usuario nuevo sin personaje: empezamos onboarding ===
+    console.log('[AUTH] New user without character - starting onboarding');
+
+    // Limpiar estado para onboarding limpio
     resetMsgs();
     setCharacter(null);
     setStep('name');
     setPendingConfirm(null);
 
-    if (authStatusEl) authStatusEl.textContent = `Hola, ${user.username}`;
-    setIdentityBar(user.username, '');
+    console.log('[AUTH] Setting identity bar for new user - User:', response.user.username);
+    if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
+    setIdentityBar(response.user.username, '');
     updateAuthUI();
     render();
 
@@ -489,6 +748,14 @@ async function doAuth(kind) {
     await startOnboardingOnce({ hard: true });
 
   } catch (e) {
+    console.error('[AUTH] Error in doAuth:', e);
+    console.error('[AUTH] Error details:', {
+      message: e.message,
+      data: e?.data,
+      response: e?.response,
+      stack: e.stack
+    });
+    
     dlog('doAuth error:', e?.data || e);
     let code = '';
     try { code = (e.data?.json?.error) || (await e.response?.json?.())?.error || ''; } catch {}
@@ -500,8 +767,11 @@ async function doAuth(kind) {
       unauthorized: 'No autorizado.',
       not_found: 'Recurso no encontrado.',
     };
-    if (authStatusEl) authStatusEl.textContent = (code && (friendly[code] || code)) || 'Error de autenticación';
+    const errorMessage = (code && (friendly[code] || code)) || 'Error de autenticación';
+    console.log('[AUTH] Setting error message:', errorMessage);
+    if (authStatusEl) authStatusEl.textContent = errorMessage;
   } finally {
+    console.log('[AUTH] Setting loading to false');
     setAuthLoading(false);
   }
 }
@@ -530,3 +800,7 @@ if ('serviceWorker' in navigator){
       .catch(e=>dlog('SW registration failed', e));
   });
 }
+
+// Exportar funciones globalmente para que puedan ser llamadas desde otros módulos
+window.render = render;
+window.updatePlaceholder = updatePlaceholder;

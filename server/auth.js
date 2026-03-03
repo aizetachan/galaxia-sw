@@ -1,264 +1,322 @@
-// server/auth.js
-import { Router } from 'express';
-import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHash } from 'crypto';
-import { hasDb, sql } from './db.js';
+// Autenticación completa con base de datos
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
 
-/* ========= util ========= */
-const now = () => new Date();
-const addDays = (d) => new Date(Date.now() + d * 24 * 60 * 60 * 1000);
-function normalizeUsername(username=''){ const u=String(username).trim().toLowerCase(); return /^[a-z0-9_]{3,24}$/.test(u)?u:null; }
-function normalizePin(pin=''){ const p=String(pin).trim(); return /^\d{4}$/.test(p)?p:null; }
+const router = express.Router();
 
-function hashPinV2(pin){ const salt=randomBytes(16).toString('hex'); const key=scryptSync(String(pin),salt,64).toString('hex'); return `v2:${salt}:${key}`; }
-function verifyPinV2(pin, stored){ const parts=String(stored).split(':'); if(parts.length!==3||parts[0]!=='v2')return false; const[,salt,keyHex]=parts; const a=Buffer.from(keyHex,'hex'); const b=Buffer.from(scryptSync(String(pin),salt,64).toString('hex'),'hex'); return a.length===b.length && timingSafeEqual(a,b); }
-function hashPinLegacy(username,pin){ return createHash('sha256').update(`${username}:${pin}`).digest('hex'); }
+// Configuración de la base de datos
+let pool = null;
+let dbConnected = false;
 
-/* ========= memoria (fallback sin DB) ========= */
-const mem={ users:new Map(), sessions:new Map() }; let memId=1;
-
-/* ========= admin por defecto ========= */
-const ADMIN_USER = process.env.ADMIN_USER || 'settings';
-const ADMIN_PIN = process.env.ADMIN_PIN || '0987';
-
-/* ========= DB helpers ========= */
-async function dbFindUserByUsername(username){
-  if(!hasDb) return mem.users.get(username)||null;
-  const {rows}=await sql(`SELECT id,username,pin_hash,created_at FROM users WHERE username=$1 LIMIT 1`,[username]);
-  return rows[0]||null;
-}
-async function dbInsertUser(username,pin_hash){
-  if(!hasDb){
-    if(mem.users.has(username)) throw new Error('USERNAME_TAKEN');
-    const u={id:memId++,username,pin_hash,created_at:now()}; mem.users.set(username,u); return u;
+if (process.env.DATABASE_URL) {
+  try {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
+    console.log('[AUTH] Database pool created for auth');
+    console.log('[AUTH] DATABASE_URL exists:', !!process.env.DATABASE_URL);
+    console.log('[AUTH] NODE_ENV:', process.env.NODE_ENV);
+    dbConnected = true;
+  } catch (error) {
+    console.error('[AUTH] Database connection error:', error.message);
+    console.error('[AUTH] DATABASE_URL:', process.env.DATABASE_URL ? 'EXISTS' : 'MISSING');
+    pool = null;
+    dbConnected = false;
   }
-  try{
-    const {rows}=await sql(`INSERT INTO users(username,pin_hash) VALUES ($1,$2) RETURNING id,username,pin_hash,created_at`,[username,pin_hash]);
-    return rows[0];
-  } catch(e){
-    if(String(e.message||'').toLowerCase().includes('unique')) throw new Error('USERNAME_TAKEN');
-    throw e;
+} else {
+  console.log('[AUTH] No DATABASE_URL found, will use demo mode');
+}
+
+// JWT Secret
+const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-change-this';
+
+// Función para crear tablas si no existen
+async function initDatabase() {
+  if (!pool) return;
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        pin_hash VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[AUTH] Database initialized');
+  } catch (error) {
+    console.error('[AUTH] Database init error:', error.message);
   }
 }
-async function dbUpdateUserPinHash(userId,newHash){
-  if(!hasDb){ for(const u of mem.users.values()){ if(u.id===userId){u.pin_hash=newHash;break;} } return; }
-  await sql(`UPDATE users SET pin_hash=$1 WHERE id=$2`,[newHash,userId]);
+
+// Inicializar base de datos
+initDatabase();
+
+// Función para hashear PIN (simple para demo)
+function hashPin(pin) {
+  // En producción usar bcrypt
+  return require('crypto').createHash('sha256').update(pin).digest('hex');
 }
-async function dbCreateSession(user_id){
-  const token=randomUUID().replace(/-/g,''); const created_at=now(); const expires_at=addDays(30);
-  if(!hasDb){ mem.sessions.set(token,{token,user_id,created_at,expires_at}); return {token,user_id,created_at,expires_at}; }
-  await sql(`INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES ($1,$2,$3,$4)`,[token,user_id,created_at,expires_at]);
-  return {token,user_id,created_at,expires_at};
+
+// Función para verificar PIN
+function verifyPin(pin, hash) {
+  return hashPin(pin) === hash;
 }
-async function dbGetSession(token){
-  if(!token) return null;
-  if(!hasDb){
-    const s=mem.sessions.get(token);
-    if(!s || (s.expires_at && s.expires_at<now())) return null;
-    const user=[...mem.users.values()].find(u=>u.id===s.user_id)||null;
-    if(!user) return null;
-    return {token:s.token,user_id:s.user_id,username:user.username};
-  }
-  const {rows}=await sql(
-    `SELECT s.token,s.user_id,u.username
-       FROM sessions s JOIN users u ON u.id=s.user_id
-      WHERE s.token=$1 AND (s.expires_at IS NULL OR s.expires_at>now())
-      LIMIT 1`,
-    [token]
+
+// Función para generar JWT
+function generateToken(user) {
+  return jwt.sign(
+    { id: user.id, username: user.username },
+    JWT_SECRET,
+    { expiresIn: '7d' }
   );
-  return rows[0]||null;
-}
-async function dbDeleteSession(token){
-  if(!token) return;
-  if(!hasDb){ mem.sessions.delete(token); return; }
-  await sql(`DELETE FROM sessions WHERE token=$1`,[token]);
 }
 
-/* ========= lógica pública ========= */
-export async function register(usernameRaw,pinRaw){
-  console.log('[AUTH/register] attempt user=', usernameRaw);
-  const username=normalizeUsername(usernameRaw); const pin=normalizePin(pinRaw);
-  if(!username||!pin){ console.warn('[AUTH/register] invalid credentials user=', usernameRaw); throw new Error('INVALID_CREDENTIALS'); }
-  const exists=await dbFindUserByUsername(username);
-  if(exists){ console.warn('[AUTH/register] username taken:', username); throw new Error('USERNAME_TAKEN'); }
-  const pin_hash=hashPinV2(pin);
-  const user=await dbInsertUser(username,pin_hash);
-  console.log('[AUTH/register] success id=', user.id, 'username=', user.username);
-  return { id:user.id, username:user.username };
-}
+// Middleware para verificar JWT
+function authenticateToken(req, res, next) {
+  const token = req.cookies.token || req.headers.authorization?.replace('Bearer ', '');
 
-export async function login(usernameRaw,pinRaw){
-  console.log('[AUTH/login] attempt user=', usernameRaw);
-  const username=normalizeUsername(usernameRaw); const pin=normalizePin(pinRaw);
-  if(!username||!pin){ console.warn('[AUTH/login] invalid credentials user=', usernameRaw); throw new Error('INVALID_CREDENTIALS'); }
-  const user=await dbFindUserByUsername(username);
-  if(!user){ console.warn('[AUTH/login] user not found:', username); throw new Error('USER_NOT_FOUND'); }
-  let ok=false; const stored=user.pin_hash||'';
-  if(stored.startsWith('v2:')) ok=verifyPinV2(pin,stored);
-  else { ok = stored===hashPinLegacy(username,pin); if(ok&&hasDb){ try{ await dbUpdateUserPinHash(user.id,hashPinV2(pin)); } catch{} } }
-  if(!ok){ console.warn('[AUTH/login] invalid pin for user=', username); throw new Error('INVALID_PIN'); }
-  const session=await dbCreateSession(user.id);
-  console.log('[AUTH/login] success uid=', user.id, 'token=', session.token.slice(0,8)+'...');
-  return { token:session.token, user:{ id:user.id, username:user.username } };
-}
-
-export async function getSession(token){ return dbGetSession(token); }
-export async function logout(token){ await dbDeleteSession(token); return { ok:true }; }
-
-export async function requireAuth(req,res,next){
-  const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
-  const token=m?m[1]:null;
-  console.log('[AUTH/requireAuth] token=', token?token.slice(0,8)+'...':'none');
-  const s=await dbGetSession(token);
-  if(!s){
-    console.warn('[AUTH/requireAuth] unauthorized token=', token?token.slice(0,8)+'...':'none');
-    const origin=req.headers.origin||'*';
-    res.setHeader('Access-Control-Allow-Origin', origin==='null'?'*':origin);
-    res.setHeader('Vary','Origin');
-    return res.status(401).json({ error:'unauthorized' });
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token requerido' });
   }
-  req.auth={ userId:s.user_id, username:s.username, token };
-  console.log('[AUTH/requireAuth] user=', s.username, 'id=', s.user_id);
-  next();
-}
 
-export async function optionalAuth(req,_res,next){
-  try{
-    const m=(req.headers.authorization||'').match(/^Bearer\s+(.+)$/i);
-    const token=m?m[1]:null;
-    if(!token) return next();
-    const s=await dbGetSession(token);
-    if(s){
-      req.auth={ userId:s.user_id, username:s.username, token };
-      console.log('[AUTH/optionalAuth] user=', s.username, 'id=', s.user_id);
-    } else {
-      console.warn('[AUTH/optionalAuth] invalid token=', token.slice(0,8)+'...');
-    }
-  } catch(e){
-    console.error('[AUTH/optionalAuth] error', e);
-  }
-  next();
-}
-
-export function requireAdmin(req,res,next){
-  if(req.auth?.username===ADMIN_USER) return next();
-  return res.status(403).json({ error:'forbidden' });
-}
-
-/* ========= endpoints (Router) ========= */
-const router = Router();
-
-// Corto-circuito OPTIONS en /auth/* (por si llegara aquí)
-router.use((req, res, next) => {
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
-// Lazy init del admin: SIN top-level await
-let adminEnsured = false;
-async function ensureAdminUser(){
-  const exists=await dbFindUserByUsername(ADMIN_USER);
-  if(!exists){
-    const pin_hash=hashPinV2(ADMIN_PIN);
-    await dbInsertUser(ADMIN_USER,pin_hash);
-    console.log('[AUTH] admin user created:', ADMIN_USER);
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token inválido' });
   }
 }
-async function ensureAdminUserOnce(){
-  if (adminEnsured) return;
-  adminEnsured = true;
-  try { await ensureAdminUser(); }
-  catch(e){ adminEnsured = false; console.error('[AUTH] ensureAdminUser error', e?.message || e); }
-}
-router.use(async (_req, _res, next) => { await ensureAdminUserOnce(); next(); });
 
-// POST /auth/register { username, pin } → { ok:true, token, user }
+// POST /auth/register
 router.post('/register', async (req, res) => {
-  try{
-    const { username, pin } = req.body || {};
-    await register(username, pin);
-    const data = await login(username, pin);
-    res.json({ ok:true, ...data });
-  } catch(e){
-    const msg = String(e?.message || 'ERROR');
-    const map = { INVALID_CREDENTIALS: 400, USERNAME_TAKEN: 409 };
-    res.status(map[msg] || 500).json({ ok:false, error: msg });
+  console.log('[AUTH] Register called');
+  console.log('[AUTH] Database URL exists:', !!process.env.DATABASE_URL);
+  console.log('[AUTH] Pool exists:', !!pool);
+  console.log('[AUTH] Database connected:', dbConnected);
+
+  try {
+    const { username, pin } = req.body;
+    const normalizedUsername = String(username || '').trim().toLowerCase();
+
+    // Validación básica
+    if (!normalizedUsername || !pin) {
+      return res.status(400).json({
+        ok: false,
+        error: 'INVALID_INPUT',
+        message: 'Usuario y PIN requeridos'
+      });
+    }
+
+    // Validar formato de usuario (3-24 caracteres, solo letras/números/_)
+    if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'INVALID_USERNAME',
+        message: 'Usuario debe tener 3-24 caracteres (letras, números, _)'
+      });
+    }
+
+    // Validar PIN (4 dígitos)
+    if (!/^\d{4}$/.test(pin)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'INVALID_PIN',
+        message: 'PIN debe ser 4 dígitos'
+      });
+    }
+
+    console.log('[AUTH] About to check pool for registration');
+    console.log('[AUTH] Pool status:', !!pool);
+
+    if (pool) {
+      console.log('[AUTH] Using database mode for registration');
+      // Verificar si usuario ya existe
+      const existing = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
+      if (existing.rows.length > 0) {
+        return res.status(409).json({
+          ok: false,
+          error: 'USERNAME_TAKEN',
+          message: 'Usuario ya existe'
+        });
+      }
+
+      // Crear usuario
+      const pinHash = hashPin(pin);
+      const result = await pool.query(
+        'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id, username',
+        [normalizedUsername, pinHash]
+      );
+
+      const user = result.rows[0];
+      const token = generateToken(user);
+
+      // Configurar cookie con el token
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
+      });
+
+      console.log('[AUTH] User registered:', normalizedUsername);
+      res.json({
+        ok: true,
+        user: { id: user.id, username: user.username },
+        token: token, // Enviar token JWT al frontend
+        message: 'Usuario registrado exitosamente'
+      });
+    } else {
+      // Modo demo - usuario falso
+      console.log('[AUTH] Using demo mode - no database connection');
+      console.log('[AUTH] Demo mode - fake registration for:', normalizedUsername);
+      const user = { id: Math.floor(Math.random() * 10000), username: normalizedUsername };
+      const token = generateToken(user);
+
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      res.json({
+        ok: true,
+        user,
+        token: token, // Enviar token JWT al frontend
+        message: 'Usuario registrado (modo demo)'
+      });
+    }
+  } catch (error) {
+    console.error('[AUTH] Register error:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'SERVER_ERROR',
+      message: 'Error en el servidor'
+    });
   }
 });
 
-// POST /auth/login { username, pin }
+// POST /auth/login
 router.post('/login', async (req, res) => {
-  try{
-    const { username, pin } = req.body || {};
-    const data = await login(username, pin);
-    res.json({ ok:true, ...data });
-  } catch(e){
-    const msg = String(e?.message || 'ERROR');
-    const map = { INVALID_CREDENTIALS: 400, USER_NOT_FOUND: 404, INVALID_PIN: 401 };
-    res.status(map[msg] || 500).json({ ok:false, error: msg });
-  }
-});
+  console.log('[AUTH] Login called');
+  console.log('[AUTH] Database URL exists:', !!process.env.DATABASE_URL);
+  console.log('[AUTH] Pool exists:', !!pool);
+  console.log('[AUTH] Database connected:', dbConnected);
 
-// GET /auth/session
-router.get('/session', optionalAuth, async (req, res) => {
-  if (!req.auth) return res.status(401).json({ ok:false, error:'unauthorized' });
-  res.json({ ok:true, user: { id: req.auth.userId, username: req.auth.username } });
+  try {
+    const { username, pin } = req.body;
+    const normalizedUsername = String(username || '').trim().toLowerCase();
+
+    // Validación básica
+    if (!normalizedUsername || !pin) {
+      return res.status(400).json({
+        ok: false,
+        error: 'INVALID_CREDENTIALS',
+        message: 'Usuario y PIN requeridos'
+      });
+    }
+
+    console.log('[AUTH] About to check pool for login');
+    console.log('[AUTH] Pool status:', !!pool);
+
+    if (pool) {
+      console.log('[AUTH] Using database mode for login');
+      // Buscar usuario
+      const result = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
+      if (result.rows.length === 0) {
+        return res.status(401).json({
+          ok: false,
+          error: 'USER_NOT_FOUND',
+          message: 'Usuario no encontrado'
+        });
+      }
+
+      const user = result.rows[0];
+
+      // Verificar PIN
+      if (!verifyPin(pin, user.pin_hash)) {
+        return res.status(401).json({
+          ok: false,
+          error: 'INVALID_PIN',
+          message: 'PIN incorrecto'
+        });
+      }
+
+      // Actualizar último login
+      await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+
+      // Generar token
+      const token = generateToken(user);
+
+      // Configurar cookie
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      console.log('[AUTH] User logged in:', normalizedUsername);
+      res.json({
+        ok: true,
+        user: { id: user.id, username: user.username },
+        token: token, // Enviar token JWT al frontend
+        message: 'Login exitoso'
+      });
+    } else {
+      // Modo demo
+      console.log('[AUTH] Using demo mode - no database connection');
+      console.log('[AUTH] Demo mode - fake login for:', normalizedUsername);
+      const user = { id: Math.floor(Math.random() * 10000), username: normalizedUsername };
+      const token = generateToken(user);
+
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+
+      res.json({
+        ok: true,
+        user,
+        token: token, // Enviar token JWT al frontend
+        message: 'Login exitoso (modo demo)'
+      });
+    }
+  } catch (error) {
+    console.error('[AUTH] Login error:', error);
+    res.status(500).json({
+      ok: false,
+      error: 'SERVER_ERROR',
+      message: 'Error en el servidor'
+    });
+  }
 });
 
 // POST /auth/logout
-router.post('/logout', requireAuth, async (req, res) => {
-  try{
-    await logout(req.auth.token);
-    res.json({ ok:true });
-  } catch(e){
-    res.status(500).json({ ok:false, error: 'ERROR' });
-  }
+router.post('/logout', (req, res) => {
+  console.log('[AUTH] Logout called');
+
+  // Limpiar cookie
+  res.clearCookie('token');
+  res.json({ ok: true, message: 'Sesión cerrada exitosamente' });
 });
 
-/* ========= export default ========= */
-export default router;
+// GET /auth/me
+router.get('/me', authenticateToken, (req, res) => {
+  console.log('[AUTH] Me called for user:', req.user.username);
 
-/* ========= util admin extra ========= */
-export async function listUsers(){
-  if(!hasDb){
-    return [...mem.users.values()].map(u=>({id:u.id,username:u.username}));
-  }
-  const {rows}=await sql(`SELECT id,username FROM users ORDER BY id`);
-  return rows;
-}
-export async function updateUser(id,{username,pin}){
-  const userId=Number(id);
-  if(!userId) return;
-  if(!hasDb){
-    for(const u of mem.users.values()){
-      if(u.id===userId){
-        const nu=normalizeUsername(username);
-        if(nu) u.username=nu;
-        if(pin) u.pin_hash=hashPinV2(pin);
-        break;
-      }
-    }
-    return;
-  }
-  const fields=[]; const values=[];
-  const nu=normalizeUsername(username);
-  if(nu){ fields.push(`username=$${fields.length+1}`); values.push(nu); }
-  if(pin){ fields.push(`pin_hash=$${fields.length+1}`); values.push(hashPinV2(pin)); }
-  if(!fields.length) return;
-  values.push(userId);
-  await sql(`UPDATE users SET ${fields.join(',')} WHERE id=$${fields.length+1}`,values);
-}
-export async function deleteUserCascade(id){
-  const userId=Number(id);
-  if(!userId) return;
-  if(!hasDb){
-    for(const [k,u] of mem.users.entries()) if(u.id===userId) mem.users.delete(k);
-    for(const [t,s] of mem.sessions.entries()) if(s.user_id===userId) mem.sessions.delete(t);
-    return;
-  }
-  await sql(`DELETE FROM chat_messages WHERE user_id=$1`,[userId]);
-  await sql(`DELETE FROM events WHERE user_id=$1`,[userId]);
-  await sql(`DELETE FROM dice_rolls WHERE character_id IN (SELECT id FROM characters WHERE owner_user_id=$1)`,[userId]);
-  await sql(`DELETE FROM characters WHERE owner_user_id=$1`,[userId]);
-  await sql(`DELETE FROM sessions WHERE user_id=$1`,[userId]);
-  await sql(`DELETE FROM users WHERE id=$1`,[userId]);
-}
+  res.json({
+    ok: true,
+    user: { id: req.user.id, username: req.user.username }
+  });
+});
+
+module.exports = router;
+module.exports.authenticateToken = authenticateToken;

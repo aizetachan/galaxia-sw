@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
     />
     <!-- <meta name="api_base"> apunta a tu API en Vercel -->
-    <meta name="api_base" content="https://galaxia-sw.vercel.app/api">
+    <meta name="api_base" content="/api">
 
     <title>GALACTIC</title>
 
@@ -83,19 +83,14 @@
         <input
           id="input"
           type="text"
-          placeholder="Tu nombre en el HoloNet… (usa /restart para reiniciar)"
+          placeholder=""
           enterkeyhint="send"
         />
         <button id="send">Enviar</button>
       </section>
     </main>
 
-    <!-- Chequea el estado del servidor antes de cargar main.js -->
-    <script type="module">
-      import { API_BASE, probeHealth, setServerStatus } from './api.js';
-      const r = await probeHealth(API_BASE);
-      setServerStatus(r.ok);
-    </script>
+    
 
     <!-- App principal -->
     <script type="module" src="./main.js"></script>

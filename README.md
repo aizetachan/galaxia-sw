@@ -287,7 +287,7 @@ El Máster narra **éxito/fallo** y consecuencias de forma breve y clara.
 
 ## Despliegue
 
-- **Vercel**: `server/api/index.js` exporta la app para `/api`.
+- **Vercel**: `server/api/[...all].js` exporta la app para `/api`.
   - Sube `/web` como estático y sirve bajo el **mismo dominio** que el API o pasa `?api=` en la URL.
   - Configura **Environment Variables**: `OPENAI_API_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, `LLM_MODEL`, etc.
 - **Estático**: `/web` puede ir a cualquier CDN. Si no comparte dominio con el backend, **usa `?api=`** y configura CORS.
