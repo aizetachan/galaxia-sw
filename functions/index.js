@@ -20,10 +20,7 @@ app.use(cors({ origin: true, credentials: true }));
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
 const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'global';
-const GEMINI_MODELS = (process.env.GEMINI_MODEL_LIST || process.env.GEMINI_MODEL || 'gemini-2.0-flash-001,gemini-1.5-flash-002,gemini-1.5-flash')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -41,27 +38,17 @@ function getBearer(req) {
 
 async function askGemini(prompt) {
   const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
-  let lastErr = null;
-
-  for (const modelName of GEMINI_MODELS) {
-    try {
-      const model = vertexAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
-        generationConfig: {
-          temperature: 0.6,
-          maxOutputTokens: 512
-        }
-      });
-
-      const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
-      if (text) return { text, model: modelName };
-    } catch (e) {
-      lastErr = e;
+  const model = vertexAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 512
     }
-  }
+  });
 
-  throw lastErr || new Error('No Gemini model available');
+  const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
+  return { text, model: GEMINI_MODEL };
 }
 
 function auth(req, res, next) {
@@ -86,7 +73,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/ai/config', auth, async (_req, res) => {
-  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, models: GEMINI_MODELS });
+  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, model: GEMINI_MODEL });
 });
 
 app.post('/ai/test', auth, async (req, res) => {
