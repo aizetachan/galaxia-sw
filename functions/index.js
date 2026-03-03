@@ -16,6 +16,78 @@ function getGeminiApiKey() {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || GEMINI_API_KEY_SECRET.value() || '';
 }
 
+function stripLeadingMetaJson(text = '') {
+  let s = String(text || '').trim();
+  if (!s) return '';
+
+  for (let i = 0; i < 4; i++) {
+    const firstLineRaw = s.split('\n')[0] || '';
+    const firstLine = firstLineRaw.trim();
+
+    const looksLikeMetaLine =
+      firstLine.startsWith('{') &&
+      (/("|\\")?(roll|memo|engine|stage|hook|escena)("|\\")?\s*:/.test(firstLine) || firstLine.includes('"memo"'));
+
+    if (looksLikeMetaLine) {
+      s = s.slice(firstLineRaw.length).trim();
+      continue;
+    }
+
+    const m = s.match(/^\s*\{[\s\S]{1,1200}?\}\s*/);
+    if (m) {
+      const first = m[0].trim();
+      try {
+        const obj = JSON.parse(first);
+        const keys = Object.keys(obj || {}).map(k => String(k).toLowerCase());
+        const hasMetaKey = ['roll', 'memo', 'engine', 'stage', 'hook', 'escena', 'consecuencia', 'opciones'].some(k => keys.includes(k));
+        if (hasMetaKey) {
+          s = s.slice(m[0].length).trim();
+          continue;
+        }
+      } catch {}
+    }
+
+    if (firstLine.includes('\\"roll\\"') || firstLine.includes('"roll"') || firstLine.includes('\\"memo\\"') || firstLine.includes('"memo"')) {
+      const unescaped = firstLine.replace(/\\"/g, '"');
+      try {
+        const obj = JSON.parse(unescaped);
+        const keys = Object.keys(obj || {}).map(k => String(k).toLowerCase());
+        const hasMetaKey = ['roll', 'memo', 'engine', 'stage', 'hook', 'escena', 'consecuencia', 'opciones'].some(k => keys.includes(k));
+        if (hasMetaKey) {
+          s = s.slice(firstLineRaw.length).trim();
+          continue;
+        }
+      } catch {}
+    }
+
+    break;
+  }
+
+  return s.trim();
+}
+
+function sanitizeDmText(rawText = '') {
+  let text = String(rawText || '');
+  if (!text) return '';
+
+  text = text.replace(/```(?:json)?\s*[\s\S]*?```/gi, (block) => {
+    const b = String(block || '');
+    return /(\"?roll\"?|\"?memo\"?|\"?hook\"?|\"?escena\"?)/i.test(b) ? '' : b;
+  });
+
+  text = text
+    .replace(/<<[\s\S]*?>>/g, '')
+    .replace(/^\s*#{1,6}\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*:?[ \t]*/gim, '')
+    .replace(/^\s*(?:\*\*|__)?\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*(?:\*\*|__)?\s*:[ \t]*/gim, '')
+    .replace(/^\s*[-*]\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*:[ \t]*/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ');
+
+  text = stripLeadingMetaJson(text).trim();
+
+  return text;
+}
+
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -87,9 +159,17 @@ async function askGemini(prompt) {
         generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
       })
     });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j?.error?.message || `Gemini API HTTP ${r.status}`);
-    const text = j?.candidates?.[0]?.content?.parts?.map(x => x?.text || '').join(' ').trim() || '';
+    let j = null;
+    let raw = '';
+    try {
+      j = await r.json();
+    } catch {
+      raw = await r.text().catch(() => '');
+    }
+    if (!r.ok) {
+      throw new Error(j?.error?.message || raw || `Gemini API HTTP ${r.status}`);
+    }
+    const text = j?.candidates?.[0]?.content?.parts?.map(x => x?.text || '').join(' ').trim() || raw || '';
     return { text, model: GEMINI_CHAT_MODEL, transport: 'api_key' };
   }
 
@@ -396,19 +476,30 @@ app.use('/dm', auth, async (req, res, next) => {
       const originalJson = res.json.bind(res);
       res.json = async (payload) => {
         try {
-          const text = payload?.text;
-          if (text) {
+          const cleanText = sanitizeDmText(payload?.text || '').slice(0, 1200);
+          if (payload && typeof payload === 'object' && cleanText) {
+            payload.text = cleanText;
+          }
+
+          if (cleanText) {
             await db.collection('users').doc(req.user.id).collection('messages').add({
               role: 'dm',
-              text,
-              ts: new Date().toISOString()
+              text: cleanText,
+              ts: new Date().toISOString(),
+              meta: {
+                stage,
+                engine: payload?.engine || 'rules',
+                model: payload?.model || null,
+                mode,
+                forceGemini
+              }
             });
           }
         } catch (e) {
           console.error('[DM persist]', e);
         }
 
-        // observability: always tag engine in stage=done responses
+        // observability: tag engine internally without contaminating text UX
         if (stage === 'done' && payload && !payload.engine) {
           payload.engine = 'rules';
           payload.mode = mode;
@@ -419,21 +510,21 @@ app.use('/dm', auth, async (req, res, next) => {
 
       // Gemini for free conversation after onboarding
       const isProtocolMsg = msg.startsWith('<<');
-      const isBuildAckYes = /<<CONFIRM_ACK\s+TYPE="build"\s+DECISION="yes"\s*>>/i.test(msg);
       const allowGemini = forceGemini || mode === 'rich';
-      const shouldUseGemini = stage === 'done' && allowGemini && (!isProtocolMsg || isBuildAckYes);
+      // Keep onboarding deterministic: Gemini starts only after onboarding protocol turn is complete.
+      const shouldUseGemini = stage === 'done' && allowGemini && !isProtocolMsg;
       if (shouldUseGemini) {
         try {
           const state = req.body?.clientState || {};
           const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
-          const effectiveMessage = isBuildAckYes
-            ? 'Acabo de completar onboarding. Dame una apertura narrativa potente y natural con opciones implícitas para continuar la historia sin pedir formato rígido.'
-            : msg;
+          const effectiveMessage = msg;
 
           const prompt = [
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
-            'Responde en español natural, corto-medio, sin etiquetas de protocolo.',
+            'Responde en español natural, corto-medio, como conversación humana fluida.',
             'No uses tokens tipo <<...>> ni pidas formato rígido.',
+            'No uses encabezados ni etiquetas como "Hook:", "Escena:", "Consecuencia:", "Opciones:".',
+            'No listes secciones; habla de forma orgánica en párrafos breves.',
             GUIDANCE_MASTER ? `\n[GUIDANCE_MASTER]\n${GUIDANCE_MASTER}` : '',
             GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
             GUIDANCE_DICE ? `\n[GUIDANCE_DICE]\n${GUIDANCE_DICE}` : '',
@@ -444,11 +535,7 @@ app.use('/dm', auth, async (req, res, next) => {
           ].filter(Boolean).join('\n');
 
           const out = await askGemini(prompt);
-          const clean = String(out?.text || '')
-            .replace(/<<[\s\S]*?>>/g, '')
-            .replace(/\s{2,}/g, ' ')
-            .trim()
-            .slice(0, 1200);
+          const clean = sanitizeDmText(out?.text || '').slice(0, 1200);
 
           if (clean) {
             return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
