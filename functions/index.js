@@ -284,6 +284,7 @@ app.use('/dm', auth, async (req, res, next) => {
       const msg = String(req.body?.message || '');
       const stage = String(req.body?.stage || '').toLowerCase();
       const mode = String(req.body?.config?.mode || 'rich').toLowerCase();
+      const forceGemini = String(process.env.FORCE_GEMINI_DM || '1') === '1';
 
       if (msg && !msg.startsWith('<<')) {
         await db.collection('users').doc(req.user.id).collection('messages').add({
@@ -310,9 +311,10 @@ app.use('/dm', auth, async (req, res, next) => {
         return originalJson(payload);
       };
 
-      // Gemini only for free conversation after onboarding (safe rollout)
+      // Gemini for free conversation after onboarding
       const isProtocolMsg = msg.startsWith('<<');
-      if (stage === 'done' && mode === 'rich' && !isProtocolMsg) {
+      const allowGemini = forceGemini || mode === 'rich';
+      if (stage === 'done' && allowGemini && !isProtocolMsg) {
         try {
           const state = req.body?.clientState || {};
           const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
@@ -334,7 +336,7 @@ app.use('/dm', auth, async (req, res, next) => {
             .slice(0, 1200);
 
           if (clean) {
-            return res.json({ ok: true, text: clean });
+            return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
           }
         } catch (e) {
           console.warn('[DM gemini fallback]', e?.message || e);
