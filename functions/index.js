@@ -1,4 +1,5 @@
 const functions = require('firebase-functions/v1');
+const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const express = require('express');
 const cors = require('cors');
@@ -7,10 +8,11 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { VertexAI } = require('@google-cloud/vertexai');
 
-let GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-try {
-  if (!GEMINI_API_KEY) GEMINI_API_KEY = functions.config()?.gemini?.api_key || '';
-} catch {}
+const GEMINI_API_KEY_SECRET = defineSecret('GEMINI_API_KEY');
+
+function getGeminiApiKey() {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || GEMINI_API_KEY_SECRET.value() || '';
+}
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -57,10 +59,11 @@ function normalizeAiError(e, model) {
 
 async function askGemini(prompt) {
   const p = String(prompt || 'Hola');
+  const apiKey = getGeminiApiKey();
 
   // Preferred override: API key path (Google AI API)
-  if (GEMINI_API_KEY) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_CHAT_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+  if (apiKey) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_CHAT_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const r = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -109,13 +112,14 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/ai/config', auth, async (_req, res) => {
+  const apiKey = getGeminiApiKey();
   return res.json({
     ok: true,
     project: VERTEX_PROJECT,
     location: VERTEX_LOCATION,
     chatModel: GEMINI_CHAT_MODEL,
     imageModel: GEMINI_IMAGE_MODEL,
-    transport: GEMINI_API_KEY ? 'api_key' : 'vertex'
+    transport: apiKey ? 'api_key' : 'vertex'
   });
 });
 
@@ -139,9 +143,10 @@ app.post('/ai/image', auth, async (req, res) => {
     }
 
     let parts = [];
+    const apiKey = getGeminiApiKey();
 
-    if (GEMINI_API_KEY) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_IMAGE_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+    if (apiKey) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_IMAGE_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,5 +428,8 @@ app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found', path
 
 exports.api = functions
   .region('europe-west1')
-  .runWith({ serviceAccount: 'galaxian-dae59@appspot.gserviceaccount.com' })
+  .runWith({
+    serviceAccount: 'galaxian-dae59@appspot.gserviceaccount.com',
+    secrets: [GEMINI_API_KEY_SECRET]
+  })
   .https.onRequest(app);
