@@ -145,7 +145,8 @@ router.post('/respond', (req, res) => {
         location: 'Dock 7 de la estación orbital',
         inventory: ['Credencial gastada', 'Comlink dañado', '42 créditos'],
         threat: 'Alerta amarilla',
-        lastAction: 'Llegada'
+        lastAction: 'Llegada',
+        justFinishedOnboarding: true
       });
       return res.json({
         ok: true,

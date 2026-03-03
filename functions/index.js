@@ -313,11 +313,17 @@ app.use('/dm', auth, async (req, res, next) => {
 
       // Gemini for free conversation after onboarding
       const isProtocolMsg = msg.startsWith('<<');
+      const isBuildAckYes = /<<CONFIRM_ACK\s+TYPE="build"\s+DECISION="yes"\s*>>/i.test(msg);
       const allowGemini = forceGemini || mode === 'rich';
-      if (stage === 'done' && allowGemini && !isProtocolMsg) {
+      const shouldUseGemini = stage === 'done' && allowGemini && (!isProtocolMsg || isBuildAckYes);
+      if (shouldUseGemini) {
         try {
           const state = req.body?.clientState || {};
           const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
+          const effectiveMessage = isBuildAckYes
+            ? 'Acabo de completar onboarding. Dame una apertura narrativa potente y natural con opciones implícitas para continuar la historia sin pedir formato rígido.'
+            : msg;
+
           const prompt = [
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
             'Responde en español natural, corto-medio, sin etiquetas de protocolo.',
@@ -325,7 +331,7 @@ app.use('/dm', auth, async (req, res, next) => {
             `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
             'Contexto reciente:',
             ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
-            `Mensaje actual del jugador: ${msg}`
+            `Mensaje actual del jugador: ${effectiveMessage}`
           ].join('\n');
 
           const out = await askGemini(prompt);
