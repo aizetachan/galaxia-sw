@@ -2,7 +2,7 @@ import { dlog, dgroup, API_BASE, setServerStatus, probeHealth } from "./api.js";
 import { getDmMode, setDmMode } from "./state.js";
 import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentityFromState } from "./ui/main-ui.js";
 import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
-import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll } from "./chat/chat-controller.js";
+import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll, cleanDMText } from "./chat/chat-controller.js";
 import { api, apiGet } from "./api-client.js";
 // ⬇️ Import actualizado: usamos startOnboardingOnce; mantenemos startOnboarding solo para /restart
 import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, getClientState, dmSay, startOnboardingOnce, startOnboarding, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
@@ -250,7 +250,7 @@ function render(){
     return `
       <div class="msg ${kind}" data-key="${tsSafe}" style="${msgBoxStyle}">
         <div class="meta ${metaAlign}">${label}</div>
-        <div class="text" style="${textStyle}">${formatMarkdown(m?.text||'')}</div>
+        <div class="text" style="${textStyle}">${formatMarkdown(kind==='dm' ? cleanDMText(m?.text||'') : (m?.text||''))}</div>
       </div>
       <div class="msg ${kind}" style="${timeBoxStyle}">
         <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(tsSafe)}</div>
@@ -523,7 +523,7 @@ async function loadUserData() {
         if (historyResponse?.messages && Array.isArray(historyResponse.messages)) {
           userMsgs = historyResponse.messages.map((m) => ({
             user: m.role === 'user' ? (userCharacter?.name || 'Tú') : 'Máster',
-            text: m.text,
+            text: m.role === 'user' ? m.text : cleanDMText(m.text),
             kind: m.role === 'user' ? 'user' : 'dm',
             ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
           }));
@@ -603,7 +603,7 @@ async function loadHistory({ force = false } = {}) {
     if (Array.isArray(rows)) {
       const mapped = rows.map((m) => ({
         user: m.role === 'user' ? (character?.name || 'Tú') : 'Máster',
-        text: m.text,
+        text: m.role === 'user' ? m.text : cleanDMText(m.text),
         kind: m.role === 'user' ? 'user' : 'dm',
         ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
       }));

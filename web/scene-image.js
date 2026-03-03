@@ -2,9 +2,7 @@ import { joinUrl, API_BASE } from "./api.js";
 import { AUTH, load, save } from "./auth/session.js";
 
 const SCENE_JOBS = load('sw:scene_jobs', {}) || {};
-const POLLERS = {};
 const persistJobs = () => { try{ save('sw:scene_jobs', SCENE_JOBS); }catch{} };
-const authHeaders = () => { const h={}; if (AUTH?.token) h.Authorization=`Bearer ${AUTH.token}`; return h; };
 
 export function decorateDMs(){
   const root=document.getElementById('chat'); if(!root) return;
@@ -30,34 +28,31 @@ export function decorateDMs(){
     box.dataset.enhanced='1';
     const job=SCENE_JOBS[key];
     if (job?.status==='done' && job?.dataUrl) injectSceneImageForKey(key, job.dataUrl);
-    else if (job && (job.status==='queued'||job.status==='processing')){
-      paintShimmerForKey(key); ensurePollingForJob(key);
-    }
+    else if (job && job.status==='processing') paintShimmerForKey(key);
   });
 }
 
 function getBoxKey(box){ return box?.getAttribute('data-key')||''; }
 function findBoxByKey(key){ try{ return document.querySelector(`.msg.dm[data-key="${key}"]`);}catch{ return null; } }
 function paintShimmerForKey(key){ const box=findBoxByKey(key); if(!box) return; const txtEl=box.querySelector('.text'); if(!txtEl) return; if(box.querySelector('.scene-image-loading')) return; const shim=document.createElement('div'); shim.className='scene-image-loading'; box.insertBefore(shim, txtEl); }
-function removeShimmerForKey(key){ const box=findBoxByKey(key); if(!box) return; const shim=box.querySelector('.scene-image-loading'); if(shim) shim.remove(); }
 function injectSceneImageForKey(key,src){ const box=findBoxByKey(key); if(!box) return; const slot=box.querySelector('.scene-image-slot'); if(!slot) return; injectSceneImage(slot, src); }
-export function hydrateSceneJobs(){ try{ Object.entries(SCENE_JOBS).forEach(([key,job])=>{ if(job.status==='done'&&job.dataUrl){ injectSceneImageForKey(key, job.dataUrl); } else if(job.status==='queued'||job.status==='processing'){ paintShimmerForKey(key); ensurePollingForJob(key); } }); }catch(e){ console.warn('[IMG] hydrateSceneJobs error:', e); } }
-function ensurePollingForJob(key){
-  // Legacy no-op: old /scene-image/status flow removed in Firebase backend.
-  const job = SCENE_JOBS[key];
-  if (!job) return;
-  if (job.status === 'queued' || job.status === 'processing') {
-    SCENE_JOBS[key] = { ...job, status: 'error', error: 'legacy_job_removed' };
-    persistJobs();
-    removeShimmerForKey(key);
-  }
-}
+export function hydrateSceneJobs(){ try{ Object.entries(SCENE_JOBS).forEach(([key,job])=>{ if(job.status==='done'&&job.dataUrl){ injectSceneImageForKey(key, job.dataUrl); } else if(job.status==='processing'){ paintShimmerForKey(key); } }); }catch(e){ console.warn('[IMG] hydrateSceneJobs error:', e); } }
 
 function getMasterTextFromBox(box){
   let t=(box.querySelector('.text')?.textContent||'').trim();
   if (!t) t = (box.querySelector('.text')?.dataset?.raw || '').trim();
   if (!t) t=[...box.childNodes].map(n=>n.nodeType===3?n.textContent:'').join(' ').replace(/\s+/g,' ').trim();
   return t;
+}
+
+function showInlineImageError(box, txtEl, message){
+  const existing = box.querySelector('.scene-image-error');
+  if (existing) existing.remove();
+  const err=document.createElement('div');
+  err.className='scene-image-error';
+  err.textContent=message || 'No se pudo generar la imagen. Puedes reintentar.';
+  box.insertBefore(err, txtEl);
+  setTimeout(()=>{ try{ err.remove(); }catch{} }, 6000);
 }
 
 async function handleBrushClick(btn){
@@ -87,8 +82,7 @@ async function handleBrushClick(btn){
       SCENE_JOBS[key] = { ...SCENE_JOBS[key], status:'error', error: payload?.message || `http_${r.status}` };
       persistJobs();
       shimmer.remove();
-      const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.';
-      box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
+      showInlineImageError(box, txtEl, 'No se pudo generar la imagen ahora. Puedes seguir jugando y reintentar.');
       return;
     }
 
@@ -98,8 +92,7 @@ async function handleBrushClick(btn){
       SCENE_JOBS[key] = { ...SCENE_JOBS[key], status:'error', error:'no_image_base64' };
       persistJobs();
       shimmer.remove();
-      const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='La IA no devolvió imagen en esta respuesta.';
-      box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
+      showInlineImageError(box, txtEl, 'La IA no devolvió imagen en esta respuesta. Puedes reintentar.');
       return;
     }
 
@@ -113,8 +106,7 @@ async function handleBrushClick(btn){
     try{ shimmer.remove(); }catch{}
     SCENE_JOBS[key] = { ...(SCENE_JOBS[key]||{}), status:'error', error: e?.message || 'unknown' };
     persistJobs();
-    const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.';
-    box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
+    showInlineImageError(box, txtEl, 'No se pudo generar la imagen por un error de red. Puedes reintentar.');
   } finally { btn.disabled=false; btn.classList.remove('loading'); }
 }
 
@@ -127,7 +119,15 @@ export function injectSceneImage(slot, src){
   const img=new Image(); img.alt='Escena generada'; img.decoding='async'; img.loading='lazy'; img.style.display='block'; img.style.width='100%';
   slot.hidden=false; slot.innerHTML=''; slot.appendChild(img);
   img.onload=()=>console.log('[IMG] loaded', img.naturalWidth, 'x', img.naturalHeight);
-  img.onerror=()=>{ console.error('[IMG] image load error'); if(src&&src.startsWith('data:image/')&&!String(finalSrc).startsWith('blob:')){ const blobUrl=dataUrlToBlobUrl(src); if (blobUrl){ img.src=blobUrl; return; } } slot.hidden=true; slot.innerHTML=''; };
+  img.onerror=()=>{
+    console.error('[IMG] image load error');
+    if(src&&src.startsWith('data:image/')&&!String(finalSrc).startsWith('blob:')){
+      const blobUrl=dataUrlToBlobUrl(src);
+      if (blobUrl){ img.src=blobUrl; return; }
+    }
+    slot.hidden=false;
+    slot.innerHTML='<div class="scene-image-error">No se pudo cargar la imagen. Puedes reintentar con el botón 🖌️.</div>';
+  };
   img.src=finalSrc;
 }
 

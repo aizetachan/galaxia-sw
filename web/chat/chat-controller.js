@@ -53,6 +53,44 @@ function stripProtoTags(s = '') {
   return String(s).replace(/<<[\s\S]*?>>/g, '');
 }
 
+function looksLikeMetaObject(v){
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const keys = Object.keys(v).map(k => k.toLowerCase());
+  const known = ['roll','memo','options','resume','stage','debug','meta','tags','system'];
+  return keys.some(k => known.includes(k));
+}
+
+function stripLeadingMetaNoise(input = '') {
+  let txt = String(input || '');
+  for (let i = 0; i < 4; i++) {
+    const before = txt;
+    const fenced = txt.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*/i);
+    if (fenced) {
+      const parsed = tryParseJson(fenced[1]);
+      if (parsed && (looksLikeMetaObject(parsed) || i === 0)) txt = txt.slice(fenced[0].length);
+    }
+
+    const leadObj = txt.match(/^\s*\{[\s\S]*?\}\s*(?:\n+|$)/);
+    if (leadObj) {
+      const parsed = tryParseJson(leadObj[0]);
+      if (parsed && looksLikeMetaObject(parsed)) txt = txt.slice(leadObj[0].length);
+    }
+
+    txt = txt
+      .replace(/^\s*(?:<<[\s\S]*?>>\s*)+/g, '')
+      .replace(/^\s*\[(?:meta|system|debug)\][^\n]*\n?/i, '')
+      .replace(/^\s*<(?:meta|system|debug)[^>]*>\s*/i, '');
+
+    if (txt === before) break;
+  }
+  return txt.trim();
+}
+
+export function cleanDMText(rawText){
+  const stripped = stripLeadingMetaNoise(String(rawText || ''));
+  return stripProtoTags(stripped).trim();
+}
+
 export function handleIncomingDMText(rawText){
   let txt = String(rawText || '');
   pendingRoll = null;
@@ -85,7 +123,7 @@ export function handleIncomingDMText(rawText){
     txt = txt.replace(rollTag[0], '').trim();
   }
 
-  txt = stripProtoTags(txt).trim();
+  txt = cleanDMText(txt);
 
   if (txt) pushDM(txt);
 }
