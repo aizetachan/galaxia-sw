@@ -19,3 +19,10 @@ ALLOWED_ORIGIN=http://localhost:3000,https://your-domain.vercel.app
 
 # Modelo de OpenAI (opcional, por defecto gpt-4o-mini)
 LLM_MODEL=gpt-4o-mini
+
+# Firebase Admin (elige UNA opción para producción)
+# Opción recomendada: JSON de service account codificado en base64
+FIREBASE_SERVICE_ACCOUNT_BASE64=
+
+# Opción alternativa: JSON crudo (más propenso a errores de escape)
+# FIREBASE_SERVICE_ACCOUNT_JSON={...}
