@@ -19,8 +19,11 @@ app.use(cors({ origin: true, credentials: true }));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
 const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
-const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash-002';
+const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'global';
+const GEMINI_MODELS = (process.env.GEMINI_MODEL_LIST || process.env.GEMINI_MODEL || 'gemini-2.0-flash-001,gemini-1.5-flash-002,gemini-1.5-flash')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -38,17 +41,27 @@ function getBearer(req) {
 
 async function askGemini(prompt) {
   const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
-  const model = vertexAI.getGenerativeModel({ model: GEMINI_MODEL });
-  const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
-    generationConfig: {
-      temperature: 0.6,
-      maxOutputTokens: 512
-    }
-  });
+  let lastErr = null;
 
-  const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
-  return text;
+  for (const modelName of GEMINI_MODELS) {
+    try {
+      const model = vertexAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 512
+        }
+      });
+
+      const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
+      if (text) return { text, model: modelName };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr || new Error('No Gemini model available');
 }
 
 function auth(req, res, next) {
@@ -72,11 +85,15 @@ app.get('/health', async (_req, res) => {
   res.json({ ok: true, ts: Date.now(), env: 'firebase', db: true, dbUrl: true });
 });
 
+app.get('/ai/config', auth, async (_req, res) => {
+  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, models: GEMINI_MODELS });
+});
+
 app.post('/ai/test', auth, async (req, res) => {
   try {
     const prompt = String(req.body?.prompt || 'Di hola en una línea.');
-    const text = await askGemini(prompt);
-    return res.json({ ok: true, model: GEMINI_MODEL, location: VERTEX_LOCATION, text });
+    const out = await askGemini(prompt);
+    return res.json({ ok: true, model: out.model, location: VERTEX_LOCATION, text: out.text });
   } catch (e) {
     console.error('[AI test]', e);
     return res.status(500).json({ ok: false, error: 'AI_ERROR', message: e?.message || 'Error calling Gemini' });
