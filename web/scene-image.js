@@ -43,19 +43,14 @@ function removeShimmerForKey(key){ const box=findBoxByKey(key); if(!box) return;
 function injectSceneImageForKey(key,src){ const box=findBoxByKey(key); if(!box) return; const slot=box.querySelector('.scene-image-slot'); if(!slot) return; injectSceneImage(slot, src); }
 export function hydrateSceneJobs(){ try{ Object.entries(SCENE_JOBS).forEach(([key,job])=>{ if(job.status==='done'&&job.dataUrl){ injectSceneImageForKey(key, job.dataUrl); } else if(job.status==='queued'||job.status==='processing'){ paintShimmerForKey(key); ensurePollingForJob(key); } }); }catch(e){ console.warn('[IMG] hydrateSceneJobs error:', e); } }
 function ensurePollingForJob(key){
-  const job=SCENE_JOBS[key]; if(!job?.jobId) return; if (POLLERS[job.jobId]) return;
-  let tries=0; const maxTries=120; const intervalMs=2000;
-  POLLERS[job.jobId]=setInterval(async()=>{
-    tries++;
-    try{
-      const url=new URL(joinUrl(API_BASE,'/scene-image/status')); url.searchParams.set('jobId', job.jobId);
-      const rs=await fetch(url,{ headers:authHeaders() }); if(!rs.ok) throw new Error('status_http_'+rs.status);
-      const st=await rs.json();
-      if (st.status==='done' && st.dataUrl){ SCENE_JOBS[key]={...SCENE_JOBS[key],status:'done',dataUrl:st.dataUrl}; persistJobs(); removeShimmerForKey(key); injectSceneImageForKey(key, st.dataUrl); clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId]; }
-      else if (st.status==='error'){ SCENE_JOBS[key]={...SCENE_JOBS[key],status:'error'}; persistJobs(); removeShimmerForKey(key); clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId]; }
-    }catch(e){ console.warn('[IMG] status poll error:', e.message); }
-    if (tries>=maxTries){ console.warn('[IMG] job timeout key=',key); removeShimmerForKey(key); clearInterval(POLLERS[job.jobId]); delete POLLERS[job.jobId]; }
-  }, intervalMs);
+  // Legacy no-op: old /scene-image/status flow removed in Firebase backend.
+  const job = SCENE_JOBS[key];
+  if (!job) return;
+  if (job.status === 'queued' || job.status === 'processing') {
+    SCENE_JOBS[key] = { ...job, status: 'error', error: 'legacy_job_removed' };
+    persistJobs();
+    removeShimmerForKey(key);
+  }
 }
 
 function getMasterTextFromBox(box){
@@ -68,30 +63,53 @@ function getMasterTextFromBox(box){
 async function handleBrushClick(btn){
   const box=btn.closest('.msg.dm'); if(!box||btn.disabled) return;
   const txtEl=box.querySelector('.text'); const slot=box.querySelector('.scene-image-slot'); if(!txtEl||!slot) return;
+  const key=getBoxKey(box);
   btn.disabled=true; btn.classList.add('loading');
   let shimmer=document.createElement('div'); shimmer.className='scene-image-loading'; box.insertBefore(shimmer, txtEl);
   try{
-    let sceneMemo=[]; try{ sceneMemo=load('sw:scene_memo',[]);}catch{}; const scene=(Array.isArray(sceneMemo)&&sceneMemo.length)?{memo:sceneMemo.slice(-6)}:null;
     const headers={'Content-Type':'application/json'}; if (AUTH?.token) headers.Authorization=`Bearer ${AUTH.token}`;
     const text=getMasterTextFromBox(box);
-    const rStart=await fetch(joinUrl(API_BASE,'/scene-image/start'),{ method:'POST', headers, body:JSON.stringify({ masterText:(text||'').trim(), scene }) });
-    if (!rStart.ok){ const t=await rStart.text().catch(()=> ''); console.error('[IMG] start failed:', rStart.status, t); shimmer.remove(); const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo iniciar la generación.'; box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4000); return; }
-    const { jobId } = await rStart.json(); let tries=0; const maxTries=120; const intervalMs=2000;
-    await new Promise((resolve)=>{
-      const iv=setInterval(async()=>{
-        tries++;
-        try{
-          const url=new URL(joinUrl(API_BASE,'/scene-image/status')); url.searchParams.set('jobId', jobId);
-          const rs=await fetch(url,{headers}); if(!rs.ok) throw new Error('status_http_'+rs.status);
-          const st=await rs.json();
-          if (st.status==='done' && st.dataUrl){ try{ shimmer.remove(); }catch{} injectSceneImage(slot, st.dataUrl); clearInterval(iv); resolve(); }
-          else if (st.status==='error'){ try{ shimmer.remove(); }catch{} const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.'; box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4000); clearInterval(iv); resolve(); }
-        }catch(e){ console.warn('[IMG] status poll error:', e.message); }
-        if (tries>=maxTries){ try{ shimmer.remove(); }catch{} const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='La generación tardó demasiado.'; box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4000); clearInterval(iv); resolve(); }
-      }, intervalMs);
-    });
+    const prompt=(text||'').trim() || 'Crea una imagen cinematográfica de la escena actual.';
+
+    SCENE_JOBS[key] = { status:'processing', prompt, at: Date.now() };
+    persistJobs();
+
+    const r=await fetch(joinUrl(API_BASE,'/ai/image'),{ method:'POST', headers, body:JSON.stringify({ prompt }) });
+    const payload = await r.json().catch(()=>({}));
+
+    if (!r.ok || !payload?.ok){
+      console.error('[IMG] /ai/image failed:', r.status, payload);
+      SCENE_JOBS[key] = { ...SCENE_JOBS[key], status:'error', error: payload?.message || `http_${r.status}` };
+      persistJobs();
+      shimmer.remove();
+      const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.';
+      box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
+      return;
+    }
+
+    const mime = payload.mimeType || 'image/png';
+    const b64 = payload.imageBase64;
+    if (!b64){
+      SCENE_JOBS[key] = { ...SCENE_JOBS[key], status:'error', error:'no_image_base64' };
+      persistJobs();
+      shimmer.remove();
+      const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='La IA no devolvió imagen en esta respuesta.';
+      box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
+      return;
+    }
+
+    const dataUrl=`data:${mime};base64,${b64}`;
+    SCENE_JOBS[key] = { ...SCENE_JOBS[key], status:'done', dataUrl, model: payload.model || null };
+    persistJobs();
+    shimmer.remove();
+    injectSceneImage(slot, dataUrl);
   }catch(e){
-    try{ shimmer.remove(); }catch{} const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.'; box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4000);
+    console.warn('[IMG] generation error:', e?.message || e);
+    try{ shimmer.remove(); }catch{}
+    SCENE_JOBS[key] = { ...(SCENE_JOBS[key]||{}), status:'error', error: e?.message || 'unknown' };
+    persistJobs();
+    const err=document.createElement('div'); err.className='scene-image-error'; err.textContent='No se pudo generar la imagen.';
+    box.insertBefore(err, txtEl); setTimeout(()=>err.remove(),4500);
   } finally { btn.disabled=false; btn.classList.remove('loading'); }
 }
 

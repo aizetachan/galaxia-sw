@@ -282,6 +282,9 @@ app.use('/dm', auth, async (req, res, next) => {
   try {
     if (req.method === 'POST' && req.path === '/respond') {
       const msg = String(req.body?.message || '');
+      const stage = String(req.body?.stage || '').toLowerCase();
+      const mode = String(req.body?.config?.mode || 'rich').toLowerCase();
+
       if (msg && !msg.startsWith('<<')) {
         await db.collection('users').doc(req.user.id).collection('messages').add({
           role: 'user',
@@ -306,6 +309,37 @@ app.use('/dm', auth, async (req, res, next) => {
         }
         return originalJson(payload);
       };
+
+      // Gemini only for free conversation after onboarding (safe rollout)
+      const isProtocolMsg = msg.startsWith('<<');
+      if (stage === 'done' && mode === 'rich' && !isProtocolMsg) {
+        try {
+          const state = req.body?.clientState || {};
+          const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
+          const prompt = [
+            'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
+            'Responde en español natural, corto-medio, sin etiquetas de protocolo.',
+            'No uses tokens tipo <<...>> ni pidas formato rígido.',
+            `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
+            'Contexto reciente:',
+            ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
+            `Mensaje actual del jugador: ${msg}`
+          ].join('\n');
+
+          const out = await askGemini(prompt);
+          const clean = String(out?.text || '')
+            .replace(/<<[\s\S]*?>>/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim()
+            .slice(0, 1200);
+
+          if (clean) {
+            return res.json({ ok: true, text: clean });
+          }
+        } catch (e) {
+          console.warn('[DM gemini fallback]', e?.message || e);
+        }
+      }
     }
     next();
   } catch (e) {

@@ -52,12 +52,9 @@ export const sendChatMessage = (data) =>
 export const rollDice = (data) =>
   api('/roll', data);
 
-// Funciones de imágenes de escena
-export const startSceneImage = (data) =>
-  api('/scene-image/start', data);
-
-export const getSceneImageStatus = (jobId) =>
-  api(`/scene-image/status?jobId=${jobId}`);
+// Funciones de imágenes IA
+export const generateSceneImage = (data) =>
+  api('/ai/image', data);
 
 // Funciones de admin
 export const getUsers = () =>
