@@ -1,4 +1,4 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const express = require('express');
 const cors = require('cors');
@@ -217,4 +217,7 @@ app.use('/dm', auth, async (req, res, next) => {
 
 app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found', path: req.path, method: req.method }));
 
-exports.api = functions.region('europe-west1').https.onRequest(app);
+exports.api = functions
+  .region('europe-west1')
+  .runWith({ serviceAccount: 'galaxian-dae59@appspot.gserviceaccount.com' })
+  .https.onRequest(app);
