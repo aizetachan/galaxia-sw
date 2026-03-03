@@ -21,7 +21,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
 const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.1-pro-preview';
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image-preview';
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
