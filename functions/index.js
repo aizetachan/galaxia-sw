@@ -20,7 +20,8 @@ app.use(cors({ origin: true, credentials: true }));
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
 const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'global';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.1-pro-preview';
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -38,7 +39,7 @@ function getBearer(req) {
 
 async function askGemini(prompt) {
   const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
-  const model = vertexAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const model = vertexAI.getGenerativeModel({ model: GEMINI_CHAT_MODEL });
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
     generationConfig: {
@@ -48,7 +49,7 @@ async function askGemini(prompt) {
   });
 
   const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
-  return { text, model: GEMINI_MODEL };
+  return { text, model: GEMINI_CHAT_MODEL };
 }
 
 function auth(req, res, next) {
@@ -73,7 +74,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/ai/config', auth, async (_req, res) => {
-  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, model: GEMINI_MODEL });
+  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, chatModel: GEMINI_CHAT_MODEL, imageModel: GEMINI_IMAGE_MODEL });
 });
 
 app.post('/ai/test', auth, async (req, res) => {
