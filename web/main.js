@@ -388,7 +388,7 @@ async function send(){
   const value = inputEl?.value?.trim?.() || '';
   if (!value) return;
 
-  if (pendingConfirm && step!=='done'){ setPendingConfirm(null); render(); }
+  // No limpiar pendingConfirm aquí: permite confirmación natural por texto (sí/no)
 
   dlog('send',{value,step});
   setSending(true);
@@ -417,6 +417,34 @@ async function send(){
 
   pushUser(value);
 
+  // Rehidratar confirmación pendiente desde el último mensaje del DM (si se perdió estado)
+  if (!pendingConfirm && step !== 'done') {
+    const lastDM = [...msgs].reverse().find(m => m.kind === 'dm' && typeof m.text === 'string');
+    const t = (lastDM?.text || '').trim();
+    const nameMatch = t.match(/nombre\s+es\s+\*\*([^*]+)\*\*|nombre\s+es\s+([^\.\?]+)/i);
+    const buildMatch = t.match(/especie\s+\*\*?([^*.,]+)\*\*?[,\s]+rol\s+\*\*?([^*\.\?]+)\*\*?/i);
+    const asksConfirm = /confirmas|lo confirmas|confirmas esta identidad/i.test(t);
+    if (asksConfirm && buildMatch) {
+      setPendingConfirm({ type:'build', species:(buildMatch[1]||'').trim(), role:(buildMatch[2]||'').trim() });
+    } else if (asksConfirm && nameMatch) {
+      const nm = (nameMatch[1] || nameMatch[2] || '').trim();
+      if (nm) setPendingConfirm({ type:'name', name:nm });
+    }
+  }
+
+  // Confirmación natural por texto cuando hay confirm pendiente (name/build)
+  const effectiveConfirm = pendingConfirm || load(KEY_CONFIRM, null);
+  if (effectiveConfirm && step !== 'done') {
+    const n = value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const isYes = /^(si|sí|ok|vale|perfecto|confirmo|yes)\b/.test(n);
+    const isNo = /^(no|nop|negativo|cambiar|nope)\b/.test(n);
+    if (isYes || isNo) {
+      await handleConfirmDecision(isYes ? 'yes' : 'no');
+      setSending(false);
+      return;
+    }
+  }
+
   if (step!=='done'){
     if (step==='name'){
       const name = value || 'Aventurer@';
@@ -424,58 +452,15 @@ async function send(){
       setPendingConfirm({ type:'name', name });
       render(); setSending(false); return;
     }
-    if (step==='species'){
-      const species = titleCase(value);
-      if (species.length>=2){
-        character.species = species; setCharacter(character);
-        try{
-          console.log('[ONBOARD] Saving character after species selection:', character);
-          const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character });
-          console.log('[ONBOARD] Character save response:', r);
-          if (r?.character?.id && !character.id){
-            character.id=r.character.id;
-            setCharacter(character);
-            console.log('[ONBOARD] Character ID set:', character.id);
-          }
-        }catch(e){
-          console.error('[ONBOARD] Update species fail:', e?.data||e);
-          dlog('update species fail', e?.data||e);
-        }
-        setStep('role');
 
-        // ⛔️ Eliminado fallback local (antes hacía pushDM “Genial, … ahora elige rol”)
-        // El Máster llevará la conversación en la siguiente respuesta.
-        dmSay(`<<ONBOARD STEP="role" NAME="${character.name}" SPECIES="${character.species}">>`)
-          .catch(()=>{});
-
-        setSending(false); return;
-      }
-    } else if (step==='role'){
-      const role = titleCase(value);
-      if (role.length>=2){
-        character.role = role; setCharacter(character);
-        try{
-          console.log('[ONBOARD] Saving character after role selection:', character);
-          const r = await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character });
-          console.log('[ONBOARD] Character save response:', r);
-          if (r?.character?.id && !character.id){
-            character.id=r.character.id;
-            setCharacter(character);
-            console.log('[ONBOARD] Character ID set:', character.id);
-          }
-        }catch(e){
-          console.error('[ONBOARD] Update role fail:', e?.data||e);
-          dlog('update role fail', e?.data||e);
-        }
-        setStep('done');
-
-        // ⛔️ Eliminado fallback local (“¡Listo! Preparando escena…”)
-        dmSay(`<<ONBOARD DONE NAME="${character.name}" SPECIES="${character.species}" ROLE="${character.role}">>`)
-          .catch(()=>{});
-
-        setSending(false); return;
-      }
+    // En etapa build (species/role), delegamos SIEMPRE el parseo al DM.
+    // Evita errores tipo tomar "quiero" como especie.
+    if (step==='species' || step==='role') {
+      try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
+      finally{ setSending(false); }
+      return;
     }
+
     try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
     finally{ setSending(false); }
     return;

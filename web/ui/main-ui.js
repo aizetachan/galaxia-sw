@@ -62,7 +62,7 @@ export function updateIdentityFromState(auth, character){
 
 export function updateAuthUI(){
   const logged = isLogged();
-  console.log('[UI] updateAuthUI called - isLogged:', logged, 'AUTH:', !!AUTH);
+  console.log('[UI] updateAuthUI called - isLogged:', logged);
 
   document.body.classList.toggle('is-guest', !logged);
   document.body.classList.toggle('is-logged', logged);

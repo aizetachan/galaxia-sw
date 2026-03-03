@@ -168,8 +168,8 @@ export async function handleConfirmDecision(decision){
           window.updatePlaceholder();
         }
 
-        // Avisamos al Máster del avance de subpaso
-        dmSay(`<<ONBOARD STEP="species" NAME="${character.name}">>`).catch(()=>{});
+        // IMPORTANTE: no llamar dmSay aquí para evitar duplicado.
+        // La respuesta del ACK (CONFIRM_ACK) ya trae el siguiente prompt del Máster.
 
       } else if (type==='build'){
         // Guardar en el cliente
