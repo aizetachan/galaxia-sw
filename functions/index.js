@@ -7,6 +7,8 @@ const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { VertexAI } = require('@google-cloud/vertexai');
+const fs = require('fs');
+const path = require('path');
 
 const GEMINI_API_KEY_SECRET = defineSecret('GEMINI_API_KEY');
 
@@ -29,6 +31,19 @@ const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PR
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.1-pro-preview';
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image-preview';
+
+function readGuidance(fileName) {
+  try {
+    const p = path.join(__dirname, 'guidance', fileName);
+    return fs.readFileSync(p, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+const GUIDANCE_MASTER = readGuidance('master-prompt.md');
+const GUIDANCE_DICE = readGuidance('dice-rules.md');
+const GUIDANCE_GAME = readGuidance('game-rules.md');
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -119,7 +134,12 @@ app.get('/ai/config', auth, async (_req, res) => {
     location: VERTEX_LOCATION,
     chatModel: GEMINI_CHAT_MODEL,
     imageModel: GEMINI_IMAGE_MODEL,
-    transport: apiKey ? 'api_key' : 'vertex'
+    transport: apiKey ? 'api_key' : 'vertex',
+    guidance: {
+      master: !!GUIDANCE_MASTER,
+      dice: !!GUIDANCE_DICE,
+      game: !!GUIDANCE_GAME
+    }
   });
 });
 
@@ -414,11 +434,14 @@ app.use('/dm', auth, async (req, res, next) => {
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
             'Responde en español natural, corto-medio, sin etiquetas de protocolo.',
             'No uses tokens tipo <<...>> ni pidas formato rígido.',
+            GUIDANCE_MASTER ? `\n[GUIDANCE_MASTER]\n${GUIDANCE_MASTER}` : '',
+            GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
+            GUIDANCE_DICE ? `\n[GUIDANCE_DICE]\n${GUIDANCE_DICE}` : '',
             `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
             'Contexto reciente:',
             ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
             `Mensaje actual del jugador: ${effectiveMessage}`
-          ].join('\n');
+          ].filter(Boolean).join('\n');
 
           const out = await askGemini(prompt);
           const clean = String(out?.text || '')
