@@ -7,6 +7,11 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { VertexAI } = require('@google-cloud/vertexai');
 
+let GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+try {
+  if (!GEMINI_API_KEY) GEMINI_API_KEY = functions.config()?.gemini?.api_key || '';
+} catch {}
+
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -51,18 +56,35 @@ function normalizeAiError(e, model) {
 }
 
 async function askGemini(prompt) {
+  const p = String(prompt || 'Hola');
+
+  // Preferred override: API key path (Google AI API)
+  if (GEMINI_API_KEY) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_CHAT_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: p }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
+      })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j?.error?.message || `Gemini API HTTP ${r.status}`);
+    const text = j?.candidates?.[0]?.content?.parts?.map(x => x?.text || '').join(' ').trim() || '';
+    return { text, model: GEMINI_CHAT_MODEL, transport: 'api_key' };
+  }
+
+  // Fallback: Vertex path
   const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
   const model = vertexAI.getGenerativeModel({ model: GEMINI_CHAT_MODEL });
   const result = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
-    generationConfig: {
-      temperature: 0.6,
-      maxOutputTokens: 512
-    }
+    contents: [{ role: 'user', parts: [{ text: p }] }],
+    generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
   });
 
   const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
-  return { text, model: GEMINI_CHAT_MODEL };
+  return { text, model: GEMINI_CHAT_MODEL, transport: 'vertex' };
 }
 
 function auth(req, res, next) {
@@ -87,7 +109,14 @@ app.get('/health', async (_req, res) => {
 });
 
 app.get('/ai/config', auth, async (_req, res) => {
-  return res.json({ ok: true, project: VERTEX_PROJECT, location: VERTEX_LOCATION, chatModel: GEMINI_CHAT_MODEL, imageModel: GEMINI_IMAGE_MODEL });
+  return res.json({
+    ok: true,
+    project: VERTEX_PROJECT,
+    location: VERTEX_LOCATION,
+    chatModel: GEMINI_CHAT_MODEL,
+    imageModel: GEMINI_IMAGE_MODEL,
+    transport: GEMINI_API_KEY ? 'api_key' : 'vertex'
+  });
 });
 
 app.post('/ai/test', auth, async (req, res) => {
@@ -109,19 +138,40 @@ app.post('/ai/image', auth, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'INVALID_PROMPT', message: 'Prompt requerido' });
     }
 
-    const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
-    const model = vertexAI.getGenerativeModel({ model: GEMINI_IMAGE_MODEL });
+    let parts = [];
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-        responseModalities: ['TEXT', 'IMAGE']
+    if (GEMINI_API_KEY) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_IMAGE_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1024,
+            responseModalities: ['TEXT', 'IMAGE']
+          }
+        })
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        return res.status(r.status).json({ ok: false, error: 'AI_IMAGE_ERROR', message: j?.error?.message || `Gemini API HTTP ${r.status}`, model: GEMINI_IMAGE_MODEL });
       }
-    });
-
-    const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+      parts = j?.candidates?.[0]?.content?.parts || [];
+    } else {
+      const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
+      const model = vertexAI.getGenerativeModel({ model: GEMINI_IMAGE_MODEL });
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
+          responseModalities: ['TEXT', 'IMAGE']
+        }
+      });
+      parts = result?.response?.candidates?.[0]?.content?.parts || [];
+    }
     const imagePart = parts.find(p => p.inlineData && p.inlineData.data);
     const textPart = parts.find(p => p.text);
 
@@ -308,6 +358,13 @@ app.use('/dm', auth, async (req, res, next) => {
         } catch (e) {
           console.error('[DM persist]', e);
         }
+
+        // observability: always tag engine in stage=done responses
+        if (stage === 'done' && payload && !payload.engine) {
+          payload.engine = 'rules';
+          payload.mode = mode;
+        }
+
         return originalJson(payload);
       };
 
@@ -345,7 +402,13 @@ app.use('/dm', auth, async (req, res, next) => {
             return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
           }
         } catch (e) {
-          console.warn('[DM gemini fallback]', e?.message || e);
+          console.error('[DM gemini fallback]', {
+            message: e?.message,
+            code: e?.code,
+            status: e?.status,
+            model: GEMINI_CHAT_MODEL,
+            location: VERTEX_LOCATION
+          });
         }
       }
     }
