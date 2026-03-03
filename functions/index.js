@@ -5,6 +5,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { VertexAI } = require('@google-cloud/vertexai');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -17,6 +18,9 @@ app.use(cookieParser());
 app.use(cors({ origin: true, credentials: true }));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
+const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
+const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -30,6 +34,21 @@ function getBearer(req) {
   const h = req.headers.authorization || req.headers.Authorization || '';
   if (String(h).startsWith('Bearer ')) return String(h).slice(7);
   return req.cookies?.token || null;
+}
+
+async function askGemini(prompt) {
+  const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
+  const model = vertexAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: String(prompt || 'Hola') }] }],
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 512
+    }
+  });
+
+  const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
+  return text;
 }
 
 function auth(req, res, next) {
@@ -51,6 +70,17 @@ app.use((req, _res, next) => {
 
 app.get('/health', async (_req, res) => {
   res.json({ ok: true, ts: Date.now(), env: 'firebase', db: true, dbUrl: true });
+});
+
+app.post('/ai/test', auth, async (req, res) => {
+  try {
+    const prompt = String(req.body?.prompt || 'Di hola en una línea.');
+    const text = await askGemini(prompt);
+    return res.json({ ok: true, model: GEMINI_MODEL, location: VERTEX_LOCATION, text });
+  } catch (e) {
+    console.error('[AI test]', e);
+    return res.status(500).json({ ok: false, error: 'AI_ERROR', message: e?.message || 'Error calling Gemini' });
+  }
 });
 
 app.post('/auth/register', async (req, res) => {
