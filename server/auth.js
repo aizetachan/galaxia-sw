@@ -101,9 +101,10 @@ router.post('/register', async (req, res) => {
 
   try {
     const { username, pin } = req.body;
+    const normalizedUsername = String(username || '').trim().toLowerCase();
 
     // Validación básica
-    if (!username || !pin) {
+    if (!normalizedUsername || !pin) {
       return res.status(400).json({
         ok: false,
         error: 'INVALID_INPUT',
@@ -112,7 +113,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Validar formato de usuario (3-24 caracteres, solo letras/números/_)
-    if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+    if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
       return res.status(400).json({
         ok: false,
         error: 'INVALID_USERNAME',
@@ -135,7 +136,7 @@ router.post('/register', async (req, res) => {
     if (pool) {
       console.log('[AUTH] Using database mode for registration');
       // Verificar si usuario ya existe
-      const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+      const existing = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
       if (existing.rows.length > 0) {
         return res.status(409).json({
           ok: false,
@@ -148,7 +149,7 @@ router.post('/register', async (req, res) => {
       const pinHash = hashPin(pin);
       const result = await pool.query(
         'INSERT INTO users (username, pin_hash) VALUES ($1, $2) RETURNING id, username',
-        [username, pinHash]
+        [normalizedUsername, pinHash]
       );
 
       const user = result.rows[0];
@@ -162,7 +163,7 @@ router.post('/register', async (req, res) => {
         maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
       });
 
-      console.log('[AUTH] User registered:', username);
+      console.log('[AUTH] User registered:', normalizedUsername);
       res.json({
         ok: true,
         user: { id: user.id, username: user.username },
@@ -172,8 +173,8 @@ router.post('/register', async (req, res) => {
     } else {
       // Modo demo - usuario falso
       console.log('[AUTH] Using demo mode - no database connection');
-      console.log('[AUTH] Demo mode - fake registration for:', username);
-      const user = { id: Math.floor(Math.random() * 10000), username };
+      console.log('[AUTH] Demo mode - fake registration for:', normalizedUsername);
+      const user = { id: Math.floor(Math.random() * 10000), username: normalizedUsername };
       const token = generateToken(user);
 
       res.cookie('token', token, {
@@ -209,9 +210,10 @@ router.post('/login', async (req, res) => {
 
   try {
     const { username, pin } = req.body;
+    const normalizedUsername = String(username || '').trim().toLowerCase();
 
     // Validación básica
-    if (!username || !pin) {
+    if (!normalizedUsername || !pin) {
       return res.status(400).json({
         ok: false,
         error: 'INVALID_CREDENTIALS',
@@ -225,7 +227,7 @@ router.post('/login', async (req, res) => {
     if (pool) {
       console.log('[AUTH] Using database mode for login');
       // Buscar usuario
-      const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+      const result = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [normalizedUsername]);
       if (result.rows.length === 0) {
         return res.status(401).json({
           ok: false,
@@ -259,7 +261,7 @@ router.post('/login', async (req, res) => {
         maxAge: 7 * 24 * 60 * 60 * 1000
       });
 
-      console.log('[AUTH] User logged in:', username);
+      console.log('[AUTH] User logged in:', normalizedUsername);
       res.json({
         ok: true,
         user: { id: user.id, username: user.username },
@@ -269,8 +271,8 @@ router.post('/login', async (req, res) => {
     } else {
       // Modo demo
       console.log('[AUTH] Using demo mode - no database connection');
-      console.log('[AUTH] Demo mode - fake login for:', username);
-      const user = { id: Math.floor(Math.random() * 10000), username };
+      console.log('[AUTH] Demo mode - fake login for:', normalizedUsername);
+      const user = { id: Math.floor(Math.random() * 10000), username: normalizedUsername };
       const token = generateToken(user);
 
       res.cookie('token', token, {
