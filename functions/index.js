@@ -72,18 +72,44 @@ function sanitizeDmText(rawText = '') {
 
   text = text.replace(/```(?:json)?\s*[\s\S]*?```/gi, (block) => {
     const b = String(block || '');
-    return /(\"?roll\"?|\"?memo\"?|\"?hook\"?|\"?escena\"?)/i.test(b) ? '' : b;
+    return /(\"?roll\"?|\"?memo\"?|\"?hook\"?|\"?escena\"?|\"?consecuencia\"?|\"?opciones\"?)/i.test(b) ? '' : b;
   });
 
   text = text
     .replace(/<<[\s\S]*?>>/g, '')
-    .replace(/^\s*#{1,6}\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*:?[ \t]*/gim, '')
-    .replace(/^\s*(?:\*\*|__)?\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*(?:\*\*|__)?\s*:[ \t]*/gim, '')
-    .replace(/^\s*[-*]\s*(hook|escena|consecuencia|opciones?|accion|acción)\s*:[ \t]*/gim, '')
+    .replace(/^\s*\[(?:meta|system|debug)[^\]]*\]\s*:?\s*/gim, '')
+    .replace(/^\s*<(?:meta|system|debug)[^>]*>\s*/gim, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*(?:\*\*|__)?\s*(hook|escena|consecuencia|opciones?|accion|acción|contexto|estado)\s*(?:\*\*|__)?\s*:[ \t]*/gim, '')
+    .replace(/^\s*[-*]\s*(hook|escena|consecuencia|opciones?|accion|acción|contexto|estado)\s*:[ \t]*/gim, '')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ');
 
   text = stripLeadingMetaJson(text).trim();
+
+  return text;
+}
+
+function polishStageDoneText(rawText = '', { userAskedOptions = false } = {}) {
+  let text = sanitizeDmText(rawText);
+  if (!text) return '';
+
+  // Eliminar fugas de meta-discurso o formato interno
+  text = text
+    .replace(/\b(?:como\s+m[aá]ster|como\s+director\s+de\s+juego)\b[^.\n]*[.\n]/gi, '')
+    .replace(/\b(?:json|meta\s*json|roll\s*:\s*[A-Za-zÁÉÍÓÚáéíóúñÑ]+\s*:\s*\d+)\b/gi, '')
+    .replace(/^\s*(?:sistema|reglas\s+internas?)\s*:\s*.*$/gim, '')
+    .trim();
+
+  // Si no pidió opciones, evitar cierres en modo "menú" demasiado plantilla
+  if (!userAskedOptions) {
+    text = text
+      .replace(/\n?\s*opciones?\s*:\s*\n(?:\s*(?:[-*]|\d+[.)])\s+.+\n?){2,6}$/gim, '')
+      .replace(/\n(?:\s*(?:[-*]|\d+[.)])\s+.+\n?){3,6}$/gim, (m) => {
+        return /(?:sigilo|social|tecnic|retirada|opci[oó]n|elegir)/i.test(m) ? '' : m;
+      })
+      .trim();
+  }
 
   return text;
 }
@@ -118,15 +144,69 @@ const GUIDANCE_DICE = readGuidance('dice-rules.md');
 const GUIDANCE_GAME = readGuidance('game-rules.md');
 
 function stripMetaContractSection(md = '') {
-  // Remove strict meta-contract blocks to keep user-facing conversation natural
+  // Remove strict structure blocks to keep user-facing conversation natural
   return String(md || '')
     .replace(/##\s*Contrato de META[\s\S]*?---\s*/i, '')
     .replace(/##\s*Cómo pedir tirada[\s\S]*?---\s*/i, '')
+    .replace(/##\s*Estructura de turno[\s\S]*?---\s*/i, '')
+    .replace(/##\s*Opciones\s*\(options\)[\s\S]*?---\s*/i, '')
     .trim();
 }
 
 const GUIDANCE_MASTER_NATURAL = stripMetaContractSection(GUIDANCE_MASTER);
 const GUIDANCE_DICE_NATURAL = stripMetaContractSection(GUIDANCE_DICE);
+
+const dmConversationMemory = new Map(); // key: user id -> lightweight conversational hints
+
+function inferTone(message = '') {
+  const m = String(message || '');
+  if (/\b(jaja|jajaja|xd|jeje|😂|🤣)\b/i.test(m)) return 'ligero';
+  if (/\?|ayuda|no entiendo|explica|como|cómo|que hago|qué hago/i.test(m)) return 'apoyo';
+  if (/!{2,}|\b(rapido|rápido|ya|vamos|urgente)\b/i.test(m)) return 'directo';
+  return 'neutral';
+}
+
+function buildRecentIntent(history = [], currentMessage = '') {
+  const recentUser = [...history].reverse().find(h => h?.kind === 'user' && String(h?.text || '').trim());
+  const prev = String(recentUser?.text || '').trim();
+  const now = String(currentMessage || '').trim();
+  const basis = now || prev;
+  if (!basis) return 'continuar la escena';
+
+  const n = basis.toLowerCase();
+  if (/inventario|que tengo|qué tengo|bolsillo|llevo/i.test(n)) return 'revisar inventario';
+  if (/credit|dinero|pagar|cuanto tengo|cuánto tengo/i.test(n)) return 'gestionar créditos';
+  if (/hablo|pregunto|convencer|negoci|guardia|npc/i.test(n)) return 'interacción social';
+  if (/observo|miro|inspeccion|alrededor|que hay|qué hay/i.test(n)) return 'observar entorno';
+  if (/voy|entro|camino|muevo|b12|cantina|panel/i.test(n)) return 'desplazarse';
+  return 'acción libre';
+}
+
+function updateConversationMemory(userId, message, history) {
+  const key = String(userId || 'anon');
+  const prev = dmConversationMemory.get(key) || {};
+  const tone = inferTone(message);
+  const recentIntent = buildRecentIntent(history, message);
+  const mem = {
+    tone,
+    recentIntent,
+    lastUserMessage: String(message || '').slice(0, 220),
+    lastDmReply: prev.lastDmReply || '',
+    updatedAt: Date.now()
+  };
+  dmConversationMemory.set(key, mem);
+  return mem;
+}
+
+function saveLastDmReply(userId, replyText = '') {
+  const key = String(userId || 'anon');
+  const prev = dmConversationMemory.get(key) || {};
+  dmConversationMemory.set(key, {
+    ...prev,
+    lastDmReply: String(replyText || '').slice(0, 280),
+    updatedAt: Date.now()
+  });
+}
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -486,6 +566,7 @@ app.use('/dm', auth, async (req, res, next) => {
       const stage = String(req.body?.stage || '').toLowerCase();
       const mode = String(req.body?.config?.mode || 'rich').toLowerCase();
       const forceGemini = String(process.env.FORCE_GEMINI_DM || '1') === '1';
+      const userAskedOptions = /\b(opciones?|alternativas|que puedo hacer|qué puedo hacer|dame opciones|sugerencias)\b/i.test(msg);
 
       if (msg && !msg.startsWith('<<')) {
         await db.collection('users').doc(req.user.id).collection('messages').add({
@@ -498,12 +579,16 @@ app.use('/dm', auth, async (req, res, next) => {
       const originalJson = res.json.bind(res);
       res.json = async (payload) => {
         try {
-          const cleanText = sanitizeDmText(payload?.text || '').slice(0, 1200);
+          const cleanText = (stage === 'done'
+            ? polishStageDoneText(payload?.text || '', { userAskedOptions })
+            : sanitizeDmText(payload?.text || '')
+          ).slice(0, 1200);
           if (payload && typeof payload === 'object' && cleanText) {
             payload.text = cleanText;
           }
 
           if (cleanText) {
+            saveLastDmReply(req.user.id, cleanText);
             await db.collection('users').doc(req.user.id).collection('messages').add({
               role: 'dm',
               text: cleanText,
@@ -547,12 +632,15 @@ app.use('/dm', auth, async (req, res, next) => {
 
           const prompt = [
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
-            'Conversación SUPER abierta: sigue el interés del jugador sin forzarlo a una estructura.',
-            'Responde en español natural, corto-medio, como conversación humana fluida.',
-            'Aplica las guidance internamente, pero NO muestres su formato, reglas ni estructura al usuario.',
-            'No uses tokens tipo <<...>> ni pidas formato rígido.',
-            'No uses encabezados ni etiquetas como "Hook:", "Escena:", "Consecuencia:", "Opciones:".',
-            'Evita listas salvo que el jugador pida explícitamente opciones. Prioriza diálogo orgánico.',
+            'Conversación abierta y humana: responde como una persona creativa, no como plantilla.',
+            'Mantén continuidad real con lo último que pasó y con la intención del jugador.',
+            'Prioriza agencia: no empujes un camino único; deja espacio para que el jugador marque dirección.',
+            'Responde en español natural, corto-medio, con ritmo conversacional y sin tono robótico.',
+            'Aplica la guidance internamente, pero NO muestres su formato, reglas ni estructura al usuario.',
+            'No uses tokens tipo <<...>> ni formatos rígidos.',
+            'No uses encabezados/etiquetas ("Hook:", "Escena:", "Consecuencia:", "Opciones:").',
+            'Evita listas o menús salvo que el jugador pida explícitamente opciones.',
+            'No cierres siempre con la misma coletilla (por ejemplo, evita repetir "¿qué haces ahora?"). Varía el cierre o déjalo abierto de forma natural.',
             GUIDANCE_MASTER_NATURAL ? `\n[GUIDANCE_MASTER_NATURAL]\n${GUIDANCE_MASTER_NATURAL}` : '',
             GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
             GUIDANCE_DICE_NATURAL ? `\n[GUIDANCE_DICE_NATURAL]\n${GUIDANCE_DICE_NATURAL}` : '',
