@@ -1,0 +1,21 @@
+{
+  "name": "galaxia-sw-functions",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.0.1",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
