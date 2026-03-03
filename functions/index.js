@@ -117,6 +117,17 @@ const GUIDANCE_MASTER = readGuidance('master-prompt.md');
 const GUIDANCE_DICE = readGuidance('dice-rules.md');
 const GUIDANCE_GAME = readGuidance('game-rules.md');
 
+function stripMetaContractSection(md = '') {
+  // Remove strict meta-contract blocks to keep user-facing conversation natural
+  return String(md || '')
+    .replace(/##\s*Contrato de META[\s\S]*?---\s*/i, '')
+    .replace(/##\s*Cómo pedir tirada[\s\S]*?---\s*/i, '')
+    .trim();
+}
+
+const GUIDANCE_MASTER_NATURAL = stripMetaContractSection(GUIDANCE_MASTER);
+const GUIDANCE_DICE_NATURAL = stripMetaContractSection(GUIDANCE_DICE);
+
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
 }
@@ -456,6 +467,17 @@ app.get('/dm/resume', auth, (_req, res) => {
   return res.json({ ok: true, text: 'Resumen no implementado en v1 firebase.' });
 });
 
+app.post('/roll', auth, async (req, res) => {
+  try {
+    const skill = String(req.body?.skill || 'Acción');
+    const roll = Math.floor(Math.random() * 20) + 1;
+    const outcome = roll >= 16 ? 'success' : roll >= 10 ? 'partial' : 'fail';
+    return res.json({ ok: true, skill, roll, outcome, text: `Tirada ${skill}: ${roll} (${outcome})` });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'ROLL_ERROR', message: e?.message || 'Error en tirada' });
+  }
+});
+
 // Persist minimal chat transcript around DM responses
 app.use('/dm', auth, async (req, res, next) => {
   try {
@@ -508,26 +530,32 @@ app.use('/dm', auth, async (req, res, next) => {
         return originalJson(payload);
       };
 
-      // Gemini for free conversation after onboarding
+      // Gemini for open conversation after onboarding + dice outcome narration
       const isProtocolMsg = msg.startsWith('<<');
+      const diceOutcomeMatch = msg.match(/<<DICE_OUTCOME\s+SKILL="([^"]+)"\s+OUTCOME="([^"]+)"\s*>>/i);
+      const isDiceOutcomeProtocol = !!diceOutcomeMatch;
       const allowGemini = forceGemini || mode === 'rich';
-      // Keep onboarding deterministic: Gemini starts only after onboarding protocol turn is complete.
-      const shouldUseGemini = stage === 'done' && allowGemini && !isProtocolMsg;
+      // Keep onboarding deterministic, but allow dice outcome protocol to narrate via Gemini.
+      const shouldUseGemini = stage === 'done' && allowGemini && (!isProtocolMsg || isDiceOutcomeProtocol);
       if (shouldUseGemini) {
         try {
           const state = req.body?.clientState || {};
           const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
-          const effectiveMessage = msg;
+          const effectiveMessage = isDiceOutcomeProtocol
+            ? `Resultado de tirada: habilidad ${diceOutcomeMatch[1]}, outcome ${diceOutcomeMatch[2]}. Narra consecuencias naturales y continuidad de escena.`
+            : msg;
 
           const prompt = [
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
+            'Conversación SUPER abierta: sigue el interés del jugador sin forzarlo a una estructura.',
             'Responde en español natural, corto-medio, como conversación humana fluida.',
+            'Aplica las guidance internamente, pero NO muestres su formato, reglas ni estructura al usuario.',
             'No uses tokens tipo <<...>> ni pidas formato rígido.',
             'No uses encabezados ni etiquetas como "Hook:", "Escena:", "Consecuencia:", "Opciones:".',
-            'No listes secciones; habla de forma orgánica en párrafos breves.',
-            GUIDANCE_MASTER ? `\n[GUIDANCE_MASTER]\n${GUIDANCE_MASTER}` : '',
+            'Evita listas salvo que el jugador pida explícitamente opciones. Prioriza diálogo orgánico.',
+            GUIDANCE_MASTER_NATURAL ? `\n[GUIDANCE_MASTER_NATURAL]\n${GUIDANCE_MASTER_NATURAL}` : '',
             GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
-            GUIDANCE_DICE ? `\n[GUIDANCE_DICE]\n${GUIDANCE_DICE}` : '',
+            GUIDANCE_DICE_NATURAL ? `\n[GUIDANCE_DICE_NATURAL]\n${GUIDANCE_DICE_NATURAL}` : '',
             `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
             'Contexto reciente:',
             ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
