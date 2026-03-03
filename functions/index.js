@@ -629,22 +629,25 @@ app.use('/dm', auth, async (req, res, next) => {
           const effectiveMessage = isDiceOutcomeProtocol
             ? `Resultado de tirada: habilidad ${diceOutcomeMatch[1]}, outcome ${diceOutcomeMatch[2]}. Narra consecuencias naturales y continuidad de escena.`
             : msg;
+          const convMem = updateConversationMemory(req.user.id, effectiveMessage, history);
 
           const prompt = [
             'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
-            'Conversación abierta y humana: responde como una persona creativa, no como plantilla.',
-            'Mantén continuidad real con lo último que pasó y con la intención del jugador.',
-            'Prioriza agencia: no empujes un camino único; deja espacio para que el jugador marque dirección.',
-            'Responde en español natural, corto-medio, con ritmo conversacional y sin tono robótico.',
+            'Conversación abierta y natural: sigue la intención reciente del jugador sin forzarlo a estructura rígida.',
+            'Mantén continuidad explícita con lo último que hizo o preguntó el jugador.',
+            'Evita repetir frases o cierres idénticos al turno anterior del máster.',
+            'Adapta el tono a la energía del jugador: directo si va al grano, cálido si pide ayuda, ligero si usa humor.',
+            'Responde en español natural, corto-medio, con avance narrativo concreto y útil.',
             'Aplica la guidance internamente, pero NO muestres su formato, reglas ni estructura al usuario.',
-            'No uses tokens tipo <<...>> ni formatos rígidos.',
-            'No uses encabezados/etiquetas ("Hook:", "Escena:", "Consecuencia:", "Opciones:").',
-            'Evita listas o menús salvo que el jugador pida explícitamente opciones.',
-            'No cierres siempre con la misma coletilla (por ejemplo, evita repetir "¿qué haces ahora?"). Varía el cierre o déjalo abierto de forma natural.',
+            'SAFETY DE FORMATO: no headings markdown, no etiquetas Hook/Escena/Consecuencia/Opciones, no bloques JSON, no meta-comentarios, no tokens <<...>>.',
+            userAskedOptions
+              ? 'El jugador pidió opciones: puedes dar 2-3 alternativas breves dentro del flujo natural (sin encabezados).'
+              : 'Evita listas o menús salvo que el jugador pida explícitamente opciones.',
             GUIDANCE_MASTER_NATURAL ? `\n[GUIDANCE_MASTER_NATURAL]\n${GUIDANCE_MASTER_NATURAL}` : '',
             GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
             GUIDANCE_DICE_NATURAL ? `\n[GUIDANCE_DICE_NATURAL]\n${GUIDANCE_DICE_NATURAL}` : '',
             `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
+            `Memoria conversacional: tono=${convMem.tone}; intención reciente=${convMem.recentIntent}; última respuesta del máster="${String(convMem.lastDmReply || '').slice(0, 180)}"`,
             'Contexto reciente:',
             ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
             `Mensaje actual del jugador: ${effectiveMessage}`

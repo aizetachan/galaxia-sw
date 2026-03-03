@@ -6,12 +6,12 @@ const buildProposalMemory = new Map(); // key: player name -> { species, role, a
 const sessionStoryMemory = new Map(); // key: player name -> lightweight scene memory
 
 function replyWithMemory(mem, baseText, altText) {
-  const next = String(baseText || '').trim();
+  const next = sanitizeVisibleNarrative(baseText);
   if (!next) return '';
   if (mem.lastReply && mem.lastReply === next) {
-    const alt = String(altText || '').trim();
-    mem.lastReply = alt || `${next}\n(La situación cambia ligeramente: se oyen pasos acercándose.)`;
-    return mem.lastReply;
+    const alt = sanitizeVisibleNarrative(altText) || `${next}\n(La situación cambia ligeramente: se oyen pasos acercándose.)`;
+    mem.lastReply = alt;
+    return alt;
   }
   mem.lastReply = next;
   return next;
@@ -19,6 +19,15 @@ function replyWithMemory(mem, baseText, altText) {
 
 function hasTag(msg, tag) {
   return String(msg || '').toUpperCase().includes(`<<${tag}`);
+}
+
+function sanitizeVisibleNarrative(text = '') {
+  return String(text || '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*\[(?:meta|system|debug)[^\]]*\]\s*:?\s*/gim, '')
+    .replace(/^\s*<(?:meta|system|debug)[^>]*>\s*/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function parseConfirmAck(msg = '') {
@@ -326,8 +335,15 @@ router.post('/respond', (req, res) => {
     inventory: ['Comlink básico', '12 créditos', 'Llave magnética B-12'],
     threat: 'Alerta moderada',
     lastAction: 'Inicio de misión',
-    lastIntentSig: ''
+    lastIntentSig: '',
+    recentIntents: [],
+    tone: 'neutral'
   };
+
+  if (/\b(jaja|jajaja|xd|jeje)\b/i.test(message)) mem.tone = 'ligero';
+  else if (/\?|ayuda|no entiendo|explica|como|cómo/i.test(message)) mem.tone = 'apoyo';
+  else if (/!{2,}|\b(rapido|rápido|ya|vamos)\b/i.test(message)) mem.tone = 'directo';
+  else mem.tone = 'neutral';
 
   if (asksIdentity) {
     return res.json({ ok: true, text: `Tu identidad actual es: **${name}**, especie **${species}**, rol **${role}**.` });
@@ -353,6 +369,9 @@ router.post('/respond', (req, res) => {
   const intentSig = `${mem.node}:${intent}`;
   const repeated = mem.lastIntentSig === intentSig;
   mem.lastIntentSig = intentSig;
+  mem.recentIntents = Array.isArray(mem.recentIntents) ? mem.recentIntents : [];
+  mem.recentIntents.push(intent);
+  if (mem.recentIntents.length > 6) mem.recentIntents = mem.recentIntents.slice(-6);
 
   const credits = (mem.inventory.join(' ').match(/(\d+)\s*credit/i) || [null, '12'])[1];
 
@@ -451,10 +470,18 @@ router.post('/respond', (req, res) => {
   // fallback suave, sin bloquear ni exigir formato
   mem.lastAction = 'Acción libre';
   sessionStoryMemory.set(playerKey, mem);
+  const toneLead = mem.tone === 'ligero'
+    ? 'Me gusta ese enfoque.'
+    : mem.tone === 'apoyo'
+      ? 'Vamos bien, te sigo.'
+      : mem.tone === 'directo'
+        ? 'Perfecto, al grano.'
+        : 'Entendido.';
+  const lastIntent = mem.recentIntents[mem.recentIntents.length - 1] || 'acción libre';
   const fallbackBase = repeated
-    ? `Sigo tu idea y la integro en la escena. Ahora mismo estás en **${mem.location}**; hay tensión por la alerta y varias rutas abiertas.`
-    : `Entendido, ${name}. Tu acción impacta la historia. Estás en **${mem.location}** y la situación sigue en alerta.`;
-  const fallback = replyWithMemory(mem, fallbackBase, `Recibido. La escena avanza en **${mem.location}**: se activa un aviso sonoro y aparecen nuevas oportunidades de acción.`);
+    ? `${toneLead} Integro tu idea y muevo escena desde **${mem.location}**; venías en línea de ${lastIntent} y ahora aparece una oportunidad nueva.`
+    : `${toneLead} Tu acción impacta la historia. Estás en **${mem.location}** y la situación sigue en alerta.`;
+  const fallback = replyWithMemory(mem, fallbackBase, `${toneLead} La escena avanza en **${mem.location}**: se activa un aviso sonoro y surgen nuevas opciones naturales.`);
   sessionStoryMemory.set(playerKey, mem);
   return res.json({ ok: true, text: fallback });
 });
