@@ -88,6 +88,54 @@ app.post('/ai/test', auth, async (req, res) => {
   }
 });
 
+app.post('/ai/image', auth, async (req, res) => {
+  try {
+    const prompt = String(req.body?.prompt || '').trim();
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: 'INVALID_PROMPT', message: 'Prompt requerido' });
+    }
+
+    const vertexAI = new VertexAI({ project: VERTEX_PROJECT, location: VERTEX_LOCATION });
+    const model = vertexAI.getGenerativeModel({ model: GEMINI_IMAGE_MODEL });
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 1024,
+        responseModalities: ['TEXT', 'IMAGE']
+      }
+    });
+
+    const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find(p => p.inlineData && p.inlineData.data);
+    const textPart = parts.find(p => p.text);
+
+    if (!imagePart) {
+      return res.status(502).json({
+        ok: false,
+        error: 'NO_IMAGE_RETURNED',
+        message: 'El modelo no devolvió imagen en esta respuesta.',
+        model: GEMINI_IMAGE_MODEL,
+        location: VERTEX_LOCATION,
+        text: textPart?.text || ''
+      });
+    }
+
+    return res.json({
+      ok: true,
+      model: GEMINI_IMAGE_MODEL,
+      location: VERTEX_LOCATION,
+      mimeType: imagePart.inlineData.mimeType || 'image/png',
+      imageBase64: imagePart.inlineData.data,
+      text: textPart?.text || ''
+    });
+  } catch (e) {
+    console.error('[AI image]', e);
+    return res.status(500).json({ ok: false, error: 'AI_IMAGE_ERROR', message: e?.message || 'Error generating image' });
+  }
+});
+
 app.post('/auth/register', async (req, res) => {
   try {
     const username = String(req.body?.username || '').trim().toLowerCase();
