@@ -177,8 +177,32 @@ app.post('/ai/image', auth, async (req, res) => {
       });
       parts = result?.response?.candidates?.[0]?.content?.parts || [];
     }
-    const imagePart = parts.find(p => p.inlineData && p.inlineData.data);
-    const textPart = parts.find(p => p.text);
+    let imagePart = parts.find(p => p.inlineData && p.inlineData.data);
+    let textPart = parts.find(p => p.text);
+
+    // Retry once with stricter instruction when model returns text-only
+    if (!imagePart) {
+      const retryPrompt = `${prompt}\n\nIMPORTANTE: Devuelve una imagen (inline image data), no solo texto.`;
+      if (apiKey) {
+        const retryUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_IMAGE_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const rr = await fetch(retryUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: retryPrompt }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 1024,
+              responseModalities: ['TEXT', 'IMAGE']
+            }
+          })
+        });
+        const rj = await rr.json().catch(() => ({}));
+        const rparts = rj?.candidates?.[0]?.content?.parts || [];
+        imagePart = rparts.find(p => p.inlineData && p.inlineData.data) || null;
+        textPart = rparts.find(p => p.text) || textPart;
+      }
+    }
 
     if (!imagePart) {
       return res.status(502).json({

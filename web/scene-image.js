@@ -69,7 +69,12 @@ async function handleBrushClick(btn){
   try{
     const headers={'Content-Type':'application/json'}; if (AUTH?.token) headers.Authorization=`Bearer ${AUTH.token}`;
     const text=getMasterTextFromBox(box);
-    const prompt=(text||'').trim() || 'Crea una imagen cinematográfica de la escena actual.';
+    const base=(text||'').trim() || 'Escena sci-fi de aventura espacial.';
+    const prompt = [
+      'Genera UNA imagen narrativa cinematográfica basada en esta escena.',
+      'Sin explicaciones largas. Prioriza composición visual, personajes, entorno e iluminación.',
+      `Escena: ${base}`
+    ].join(' ');
 
     SCENE_JOBS[key] = { status:'processing', prompt, at: Date.now() };
     persistJobs();
