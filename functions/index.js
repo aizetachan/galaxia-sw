@@ -19,7 +19,7 @@ app.use(cors({ origin: true, credentials: true }));
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-jwt-secret';
 const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || 'galaxian-dae59';
-const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'global';
+const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.1-pro-preview';
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
@@ -35,6 +35,19 @@ function getBearer(req) {
   const h = req.headers.authorization || req.headers.Authorization || '';
   if (String(h).startsWith('Bearer ')) return String(h).slice(7);
   return req.cookies?.token || null;
+}
+
+function normalizeAiError(e, model) {
+  return {
+    ok: false,
+    error: 'AI_ERROR',
+    message: e?.message || 'Vertex error',
+    code: e?.code || null,
+    status: e?.status || null,
+    model,
+    location: VERTEX_LOCATION,
+    project: VERTEX_PROJECT
+  };
 }
 
 async function askGemini(prompt) {
@@ -84,7 +97,8 @@ app.post('/ai/test', auth, async (req, res) => {
     return res.json({ ok: true, model: out.model, location: VERTEX_LOCATION, text: out.text });
   } catch (e) {
     console.error('[AI test]', e);
-    return res.status(500).json({ ok: false, error: 'AI_ERROR', message: e?.message || 'Error calling Gemini' });
+    const payload = normalizeAiError(e, GEMINI_CHAT_MODEL);
+    return res.status(500).json(payload);
   }
 });
 
@@ -132,7 +146,9 @@ app.post('/ai/image', auth, async (req, res) => {
     });
   } catch (e) {
     console.error('[AI image]', e);
-    return res.status(500).json({ ok: false, error: 'AI_IMAGE_ERROR', message: e?.message || 'Error generating image' });
+    const payload = normalizeAiError(e, GEMINI_IMAGE_MODEL);
+    payload.error = 'AI_IMAGE_ERROR';
+    return res.status(500).json(payload);
   }
 });
 
