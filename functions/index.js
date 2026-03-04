@@ -625,7 +625,7 @@ app.use('/dm', auth, async (req, res, next) => {
           const cleanText = (stage === 'done'
             ? polishStageDoneText(payload?.text || '', { userAskedOptions })
             : sanitizeDmText(payload?.text || '')
-          ).slice(0, 1200);
+          ).slice(0, 4000);
           if (payload && typeof payload === 'object' && cleanText) {
             payload.text = cleanText;
           }
@@ -697,7 +697,7 @@ app.use('/dm', auth, async (req, res, next) => {
           ].filter(Boolean).join('\n');
 
           let out = await withTimeout(askGemini(prompt), 12000, 'gemini_timeout');
-          let clean = sanitizeDmText(out?.text || '').slice(0, 1200);
+          let clean = sanitizeDmText(out?.text || '').slice(0, 4000);
 
           if (looksTruncatedNarrative(clean)) {
             const repairPrompt = [
@@ -707,7 +707,7 @@ app.use('/dm', auth, async (req, res, next) => {
               `Intención del jugador: ${effectiveMessage}`
             ].join('\n');
             const repaired = await withTimeout(askGemini(repairPrompt), 9000, 'gemini_repair_timeout');
-            const repairedClean = sanitizeDmText(repaired?.text || '').slice(0, 1200);
+            const repairedClean = sanitizeDmText(repaired?.text || '').slice(0, 4000);
             if (repairedClean && !looksTruncatedNarrative(repairedClean)) {
               out = repaired;
               clean = repairedClean;
@@ -715,7 +715,7 @@ app.use('/dm', auth, async (req, res, next) => {
           }
 
           if (clean) {
-            clean = finalizeNarrative(clean).slice(0, 1400);
+            clean = finalizeNarrative(clean).slice(0, 5000);
             return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
           }
         } catch (e) {
