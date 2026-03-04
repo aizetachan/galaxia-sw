@@ -114,6 +114,18 @@ function polishStageDoneText(rawText = '', { userAskedOptions = false } = {}) {
   return text;
 }
 
+function looksTruncatedNarrative(text = '') {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (t.length < 40) return false;
+  // already ends as a full sentence
+  if (/[.!?…]$/.test(t)) return false;
+  // suspicious endings that look cut off
+  if (/\b(de|del|de la|de los|de las|y|o|que|con|para|por|en|al|la|el)\s*$/i.test(t)) return true;
+  // long answer without closing punctuation is likely incomplete
+  return t.length > 140;
+}
+
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -653,8 +665,23 @@ app.use('/dm', auth, async (req, res, next) => {
             `Mensaje actual del jugador: ${effectiveMessage}`
           ].filter(Boolean).join('\n');
 
-          const out = await askGemini(prompt);
-          const clean = sanitizeDmText(out?.text || '').slice(0, 1200);
+          let out = await askGemini(prompt);
+          let clean = sanitizeDmText(out?.text || '').slice(0, 1200);
+
+          if (looksTruncatedNarrative(clean)) {
+            const repairPrompt = [
+              'Reescribe de forma completa y natural la respuesta del máster para que NO quede cortada.',
+              'No uses etiquetas, ni JSON, ni listas rígidas.',
+              `Respuesta cortada: ${clean}`,
+              `Intención del jugador: ${effectiveMessage}`
+            ].join('\n');
+            const repaired = await askGemini(repairPrompt);
+            const repairedClean = sanitizeDmText(repaired?.text || '').slice(0, 1200);
+            if (repairedClean && !looksTruncatedNarrative(repairedClean)) {
+              out = repaired;
+              clean = repairedClean;
+            }
+          }
 
           if (clean) {
             return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
