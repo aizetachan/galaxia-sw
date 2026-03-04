@@ -33,12 +33,12 @@ export async function api(path, body) {
   let timeoutId;
 
   try {
-    // Agregar timeout de 30 segundos
+    // Timeout ampliado para respuestas IA más largas
     controller = new AbortController();
     timeoutId = setTimeout(() => {
-      console.log('[API] Timeout reached (30s), aborting request');
+      console.log('[API] Timeout reached (45s), aborting request');
       controller.abort('timeout');
-    }, 30000);
+    }, 45000);
 
     res = await fetch(url, {
       method: 'POST',
@@ -103,12 +103,12 @@ export async function apiGet(path) {
   let timeoutId;
 
   try {
-    // Agregar timeout de 30 segundos
+    // Timeout ampliado para lecturas con backend IA
     controller = new AbortController();
     timeoutId = setTimeout(() => {
-      console.log('[API] Timeout reached (30s), aborting GET request');
+      console.log('[API] Timeout reached (45s), aborting GET request');
       controller.abort('timeout');
-    }, 30000);
+    }, 45000);
 
     res = await fetch(url, {
       method: 'GET',

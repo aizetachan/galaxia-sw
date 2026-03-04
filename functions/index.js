@@ -118,12 +118,25 @@ function looksTruncatedNarrative(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
   if (t.length < 40) return false;
-  // already ends as a full sentence
   if (/[.!?…]$/.test(t)) return false;
-  // suspicious endings that look cut off
   if (/\b(de|del|de la|de los|de las|y|o|que|con|para|por|en|al|la|el)\s*$/i.test(t)) return true;
-  // long answer without closing punctuation is likely incomplete
   return t.length > 140;
+}
+
+function finalizeNarrative(text = '') {
+  let t = String(text || '').trim();
+  if (!t) return '';
+
+  // If it still looks cut, close it in a natural generic way.
+  if (looksTruncatedNarrative(t)) {
+    t = t.replace(/[,:;\-–—\s]+$/g, '').trim();
+    t += '. La situación sigue en movimiento a tu alrededor.';
+    return t;
+  }
+
+  // If complete enough but missing punctuation, close softly.
+  if (!/[.!?…]$/.test(t)) t += '.';
+  return t;
 }
 
 admin.initializeApp();
@@ -247,6 +260,20 @@ function normalizeAiError(e, model) {
   };
 }
 
+async function withTimeout(promise, ms = 12000, label = 'timeout') {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), ms);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function askGemini(prompt) {
   const p = String(prompt || 'Hola');
   const apiKey = getGeminiApiKey();
@@ -329,7 +356,7 @@ app.get('/ai/config', auth, async (_req, res) => {
 app.post('/ai/test', auth, async (req, res) => {
   try {
     const prompt = String(req.body?.prompt || 'Di hola en una línea.');
-    const out = await askGemini(prompt);
+    const out = await withTimeout(askGemini(prompt), 15000, 'gemini_timeout');
     return res.json({ ok: true, model: out.model, location: VERTEX_LOCATION, text: out.text });
   } catch (e) {
     console.error('[AI test]', e);
@@ -665,7 +692,7 @@ app.use('/dm', auth, async (req, res, next) => {
             `Mensaje actual del jugador: ${effectiveMessage}`
           ].filter(Boolean).join('\n');
 
-          let out = await askGemini(prompt);
+          let out = await withTimeout(askGemini(prompt), 12000, 'gemini_timeout');
           let clean = sanitizeDmText(out?.text || '').slice(0, 1200);
 
           if (looksTruncatedNarrative(clean)) {
@@ -675,7 +702,7 @@ app.use('/dm', auth, async (req, res, next) => {
               `Respuesta cortada: ${clean}`,
               `Intención del jugador: ${effectiveMessage}`
             ].join('\n');
-            const repaired = await askGemini(repairPrompt);
+            const repaired = await withTimeout(askGemini(repairPrompt), 9000, 'gemini_repair_timeout');
             const repairedClean = sanitizeDmText(repaired?.text || '').slice(0, 1200);
             if (repairedClean && !looksTruncatedNarrative(repairedClean)) {
               out = repaired;
@@ -684,6 +711,7 @@ app.use('/dm', auth, async (req, res, next) => {
           }
 
           if (clean) {
+            clean = finalizeNarrative(clean).slice(0, 1400);
             return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
           }
         } catch (e) {
