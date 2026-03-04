@@ -118,8 +118,12 @@ function looksTruncatedNarrative(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
   if (t.length < 40) return false;
+
+  // Bad semantic endings even with punctuation (e.g. "... por toda tu.")
+  if (/\b(mi|tu|tus|su|sus|nuestro|nuestra|nuestros|nuestras)\s*[.!?…]?$/i.test(t)) return true;
+  if (/\b(de|del|de la|de los|de las|y|o|que|con|para|por|en|al|la|el)\s*[.!?…]?$/i.test(t)) return true;
+
   if (/[.!?…]$/.test(t)) return false;
-  if (/\b(de|del|de la|de los|de las|y|o|que|con|para|por|en|al|la|el)\s*$/i.test(t)) return true;
   return t.length > 140;
 }
 
