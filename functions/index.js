@@ -443,7 +443,6 @@ app.post('/roll', auth, async (req, res) => {
 });
 
 // Persist minimal chat transcript around DM responses
-}, dmRouter);
 
 const dmMiddleware = createDmGeminiMiddleware({
   db,
