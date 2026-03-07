@@ -1,28 +1,19 @@
-# Variables de entorno para el servidor
+# Variables para desarrollo local (Functions)
+# Usa firebase functions:secrets:set para producción
 
-# Base de datos Neon PostgreSQL
-DATABASE_URL=postgresql://username:password@host:port/database?sslmode=require
+# Gemini / Vertex
+GEMINI_API_KEY=your-gemini-api-key
+GOOGLE_API_KEY=
+GEMINI_CHAT_MODEL=gemini-3.1-pro-preview
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
+VERTEX_PROJECT=galaxian-dae59
+VERTEX_LOCATION=us-central1
+FORCE_GEMINI_DM=1
 
-# OpenAI API Key (para el Máster IA)
-OPENAI_API_KEY=sk-your-openai-api-key-here
-OPENAI_PROJECT=your-project-id-optional
+# Auth
+JWT_SECRET=super-secret-jwt
 
-# JWT Secret para tokens de autenticación
-JWT_SECRET=your-very-secure-jwt-secret-here
-
-# Configuración del servidor
-PORT=3001
-NODE_ENV=development
-
-# CORS - orígenes permitidos (separados por coma)
-ALLOWED_ORIGIN=http://localhost:3000,https://your-domain.vercel.app
-
-# Modelo de OpenAI (opcional, por defecto gpt-4o-mini)
-LLM_MODEL=gpt-4o-mini
-
-# Firebase Admin (elige UNA opción para producción)
-# Opción recomendada: JSON de service account codificado en base64
+# Firebase Admin (solo si corres funciones fuera de GCP)
 FIREBASE_SERVICE_ACCOUNT_BASE64=
-
-# Opción alternativa: JSON crudo (más propenso a errores de escape)
+# o
 # FIREBASE_SERVICE_ACCOUNT_JSON={...}

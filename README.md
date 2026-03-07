@@ -1,7 +1,6 @@
 # GALACTIC (galaxia-sw)
 
-Mundo compartido estilo Star Wars — **Vanilla Web (HTML/CSS/JS)** + **API Node/Express**.  
-Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo IA” (sin BD) y modo **mundo vivo** con **PostgreSQL**.
+Mundo compartido estilo Star Wars — **Front vanilla (HTML/CSS/JS)** en `/web` + **API sobre Firebase Functions** en `/functions`. Toda la data (usuarios, personajes, historial) vive en **Firestore**, y el Máster IA se ejecuta con **Gemini** (Vertex AI o API key directa).
 
 ---
 
@@ -10,9 +9,9 @@ Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo I
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Requisitos](#requisitos)
 - [Puesta en marcha (local)](#puesta-en-marcha-local)
-  - [1) Backend](#1-backend)
-  - [2) Frontend](#2-frontend)
-- [Variables de entorno (`/server/.env`)](#variables-de-entorno-serverenv)
+  - [1) Frontend (Vite)](#1-frontend-vite)
+  - [2) Backend (Firebase Emulators)](#2-backend-firebase-emulators)
+- [Variables y secretos](#variables-y-secretos)
 - [Cómo detecta el cliente la API](#cómo-detecta-el-cliente-la-api)
 - [Flujo de usuario](#flujo-de-usuario)
   - [Comandos rápidos](#comandos-rápidos)
@@ -21,7 +20,7 @@ Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo I
   - [Tiradas de dados](#tiradas-de-dados)
 - [Endpoints principales](#endpoints-principales)
 - [Estilo y personalización del front](#estilo-y-personalización-del-front)
-- [Despliegue](#despliegue)
+- [Despliegue (Firebase Hosting + Functions)](#despliegue-firebase-hosting--functions)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap corto](#roadmap-corto)
 - [Créditos](#créditos)
@@ -32,291 +31,248 @@ Front simple y estático en `/web`, backend en `/server`. Soporta modo “solo I
 
 ```
 /web
-  ├─ index.html         # UI base (landing + login + chat + CTAs)
-  ├─ app.js             # Lógica de cliente (onboarding, chat, tiradas, confirmaciones)
-  └─ styles.css         # Estilos (tokens + layout + modo invitado + vídeo de fondo)
+  ├─ index.html        # UI base (landing + login + chat + CTAs)
+  ├─ main.js           # Bootstrap de la app
+  ├─ onboarding.js     # Flujo de alta (name/build)
+  ├─ chat/             # Controladores del chat y tiradas
+  ├─ state.js          # Preferencias locales (modo DM, flags)
+  └─ styles.css        # Estilos (tokens, layout, modo invitado, etc.)
 
-/server
-  ├─ index.js           # Express app, CORS, rutas /api/*
-  ├─ api/index.js       # Adaptador para Vercel (export default app)
-  ├─ auth.js            # Registro/login por username + PIN (con fallback en memoria)
-  ├─ dm.js              # “Máster” (IA). Construye prompts y responde /api/dm/respond
-  ├─ world/             # Mundo vivo (personajes, eventos, estado…) [requiere Postgres]
-  ├─ chat.js            # Historial del chat (si hay BD)
-  ├─ db.js              # Conexión a Postgres (Neon). Fallback: sin BD.
-  ├─ openai.js          # Ping a OpenAI (comprobación de credenciales)
-  ├─ prompts/           # Textos del Máster + reglas de juego/dados (editable)
-  │    ├─ prompt-master.md
-  │    ├─ game-rules.md
-  │    └─ dice-rules.md
-  ├─ data/              # (solo dev) JSONs locales
-  ├─ .env.example
-  └─ package.json
+/functions
+  ├─ index.js          # Express + Firebase Functions + rutas /api/*
+  ├─ dm.js             # Reglas de onboarding/manual fallback
+  ├─ guidance/         # Prompts para el Máster (markdown)
+  ├─ package.json      # Dependencias (firebase-admin, vertex, etc.)
+  └─ ...               # Helpers (persistencia, sanitizado, etc.)
 ```
+
+> **Nota:** El backend anterior basado en `/server` + Vercel quedó descontinuado. Todo el runtime oficial es Firebase.
 
 ---
 
 ## Requisitos
 
-- **Node 18+**
-- (Opcional) **PostgreSQL** (ideal: Neon Serverless)
-- **OPENAI_API_KEY** para el Máster (SDK oficial)
+- **Node 20.x** (igual que Functions). Localmente usamos 22.x pero la función se despliega con 20.
+- **Firebase CLI** `npm install -g firebase-tools`
+- **Proyecto Firebase** con Firestore y Functions habilitados (`galaxian-dae59`).
+- **Gemini API Key** (Google AI Studio) **o** acceso Vertex AI en el mismo proyecto.
 
-> Sin BD puedes probar el onboarding y jugar: el Máster funciona; se desactiva lo que requiere persistencia de mundo. Con BD se habilitan personajes, timeline, eventos, etc.
+Firestore almacena:
+- Colecciones `users`, `usernames`, `characters`, `messages` (se crean on-demand).
 
 ---
 
 ## Puesta en marcha (local)
 
-### 1) Backend
+### 1) Frontend (Vite)
 
 ```bash
-cd server
-cp .env.example .env
-# Edita .env:
-# - PORT=3001
-# - ALLOWED_ORIGIN=http://localhost:3000
-# - OPENAI_API_KEY=tu_clave
-# - DATABASE_URL=postgres://...   # si usas BD
-npm i
-npm run dev
+npm install          # en la raíz (para /web)
+npm run dev          # abre http://localhost:5173
 ```
 
-### 2) Frontend
+Para que el front hable con el backend local, añade `?api=http://localhost:5001/PROJECT/us-central1/api` (ruta del emulator) o define `window.API_BASE` en consola.
 
-Sirve la carpeta `/web` con un servidor estático (ejemplos):
+### 2) Backend (Firebase Emulators)
 
 ```bash
-# Opción A: http-server
-npx http-server web -p 3000 -c-1
-
-# Opción B: serve
-npx serve web -l 3000
+cd functions
+npm install
+firebase emulators:start --only functions,firestore
 ```
 
-Abre:
-
-```
-http://localhost:3000/?api=http://localhost:3001/api
-```
-
-> **CORS**: en `.env` del backend, pon `ALLOWED_ORIGIN=http://localhost:3000`. Puedes incluir varios orígenes separados por coma.
+En otra terminal puedes servir el front (`npm run dev`). El rewrite `?api=` debe apuntar al endpoint del emulator (`http://localhost:5001/<project>/us-central1/api`).
 
 ---
 
-## Variables de entorno (`/server/.env`)
+## Variables y secretos
 
-- `PORT` — puerto del backend (por defecto `3001`)
-- `ALLOWED_ORIGIN` — lista de orígenes permitidos para CORS, separados por comas
-- `OPENAI_API_KEY` — clave de OpenAI (requerido para el Máster)
-- `OPENAI_PROJECT` — *(opcional)* id de proyecto en OpenAI
-- `DATABASE_URL` — URL Postgres (Neon recomendado). Si no está:
-  - **auth** y **sesiones** usan memoria
-  - el Máster funciona, pero **/world** devolverá errores o se no-op donde corresponda
-- `LLM_MODEL` — *(opcional)* fuerza el modelo LLM del Máster (alias: `OPENAI_MODEL`).
-  Si no se define, el servidor usa `gpt-5-mini`.
+Los valores sensibles se gestionan vía **Firebase Functions Secrets**:
 
-> En `server/openai.js` hay un **ping** que ayuda a validar credenciales.
+```
+firebase functions:secrets:set GEMINI_API_KEY
+firebase functions:secrets:set JWT_SECRET
+firebase functions:secrets:set VERTEX_PROJECT
+firebase functions:secrets:set VERTEX_LOCATION
+firebase functions:secrets:set GEMINI_CHAT_MODEL   # opcional
+firebase functions:secrets:set GEMINI_IMAGE_MODEL  # opcional
+firebase functions:secrets:set FORCE_GEMINI_DM     # usar "1" para forzar Gemini tras onboarding
+```
+
+Para desarrollo local puedes crear `.env.local` dentro de `functions/` o exportar las variables antes de arrancar el emulator (Firebase CLI carga automáticamente los secretos si ejecutas `firebase emulators:start --import` tras un `firebase functions:secrets:access`).
+
+Variables relevantes:
+
+- `GEMINI_API_KEY` **o** `GOOGLE_API_KEY` — clave directa de Gemini (Google AI Studio).
+- `VERTEX_PROJECT` y `VERTEX_LOCATION` — solo si usas Vertex en lugar de API key.
+- `GEMINI_CHAT_MODEL` — por defecto `gemini-3.1-pro-preview`.
+- `GEMINI_IMAGE_MODEL` — por defecto `gemini-3.1-flash-image-preview`.
+- `JWT_SECRET` — se usa para emitir/verificar los tokens firmados (guardados también como cookie HttpOnly).
+- `FORCE_GEMINI_DM` — `1` fuerza al Máster a delegar en Gemini en la etapa `done`.
+
+No hay `DATABASE_URL`: Firestore es la única fuente de verdad.
 
 ---
 
 ## Cómo detecta el cliente la API
 
-`/web/app.js` intenta en este orden:
+`/web/api.js` prueba en este orden:
 
-1. Query `?api=...`  
-2. `window.API_BASE`  
-3. `location.origin + "/api"`  
-4. `<meta name="api-base" content="...">`  
-5. valor por defecto  
-6. caché en `localStorage` (`sw:api_base`)
+1. Query `?api=...`
+2. `window.API_BASE`
+3. `location.origin + "/api"`
+4. `<meta name="api-base" content="...">`
+5. Cache en `localStorage` (`sw:api_base`)
 
-El cliente usa `GET /api/health` para probar cada candidato.
+Cada candidato se valida contra `GET /api/health`.
 
 ---
 
 ## Flujo de usuario
 
 - **Login/registro** con `username` (a-z, 0-9, `_`, 3–24) + **PIN (4 dígitos)**.
-- **Invitado**: si no hay sesión, el Máster da info y guía hasta crear usuario.  
-- **Onboarding** del personaje por **fases**:
-  1. `name` → pide nombre
-  2. `build` → sugiere **especie + rol** (2–3 propuestas)
-  3. `done` → empieza la aventura
+- **Invitado**: si no hay sesión, el Máster guía hasta crear usuario.
+- **Onboarding** por fases: `name` → `build` → `done`.
 
 ### Comandos rápidos
 
-- `/resumen` — muestra un resumen corto de la sesión anterior
-- `/publico` / `/privado` — alterna visibilidad del perfil
-- `/restart` — limpia estado local (msgs/char/step)
+- `/resumen` — resumen corto de la sesión anterior.
+- `/publico` / `/privado` — alterna visibilidad del perfil.
+- `/restart` — limpia estado local (msgs/char/step).
 
 ---
 
 ## Protocolo del Máster (etiquetas)
 
-El Máster (IA) **no** pide al jugador escribir etiquetas; solo las **emite él**. El cliente las procesa.
+El Máster (IA) emite etiquetas que el cliente interpreta.
 
 ### Confirmaciones (onboarding)
 
-- Confirmar **nombre**:
-
 ```
 <<CONFIRM NAME="TuNombre">>
-```
-
-- Confirmar **especie + rol**:
-
-```
 <<CONFIRM SPECIES="Twi'lek" ROLE="Contrabandista">>
-```
-
-- El cliente responde internamente:
-
-```
 <<CONFIRM_ACK TYPE="name|build" DECISION="yes|no">>
 ```
 
-**Reglas**
-
-- La etiqueta va **en una línea propia** y como **última línea** del mensaje del Máster.
-- Si el jugador dice **NO**, el Máster propone nuevas opciones y vuelve a emitir la etiqueta.
-- Al confirmar:
-  - `name` ⇒ pasa a `species/role` (fase `build`)
-  - `build` ⇒ pasa a `done` y arranca la aventura
-
 ### Tiradas de dados
-
-El Máster **solo** sugiere tirada si hay **incertidumbre, riesgo, oposición o impacto**.
 
 ```
 <<ROLL SKILL="Carisma" REASON="Tratas de convencer al guardia">>
 ```
 
-El cliente muestra CTA “Resolver tirada” y llama a `/api/roll` (demo) o resuelve según el flujo acordado.  
-El Máster narra **éxito/fallo** y consecuencias de forma breve y clara.
+El cliente muestra CTA “Resolver tirada” y llama a `/api/roll`. El Máster narra el resultado en el siguiente turno.
 
-> Las reglas de estilo y cuándo pedir tirada están en `server/prompts/dice-rules.md` y `prompt-master.md`.
+> Las reglas completas están en `functions/guidance/*.md`.
 
 ---
 
 ## Endpoints principales
 
+Todos viven bajo `/api/*` y los sirve `functions/index.js`.
+
 ### Salud
 
-- `GET /health` y `GET /api/health` — ping JSON
+- `GET /api/health` — ping JSON.
+- `GET /api/ai/config` — requiere token, devuelve config activa del Máster.
 
 ### Auth (`/api/auth/*`)
 
-- `POST /api/auth/register` → `{ username, pin }` → `{ ok:true, token, user }`
-- `POST /api/auth/login` → `{ username, pin }` → `{ ok:true, token, user }`
-- `POST /api/auth/logout` → header `Authorization: Bearer <token>`
+- `POST /api/auth/register` → `{ username, pin }` → `{ ok, token, user }`
+- `POST /api/auth/login` → `{ username, pin }`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
 
-> Sin `DATABASE_URL`, usuarios y sesiones se guardan **en memoria** (útil para pruebas).
+Los usuarios se guardan en Firestore (`users`, `usernames`).
 
 ### Máster / IA (`/api/dm/*`)
 
-- `POST /api/dm/respond`  
-  **Ejemplo de cuerpo**:
+- `POST /api/dm/respond` — entrada del jugador.
+- `GET /api/dm/resume` — placeholder (se puede extender).
 
-```json
-{
-  "message": "texto del jugador",
-  "history": [{ "role": "user", "content": "..." }],
-  "stage": "name|build|done",
-  "character_id": "opcional",
-  "clientState": {}
-}
-```
+El middleware decide cuándo usar Gemini (modo `rich`) y persiste el historial en `users/<uid>/messages`.
 
-  **Respuesta**
+### Mundo vivo / personajes
 
-```json
-{ "ok": true, "text": "salida del Máster" }
-```
-
-  (Puede incluir `<<CONFIRM ...>>` o `<<ROLL ...>>` al final).
-
-- `GET /api/dm/resume` — resumen corto (si hay BD y datos).
-
-### Chat (histórico, opcional)
-
-- `GET /api/chat/history?limit=200` (autenticado) — últimos mensajes si hay BD.
-
-### Mundo vivo (`/api/world/*` y `/api/characters/*`) — **requiere BD**
-
-- `GET  /api/world/characters/me`
+- `GET /api/world/characters/me`
 - `POST /api/world/characters`
-- `GET  /api/world/context?character_id=...`
-- `GET  /api/world/inbox?character_id=...`
-- `POST /api/events/read`
-- `GET  /api/characters/:id/state`
-- `PATCH /api/characters/:id/state`
-- `POST /api/rolls`
-- `POST /api/events`
-- `GET  /api/characters/:id/timeline`
+- `GET /api/chat/history`
 
-> **Esquema BD**: crear tablas `users`, `sessions`, `characters`, `character_state (+ _history)`, `events (+ event_targets, event_reads)`, `faction_memberships`, `chat_messages`. Tomar como referencia las consultas en los módulos de `world/`, `auth.js` y `chat.js`.
+Todos los datos se guardan en Firestore. Sin personaje previo, responde `{ character: null }`.
+
+### Tiradas
+
+- `POST /api/roll` → devuelve `{ roll, outcome }` (d20 simple, server-side).
 
 ---
 
 ## Estilo y personalización del front
 
-- Vídeo de la tarjeta de invitado en `/web/assets/video/hero-home-720p.*`.  
-  Clase del vídeo: `.guest__bg`.
-
-**Ajustar opacidad del vídeo (ejemplo CSS):**
-
-```css
-/* Capa encima del vídeo sin tocar el asset */
-.guest__bg {
-  position: relative;
-}
-.guest__bg::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,.35); /* sube/baja este valor */
-  pointer-events: none;
-}
-```
-
-- El chat **no hace scroll global**: solo el área del chat scrollea; en móvil se evita el zoom del input.
-- El **estado de identidad** (usuario + personaje) se muestra en cabecera cuando hay sesión.
+- Vídeo del modo invitado en `/web/assets/video/hero-home-720p.*` (clase `.guest__bg`).
+- Para ajustar opacidad, añade pseudo-elementos sobre `.guest__bg` (ver `styles.css`).
+- El modo del Máster (`fast` vs `rich`) se guarda en `localStorage` (`sw:dm_mode`).
+- `scene-image.js` soporta placeholders y fades para imágenes generadas (Gemini).
 
 ---
 
-## Despliegue
+## Despliegue (Firebase Hosting + Functions)
 
-- **Vercel**: `server/api/[...all].js` exporta la app para `/api`.
-  - Sube `/web` como estático y sirve bajo el **mismo dominio** que el API o pasa `?api=` en la URL.
-  - Configura **Environment Variables**: `OPENAI_API_KEY`, `DATABASE_URL`, `ALLOWED_ORIGIN`, `LLM_MODEL`, etc.
-- **Estático**: `/web` puede ir a cualquier CDN. Si no comparte dominio con el backend, **usa `?api=`** y configura CORS.
+1. **Instalar dependencias**
+   ```bash
+   npm install              # raíz
+   cd functions && npm install
+   ```
+2. **Construir el frontend**
+   ```bash
+   npm run build            # genera dist/
+   ```
+3. **Configurar secretos** (si no existen):
+   ```bash
+   firebase functions:secrets:set GEMINI_API_KEY
+   firebase functions:secrets:set JWT_SECRET
+   # ... resto de variables
+   ```
+4. **Deploy**
+   ```bash
+   firebase deploy --only functions,hosting
+   ```
+
+El `firebase.json` ya contiene:
+
+- `hosting.public = dist`
+- Rewrite `source: "/api/**" → function: "api"`
+- Fallback SPA `"**" → /index.html`
+
+Tras el deploy, la app queda en `https://<project>.web.app` y el API bajo el mismo dominio (`/api`).
 
 ---
 
 ## Troubleshooting
 
-- **Server: FAIL** en la cabecera → el cliente no alcanza `/api/health`. Revisa `?api=` o CORS.
-- **401/403** → falta token (`Authorization: Bearer ...`). Vuelve a loguear.
-- **/world/** error sin BD → esperado. Añade `DATABASE_URL` o ignora esas funciones en modo demo.
-- **El Máster no responde** → comprueba `OPENAI_API_KEY` y logs en `server/dm.js`.
-- **CORS bloqueado** → ajusta `ALLOWED_ORIGIN` (varios orígenes separados por coma).
+- **Server: FAIL en la UI** → el front no alcanza `/api/health`. Revisa el rewrite o el parámetro `?api=`.
+- **401/403** → no hay token válido. Vuelve a hacer login (las cookies son HttpOnly con SameSite=None).
+- **El Máster responde plano/repetitivo** → comprueba que `FORCE_GEMINI_DM=1` y que `GEMINI_API_KEY` es válido (`POST /api/ai/test`).
+- **Firestore reglas** → asegúrate de permitir lectura/escritura a las rutas usadas por las funciones (se ejecutan con privilegios de servidor).
+- **Emulador** → usa `firebase emulators:start --project <id>` y apunta el front a `http://localhost:5001/<id>/us-central1/api`.
 
 ---
 
 ## Roadmap corto
 
-- [ ] Migraciones SQL oficiales (Neon)
-- [ ] Tiradas “server-autorizadas” con registro en `rolls` y consecuencias de estado
-- [ ] Editor visual de prompts (backoffice) para `prompts/*.md`
-- [ ] Modo multi-rooms/sesiones
-- [ ] Persistencia de **resumen** y “capítulos” jugados
+- [ ] Editor visual para prompts (`functions/guidance`).
+- [ ] Persistencia de timeline/resúmenes por personaje.
+- [ ] Modo multi-sesión simultánea.
+- [ ] UI para configurar tiradas y consecuencias desde el front.
 
 ---
 
+## Documentación adicional
+- Legacy Express/Vercel notes: `notes/legacy-server/`
+- Plan de escalabilidad: `docs/SCALING_PLAN.md`
+
 ## Créditos
 
-- Diseño y sistema de juego: equipo Galactic.  
-- Código: web vanilla + Node/Express.  
-- IA: OpenAI SDK (personalizable editando `prompts/*`).
 
+- Diseño + sistema de juego: equipo Galactic.
+- Front: Vanilla + Vite.
+- Backend: Firebase Functions + Firestore.
+- IA: Gemini (Vertex AI / Google AI API) con prompts personalizables (`functions/guidance`).

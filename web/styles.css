@@ -37,7 +37,7 @@ body{
   overflow-y:auto;
 }
 body.is-logged{
-  overflow:hidden;                 /* solo cuando hay sesión el scroll se traslada al panel */
+  overflow:hidden;                 /* el scroll queda dentro del panel principal */
 }
 
 
@@ -97,7 +97,7 @@ body::before{
 #guest-card{
   flex:1 1 auto;
   min-height:0;
-  overflow-y:auto;                 /* único scroll de la app */
+  overflow-y:auto;                 /* único scroll del chat */
   -webkit-overflow-scrolling:touch;
 
   height:var(--chat-h);
@@ -106,7 +106,38 @@ body::before{
   border:1px solid var(--holo);
   border-radius:var(--radius);
   padding:12px;
+  padding-bottom:calc(8px + env(safe-area-inset-bottom, 0px));   /* margen mínimo para el composer */
   box-shadow:var(--shadow);
+  position:relative;
+}
+
+#chat.loading-blur{ filter:blur(2px); opacity:.35; transition:filter .2s ease, opacity .2s ease; }
+
+.chat-loading{
+  position:absolute;
+  inset:12px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  background:rgba(4,8,14,0.9);
+  border:1px solid rgba(64,145,234,.45);
+  border-radius:var(--radius);
+  text-align:center;
+  font-size:14px;
+  color:var(--text);
+  z-index:5;
+  opacity:1;
+  transition:opacity .2s ease;
+}
+.chat-loading.hidden{ opacity:0; pointer-events:none; }
+.chat-loading .spinner{
+  width:26px; height:26px;
+  border:3px solid rgba(255,255,255,.25);
+  border-top-color:var(--holo);
+  border-radius:50%;
+  animation: sw-spin .8s linear infinite;
 }
 
 #main-viewport.settings-panel{
@@ -141,7 +172,9 @@ body::before{
   background:linear-gradient(180deg, #07131f, #060e18);
   border:1px solid #0c3142;
   box-shadow: inset 0 0 0 1px #00d1ff14, 0 0 0 1px #001018;
-  position:relative; overflow:hidden;
+  position:relative;
+  overflow:visible;
+  min-height:fit-content;
 }
 .msg::after{
   content:""; position:absolute; inset:0; pointer-events:none;

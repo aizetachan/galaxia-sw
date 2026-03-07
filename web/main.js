@@ -1,56 +1,53 @@
-import { dlog, dgroup, API_BASE, setServerStatus, probeHealth } from "./api.js";
-import { getDmMode, setDmMode } from "./state.js";
+import { dlog, API_BASE, setServerStatus, probeHealth } from "./api.js";
+import { getDmMode } from "./state.js";
 import { setIdentityBar, updateAuthUI, updateIdentityFromState as _updateIdentityFromState } from "./ui/main-ui.js";
-import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged, listenAuthChanges } from "./auth/session.js";
-import { msgs, pendingRoll, pushDM, pushUser, talkToDM, resetMsgs, handleIncomingDMText, mapStageForDM, setRenderCallback, setMsgs, setPendingRoll, cleanDMText } from "./chat/chat-controller.js";
+import { AUTH, setAuth, KEY_MSGS, KEY_CHAR, KEY_STEP, KEY_CONFIRM, load, save, isLogged } from "./auth/session.js";
+import { msgs, pushDM, resetMsgs, setMsgs, cleanDMText } from "./chat/chat-controller.js";
 import { api, apiGet } from "./api-client.js";
-// ⬇️ Import actualizado: usamos startOnboardingOnce; mantenemos startOnboarding solo para /restart
-import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, getClientState, dmSay, startOnboardingOnce, startOnboarding, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
-import { setSending as applySending, setAuthLoading as applyAuthLoading, setConfirmLoading as applyConfirmLoading } from "./ui/helpers.js";
-import { now, hhmm, escapeHtml, formatMarkdown, titleCase } from "./utils.js";
-import { decorateDMs, hydrateSceneJobs } from "./scene-image.js";
+import { character, step, pendingConfirm, setCharacter, setStep, setPendingConfirm, startOnboardingOnce, handleConfirmDecision, setupOnboardingUI } from "./onboarding.js";
+import { setAuthLoading as applyAuthLoading } from "./ui/helpers.js";
+import { now } from "./utils.js";
+import { initChatUI, renderChat, setChatLoading, updatePlaceholder, setConfirmLoading } from "./chat/chat-ui.js";
+import { initChatActions } from "./chat/chat-actions.js";
 
 /* ============================================================
- *                       Estado
+ *                       Estado & DOM
  * ========================================================== */
-const UI = { sending:false, authLoading:false, authKind:null, confirmLoading:false };
-
-setRenderCallback(render);
-
-/* ============================================================
- *                        DOM
- * ========================================================== */
-const chatEl = document.getElementById('chat'); // ← sin pantalla intermedia
-
-const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
-window.setIdentityBar = setIdentityBar;
-window.updateIdentityFromState = updateIdentityFromState;
-window.pushDM = pushDM;
-
-let firstRenderDone = false;
+const UI = { authLoading:false, authKind:null };
 
 const authUserEl = document.getElementById('auth-username');
 const authPinEl = document.getElementById('auth-pin');
 const authLoginBtn = document.getElementById('auth-login');
 const authRegisterBtn = document.getElementById('auth-register');
 const authStatusEl = document.getElementById('auth-status');
-const inputEl = document.getElementById('input');
-const sendBtn = document.getElementById('send');
-const rollCta = document.getElementById('roll-cta');
-const rollSkillEl = document.getElementById('roll-skill');
-const resolveBtn = document.getElementById('resolve-btn');
-const cancelBtn = document.getElementById('cancel-btn');
 
-/* ============================================================
- *        UI helpers
- * ========================================================== */
-const setSending = (on)=>applySending(UI,on,{sendBtn,inputEl});
+const updateIdentityFromState = () => _updateIdentityFromState(AUTH, character);
+window.setIdentityBar = setIdentityBar;
+window.updateIdentityFromState = updateIdentityFromState;
+window.pushDM = pushDM;
+
+initChatUI({ updateIdentityFromState, handleConfirmDecision });
+initChatActions();
+setupOnboardingUI({ setConfirmLoading, render: renderChat });
+
 const setAuthLoading = (on,kind=null)=>applyAuthLoading(UI,on,kind,{authUserEl,authPinEl,authLoginBtn,authRegisterBtn});
-const setConfirmLoading = (on)=>{ const yes=document.getElementById('confirm-yes-inline'); const no=document.getElementById('confirm-no-inline'); applyConfirmLoading(UI,on,yes,no); };
+
+function resetToGuestState(){
+  setAuth(null);
+  setMsgs([]);
+  setCharacter(null);
+  setStep('name');
+  setPendingConfirm(null);
+  setChatLoading(false);
+  renderChat();
+  updatePlaceholder();
+}
 
 /* ============================================================
  *                          BOOT
  * ========================================================== */
+setChatLoading(true);
+
 async function boot(){
   console.log('[BOOT] ===== BOOT START =====');
   dlog('Boot start');
@@ -80,12 +77,8 @@ async function boot(){
 
     if (!rawAuthData || rawAuthData === 'null' || rawAuthData === 'undefined') {
       console.log('[BOOT] 📋 No auth data in localStorage, starting as guest');
-      setAuth(null);
       localStorage.removeItem('sw:auth');
-      setMsgs([]);
-      setCharacter(null);
-      setStep('name');
-      setPendingConfirm(null);
+      resetToGuestState();
     } else {
       // Validación robusta del JSON
       let saved = null;
@@ -100,11 +93,7 @@ async function boot(){
         // Limpiar datos corruptos
         console.log('[BOOT] 🧹 Cleaning corrupted auth data...');
         localStorage.removeItem('sw:auth');
-        setAuth(null);
-        setMsgs([]);
-        setCharacter(null);
-        setStep('name');
-        setPendingConfirm(null);
+        resetToGuestState();
         return;
       }
 
@@ -112,22 +101,14 @@ async function boot(){
       if (!saved || typeof saved !== 'object') {
         console.error('[BOOT] ❌ Auth data is not a valid object:', saved);
         localStorage.removeItem('sw:auth');
-        setAuth(null);
-        setMsgs([]);
-        setCharacter(null);
-        setStep('name');
-        setPendingConfirm(null);
+        resetToGuestState();
         return;
       }
 
       if (!saved.token || !saved.user?.id) {
         console.log('[BOOT] 📋 Auth data incomplete, missing token or user.id:', saved);
         localStorage.removeItem('sw:auth');
-        setAuth(null);
-        setMsgs([]);
-        setCharacter(null);
-        setStep('name');
-        setPendingConfirm(null);
+        resetToGuestState();
         return;
       }
 
@@ -135,11 +116,7 @@ async function boot(){
       if (typeof saved.token !== 'string' || !saved.token.includes('.')) {
         console.error('[BOOT] ❌ Token format invalid:', saved.token);
         localStorage.removeItem('sw:auth');
-        setAuth(null);
-        setMsgs([]);
-        setCharacter(null);
-        setStep('name');
-        setPendingConfirm(null);
+        resetToGuestState();
         return;
       }
 
@@ -168,11 +145,7 @@ async function boot(){
 
         // Limpiar auth inválido
         localStorage.removeItem('sw:auth');
-        setAuth(null);
-        setMsgs([]);
-        setCharacter(null);
-        setStep('name');
-        setPendingConfirm(null);
+        resetToGuestState();
       }
     }
   } catch(e){
@@ -180,12 +153,8 @@ async function boot(){
     console.log('[BOOT] 🧹 Cleaning up due to unexpected error...');
 
     // Limpiar todo en caso de error inesperado
-    localStorage.removeItem('sw:auth');
-    setAuth(null);
-    setMsgs([]);
-    setCharacter(null);
-    setStep('name');
-    setPendingConfirm(null);
+        localStorage.removeItem('sw:auth');
+    resetToGuestState();
 
     dlog('Auth restore error:', e);
     if (authStatusEl) authStatusEl.textContent = 'Error al restaurar sesión';
@@ -207,14 +176,10 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   }
 
   // Listeners
-  if (sendBtn) sendBtn.addEventListener('click', send);
-  if (inputEl) inputEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') send(); });
-  if (resolveBtn) resolveBtn.addEventListener('click', resolveRoll);
   if (authLoginBtn) authLoginBtn.addEventListener('click', ()=>doAuth('login'));
   if (authRegisterBtn) authRegisterBtn.addEventListener('click', ()=>doAuth('register'));
-  if (cancelBtn) cancelBtn.addEventListener('click', ()=>{ pushDM('🎲 Tirada cancelada (… )'); setPendingRoll(null); updateRollCta(); });
 
-  render();
+  renderChat();
   updatePlaceholder();
   dlog('Boot done');
 }
@@ -226,119 +191,7 @@ Para empezar, inicia sesión (usuario + PIN). Luego crearemos tu identidad y ent
   }
 })();
 
-/* ============================================================
- *                         Render
- * ========================================================== */
-function render(){
-  console.log('[RENDER] Starting render with:', { msgsCount: msgs.length, step, character: !!character, pendingConfirm });
-  dgroup('render', ()=>console.log({ msgsCount: msgs.length, step, character, pendingConfirm }));
-
-  let html = msgs.map((m,i)=>{
-    const kind = (m && m.kind)==='user' ? 'user':'dm';
-    const tsSafe = Number(m?.ts) || (Date.now()+i);
-    const isUser = (kind==='user');
-    const metaAlign = isUser ? 'text-right' : '';
-    const labelUser = m?.user ? escapeHtml(m.user) : (isUser ? escapeHtml(character?.name||'Tú') : 'Máster');
-    const label = labelUser + ':';
-    const msgBoxStyle = isUser
-      ? 'display:flex; flex-direction:column; align-items:flex-end; width:fit-content; max-width:min(72ch, 92%); margin-left:auto;'
-      : 'width:fit-content; max-width:min(72ch, 92%);';
-    const textStyle = isUser ? 'text-align:left; width:100%;' : '';
-    const timeBoxBase  = 'background:none;border:none;box-shadow:none;padding:0;margin-top:2px;';
-    const timeBoxStyle = isUser ? timeBoxBase+'width:fit-content; margin-left:auto;' : timeBoxBase+'width:fit-content;';
-
-    return `
-      <div class="msg ${kind}" data-key="${tsSafe}" style="${msgBoxStyle}">
-        <div class="meta ${metaAlign}">${label}</div>
-        <div class="text" style="${textStyle}">${formatMarkdown(kind==='dm' ? cleanDMText(m?.text||'') : (m?.text||''))}</div>
-      </div>
-      <div class="msg ${kind}" style="${timeBoxStyle}">
-        <div class="meta ${metaAlign}" style="line-height:1;">${hhmm(tsSafe)}</div>
-      </div>
-    `;
-  }).join('');
-
-  if (pendingConfirm){
-    const summary = (pendingConfirm.type==='name')
-      ? `¿Confirmas el nombre: “${escapeHtml(pendingConfirm.name)}”?`
-      : `¿Confirmas: ${escapeHtml(pendingConfirm.species)} — ${escapeHtml(pendingConfirm.role)}?`;
-    html += `
-      <div class="msg dm" style="width:fit-content; max-width:min(72ch, 85%);">
-        <div class="meta meta--label">Máster:</div>
-        <div class="text">
-          <div class="confirm-cta-card">
-            <strong>Confirmación:</strong> <span>${summary}</span>
-            <div class="roll-cta__actions" style="margin-top:6px">
-              <button id="confirm-yes-inline" type="button">Sí</button>
-              <button id="confirm-no-inline" type="button" class="outline">No</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="msg dm" style="background:none;border:none;box-shadow:none;padding:0;margin-top:2px; width:fit-content;">
-        <div class="meta meta--time" style="line-height:1;">${hhmm(now())}</div>
-      </div>
-    `;
-  }
-
-  if (!firstRenderDone){
-    document.getElementById('identity-bar')?.classList.add('hidden');
-  }
-
-  requestAnimationFrame(()=>{
-    if (chatEl){
-      chatEl.innerHTML = html;
-      decorateDMs();
-      hydrateSceneJobs();
-      chatEl.scrollTop = chatEl.scrollHeight;
-    }
-    updateIdentityFromState();
-
-    const yes = document.getElementById('confirm-yes-inline');
-    const no  = document.getElementById('confirm-no-inline');
-    if (yes) yes.onclick = () => handleConfirmDecision('yes');
-    if (no)  no.onclick  = () => handleConfirmDecision('no');
-
-    setConfirmLoading(UI.confirmLoading);
-    firstRenderDone = true;
-  });
-
-  updatePlaceholder();
-  updateRollCta();
-  setSending(UI.sending);
-  setAuthLoading(UI.authLoading, UI.authKind);
-}
-
-setupOnboardingUI({ setConfirmLoading, render });
-
-function updatePlaceholder(){
-  const placeholders = {
-    name:'Tu nombre en el HoloNet…',
-    species:'Elige especie… (el Máster te da opciones)',
-    role:'Elige rol… (el Máster te da opciones)',
-    done:'Habla con el Máster… (usa /restart para reiniciar)'
-  };
-  if (inputEl) {
-    const newPlaceholder = placeholders[step] || placeholders.done;
-    console.log('[PLACEHOLDER] Setting placeholder for step:', step, '->', newPlaceholder, 'inputEl found:', !!inputEl);
-    inputEl.placeholder = newPlaceholder;
-    console.log('[PLACEHOLDER] Placeholder set successfully:', inputEl.placeholder);
-  } else {
-    console.warn('[PLACEHOLDER] inputEl not found!');
-  }
-}
-function updateRollCta(){
-  if (!rollCta || !rollSkillEl) return;
-  if (pendingRoll){
-    rollCta.classList.remove('hidden');
-    rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill}` : '';
-  } else {
-    rollCta.classList.add('hidden');
-    rollSkillEl.textContent = '';
-  }
-}
-
-/* ===== Resume helpers (igual que antes) ===== */
+/* ===== Resume helpers (para historial remoto) ===== */
 function stripProtoTags(s=''){ return String(s).replace(/<<[\s\S]*?>>/g,'').replace(/\s{2,}/g,' ').trim(); }
 function inflateTranscriptFromResume(text){
   const cleaned = stripProtoTags(text).replace(/\(kickoff\)/ig,'').trim();
@@ -353,151 +206,11 @@ function inflateTranscriptFromResume(text){
   }
   return out;
 }
-async function showResumeOnDemand(){
-  try{
-    const r = await apiGet('/dm/resume');
-    if (r?.ok && r.text){
-      const bullets = summarizeResumeEvents(r.text, 6);
-      pushDM(bullets.length ? `**Resumen (eventos clave):**\n- ${bullets.join('\n- ')}` : 'No encontré eventos destacados en tu sesión.');
-    } else pushDM('No hay resumen disponible.');
-  }catch(e){ dlog('resume on demand fail', e?.data||e); pushDM('No se pudo obtener el resumen ahora.'); }
-}
-function summarizeResumeEvents(rawText, maxItems=6){
-  const bullets=[]; const seen=new Set(); const short = s=>String(s).replace(/\s{2,}/g,' ').trim().slice(0,180);
-  const cleaned = stripProtoTags(rawText).replace(/\(kickoff\)/ig,'').trim();
-  const parts = cleaned.split(/\s*·\s*/g).map(s=>s.trim()).filter(Boolean);
-  const dmParts = parts.map(p=>p.match(/^(?:Máster|Master):\s*(.+)$/i)?.[1]).filter(Boolean);
-  const userParts = parts.map(p=>p.match(/^Jugador(?:\/a|x|@)?\s*:\s*(.+)$/i)?.[1]).filter(Boolean);
-  const loc = rawText.match(/Salud de nuevo.*?\s+en\s+([^.—]+)[.—]/i);
-  if (loc && loc[1]) bullets.push(`Ubicación actual: ${short(loc[1])}`);
-  const pick=(re,label)=>{ for(const t of dmParts){ const m=t.match(re); if(m){ const key=(label+'|'+m[0]).toLowerCase(); if(!seen.has(key)){ seen.add(key); bullets.push(`${label}: ${short(t)}`); return true; } } } return false; };
-  pick(/\b(minidat|chip|coordenad|esquema|holoc|llave|contraseñ|mensaje cifrado|paquete|datacard)\b/i,'Pista/objeto');
-  pick(/\b(dirígete|ve a|reúnete|entrega|llega a|punto de encuentro|Faro|muelle|cantina|puerto|mercado)\b/i,'Objetivo');
-  pick(/\b(media hora|\d+\s*(?:minutos?|horas?)|plazo|en\s+\d+\s*(?:minutos?|horas?))\b/i,'Tiempo límite');
-  pick(/\b(dron(?:es)?|patrullas?|guardias?|imperiales?|alarma|persecución|enemig|cazarrecompensas)\b/i,'Amenaza');
-  pick(/\b(tienes|llevas|guardas|consigues|obtienes|te entregan|recibes)\b/i,'Estado');
-  const lastUser = userParts.reverse().find(t=>t && !/^\/\w+/.test(t) && !/confirmo/i.test(t) && t.length>6);
-  if (lastUser) bullets.push(`Última acción: ${short(lastUser)}`);
-  return bullets.slice(0,maxItems);
-}
-
-/* ============================================================
- *                       Send flow
- * ========================================================== */
-async function send(){
-  const value = inputEl?.value?.trim?.() || '';
-  if (!value) return;
-
-  // No limpiar pendingConfirm aquí: permite confirmación natural por texto (sí/no)
-
-  dlog('send',{value,step});
-  setSending(true);
-  if (inputEl) inputEl.value='';
-
-  const m = value.match(/^\/modo\s+(fast|rich)\b/i);
-  if (m){ setDmMode(m[1].toLowerCase()); setSending(false); return; }
-
-  if ((value==='/privado'||value==='/publico')&&character){
-    character.publicProfile = (value==='/publico'); setCharacter(character);
-    try{ await api('/world/characters', { name:character.name, species:character.species, role:character.role, publicProfile:character.publicProfile, lastLocation:character.lastLocation, character }); }catch(e){ dlog('privacy update fail', e?.data||e); }
-    setSending(false); return;
-  }
-  if (value==='/resumen'||value==='/resume'){ await showResumeOnDemand(); setSending(false); return; }
-  if (value==='/restart'){
-    localStorage.removeItem(KEY_MSGS);
-    localStorage.removeItem(KEY_CHAR);
-    localStorage.removeItem(KEY_STEP);
-    localStorage.removeItem(KEY_CONFIRM);
-    resetMsgs(); setCharacter(null); setStep('name'); setPendingRoll(null); setPendingConfirm(null);
-
-    // Reinicio del onboarding: permitimos reiniciar directamente
-    await startOnboarding({ hard:true });
-    setSending(false); return;
-  }
-
-  pushUser(value);
-
-  // Rehidratar confirmación pendiente desde el último mensaje del DM (si se perdió estado)
-  if (!pendingConfirm && step !== 'done') {
-    const lastDM = [...msgs].reverse().find(m => m.kind === 'dm' && typeof m.text === 'string');
-    const t = (lastDM?.text || '').trim();
-    const nameMatch = t.match(/nombre\s+es\s+\*\*([^*]+)\*\*|nombre\s+es\s+([^\.\?]+)/i);
-    const buildMatch = t.match(/especie\s+\*\*?([^*.,]+)\*\*?[,\s]+rol\s+\*\*?([^*\.\?]+)\*\*?/i);
-    const asksConfirm = /confirmas|lo confirmas|confirmas esta identidad/i.test(t);
-    if (asksConfirm && buildMatch) {
-      setPendingConfirm({ type:'build', species:(buildMatch[1]||'').trim(), role:(buildMatch[2]||'').trim() });
-    } else if (asksConfirm && nameMatch) {
-      const nm = (nameMatch[1] || nameMatch[2] || '').trim();
-      if (nm) setPendingConfirm({ type:'name', name:nm });
-    }
-  }
-
-  // Confirmación natural por texto cuando hay confirm pendiente (name/build)
-  const effectiveConfirm = pendingConfirm || load(KEY_CONFIRM, null);
-  if (effectiveConfirm && step !== 'done') {
-    const n = value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-    const isYes = /^(si|sí|ok|vale|perfecto|confirmo|yes)\b/.test(n);
-    const isNo = /^(no|nop|negativo|cambiar|nope)\b/.test(n);
-    if (isYes || isNo) {
-      await handleConfirmDecision(isYes ? 'yes' : 'no');
-      setSending(false);
-      return;
-    }
-  }
-
-  if (step!=='done'){
-    if (step==='name'){
-      const name = value || 'Aventurer@';
-      setCharacter({ name, species:'', role:'', publicProfile:true, lastLocation:'Tatooine — Cantina de Mos Eisley' });
-      setPendingConfirm({ type:'name', name });
-      render(); setSending(false); return;
-    }
-
-    // En etapa build (species/role), delegamos SIEMPRE el parseo al DM.
-    // Evita errores tipo tomar "quiero" como especie.
-    if (step==='species' || step==='role') {
-      try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
-      finally{ setSending(false); }
-      return;
-    }
-
-    try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
-    finally{ setSending(false); }
-    return;
-  }
-
-  try{ await talkToDM(api, value, step, character, pendingConfirm, getClientState, getDmMode); }
-  finally{ setSending(false); }
-}
-
-/* ============================================================
- *                       Tiradas
- * ========================================================== */
-let busy=false;
-async function resolveRoll(){
-  if (!pendingRoll || busy) return;
-  busy=true;
-  try{ if (resolveBtn){ resolveBtn.disabled=true; resolveBtn.classList.add('loading'); resolveBtn.setAttribute('aria-busy','true'); } }catch{}
-  const skill = pendingRoll.skill||'Acción';
-  try{
-    if (rollSkillEl) rollSkillEl.textContent = pendingRoll.skill ? ` · ${pendingRoll.skill} — resolviendo…` : ' — resolviendo…';
-    const res = await api('/roll', { skill });
-    const hist = msgs.slice(-8);
-    const follow = await api('/dm/respond', { message:`<<DICE_OUTCOME SKILL="${skill}" OUTCOME="${res.outcome}">>`, history:hist, character_id:Number(character?.id)||null, stage:mapStageForDM(step), clientState:getClientState(), config:{ mode:getDmMode() } });
-    pushDM(`🎲 **Tirada** (${skill}): ${res.roll} → ${res.outcome}`);
-    handleIncomingDMText(follow?.text || res.text || 'La situación evoluciona…');
-  } catch(e){
-    dlog('resolveRoll error', e?.data||e);
-    pushDM('Algo se interpone; la situación se complica.');
-  } finally {
-    busy=false; setPendingRoll(null); updateRollCta(); render();
-    try{ if (resolveBtn){ resolveBtn.disabled=false; resolveBtn.classList.remove('loading'); resolveBtn.removeAttribute('aria-busy'); } }catch{}
-  }
-}
 
 // Función para cargar datos del usuario desde el servidor
 async function loadUserData() {
   console.log('[BOOT] Loading user data from server...');
+  setChatLoading(true);
 
   try {
     // Verificar si el usuario ya tiene un personaje guardado
@@ -547,8 +260,8 @@ async function loadUserData() {
     setPendingConfirm(null);
 
     // Forzar render y actualización de UI después de configurar el estado
-    console.log('[BOOT] Forcing render and UI update...');
-    render();
+    console.log('[BOOT] Forcing render y actualización de UI después de configurar el estado...');
+    renderChat();
     updatePlaceholder();
     updateAuthUI();
 
@@ -565,6 +278,8 @@ async function loadUserData() {
     setCharacter(load(KEY_CHAR, null));
     setStep(load(KEY_STEP, 'name'));
     setPendingConfirm(load(KEY_CONFIRM, null));
+  } finally {
+    setChatLoading(false);
   }
 }
 
@@ -725,7 +440,7 @@ async function doAuth(kind) {
       if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
       setIdentityBar(response.user.username, character?.name || '');
       updateAuthUI();
-      render();
+      renderChat();
       return; // listo para seguir jugando
     }
 
@@ -742,7 +457,7 @@ async function doAuth(kind) {
     if (authStatusEl) authStatusEl.textContent = `Hola, ${response.user.username}`;
     setIdentityBar(response.user.username, '');
     updateAuthUI();
-    render();
+    renderChat();
 
     // ⬇️ Cambio clave: arrancar onboarding una sola vez (sin pushDM locales)
     await startOnboardingOnce({ hard: true });
@@ -801,6 +516,3 @@ if ('serviceWorker' in navigator){
   });
 }
 
-// Exportar funciones globalmente para que puedan ser llamadas desde otros módulos
-window.render = render;
-window.updatePlaceholder = updatePlaceholder;

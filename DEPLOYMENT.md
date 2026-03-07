@@ -1,182 +1,127 @@
-# Guía de Despliegue en Vercel
+# Despliegue en Firebase (Hosting + Functions)
 
-## Configuración del Proyecto
+Esta app se entrega como **SPA estática** (build de `/web`) + **API en Firebase Functions** (`functions/index.js`). No hay servicios externos: todo vive en el proyecto `galaxian-dae59`.
 
-Tu proyecto ya está configurado como un monorepo con:
-- **Frontend**: `web/` (Vite + SPA)
-- **Backend**: `server/` (Express + API)
-- **Adaptador Vercel**: `api/index.js`
+---
 
-## Configuración en Vercel
+## 1. Requisitos previos
 
-### 1. Crear Proyecto en Vercel
+- Firebase CLI (`npm install -g firebase-tools`)
+- Acceso al proyecto (rol Editor / Deploy). Comprueba con `firebase projects:list`.
+- Secrets configurados (ver sección de variables).
+- Node 20.x para Functions.
 
-1. Ve a [vercel.com](https://vercel.com) y conecta tu repositorio
-2. **Root Directory**: Deja vacío (raíz del repo)
-3. **Framework Preset**: "Other"
-4. **Install Command**: `npm install`
-5. **Build Command**: `npm run build`
-6. **Output Directory**: `dist`
+---
 
-**Importante**: 
-- El `vercel.json` está configurado correctamente con `@vercel/static-build`
-- Configura estos valores manualmente en la interfaz de Vercel también
-- Asegúrate de que el meta tag en `web/index.html` tenga `content="/api"` (no URL absoluta)
+## 2. Preparar el entorno
 
-### 2. Variables de Entorno
-
-En Project Settings → Environment Variables, añade:
-
-```
-DATABASE_URL=postgresql://user:pass@host:port/db?sslmode=require
-OPENAI_API_KEY=sk-...
-JWT_SECRET=tu-secreto-jwt
-INTERNAL_TOKEN=token-interno-opcional
-NODE_ENV=production
-```
-
-### 3. Dominio
-
-Vercel te dará automáticamente:
-- **Preview**: `https://tu-proyecto-git-branch.vercel.app`
-- **Production**: `https://tu-proyecto.vercel.app`
-
-## Verificación del Despliegue
-
-### 1. Health Check
 ```bash
-curl https://tu-proyecto.vercel.app/api/health
+npm install              # dependencias del front
+cd functions && npm install  # dependencias del backend
 ```
-Debería devolver: `{"ok": true, "ts": 1234567890, ...}`
 
-### 2. Registro de Usuario
+Si necesitas probar localmente, usa los emuladores:
+
 ```bash
-curl -X POST https://tu-proyecto.vercel.app/api/auth/register \
+firebase emulators:start --only functions,firestore
+# en otra terminal
+npm run dev
+# navega a http://localhost:5173/?api=http://localhost:5001/<project>/us-central1/api
+```
+
+---
+
+## 3. Variables / secrets
+
+Configura los secretos una vez (se almacenan en el proyecto):
+
+```bash
+firebase functions:secrets:set GEMINI_API_KEY
+firebase functions:secrets:set JWT_SECRET
+firebase functions:secrets:set VERTEX_PROJECT
+firebase functions:secrets:set VERTEX_LOCATION
+firebase functions:secrets:set GEMINI_CHAT_MODEL
+firebase functions:secrets:set GEMINI_IMAGE_MODEL
+firebase functions:secrets:set FORCE_GEMINI_DM
+```
+
+Para inspeccionarlos: `firebase functions:secrets:list`. Para usarlos en local puedes exportarlos como variables o ejecutar `firebase functions:secrets:access`.
+
+---
+
+## 4. Compilar frontend
+
+```bash
+npm run build   # genera dist/
+```
+
+Firebase Hosting tomará `dist/` como carpeta pública (ver `firebase.json`).
+
+---
+
+## 5. Deploy
+
+```bash
+firebase deploy --only functions,hosting
+```
+
+Esto hace dos cosas:
+
+1. Sube `dist/` a Hosting: `https://<project>.web.app`
+2. Despliega la función `api` (Express + Gemini + Firestore) en la región definida (`europe-west1`).
+
+Los rewrites relevantes están en `firebase.json`:
+
+```json
+{
+  "hosting": {
+    "public": "dist",
+    "rewrites": [
+      { "source": "/api/**", "function": "api" },
+      { "source": "**", "destination": "/index.html" }
+    ]
+  }
+}
+```
+
+---
+
+## 6. Pruebas post-deploy
+
+```bash
+curl https://<project>.web.app/api/health
+# Registrar usuario
+curl -X POST https://<project>.web.app/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"testuser","pin":"1234"}'
+  -d '{"username":"testpilot","pin":"1234"}'
 ```
 
-### 3. Login
+Entra en el front `https://<project>.web.app` y valida:
+
+- Login → onboarding → Máster responde (Gemini)
+- `/api/ai/test` (via UI) confirma modelo y ubicación
+- `/api/chat/history` devuelve mensajes guardados
+
+---
+
+## 7. Rollback
+
+Los despliegues se versionan por defecto. Para revertir:
+
 ```bash
-curl -i -X POST https://tu-proyecto.vercel.app/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"testuser","pin":"1234"}'
+firebase hosting:versions:list
+firebase hosting:revert <versionId>
+# o redeploy después de corregir
 ```
 
-Debería devolver `Set-Cookie: sid=...; Path=/; HttpOnly; Secure`
+Para Functions puedes desplegar la versión anterior desde Cloud Console → Functions.
 
-### 4. Verificar Sesión
-```bash
-curl -H 'Cookie: sid=tu-token-aqui' \
-  https://tu-proyecto.vercel.app/api/auth/me
-```
+---
 
-## Desarrollo Local
+## 8. Usuarios de prueba
 
-### Opción 1: Desarrollo Separado
-```bash
-# Terminal 1: Frontend
-npm run dev:web
+Puedes crear usuarios manualmente llamando a `/api/auth/register` o insertando documentos en Firestore (`users`, `usernames`). Recuerda que el PIN se guarda como hash SHA-256; no guardes texto plano fuera de desarrollo.
 
-# Terminal 2: Backend
-npm run dev:server
-```
+---
 
-### Opción 2: Con Vercel CLI
-```bash
-npm install -g vercel
-vercel dev
-```
-
-## Estructura Final
-
-```
-galaxia-sw/
-├── api/
-│   └── index.js          # Adaptador Vercel
-├── server/
-│   ├── app.js            # Configuración Express
-│   ├── index.js          # Exporta app sin listen
-│   └── ...
-├── web/
-│   ├── api/
-│   │   └── client.js     # Cliente API unificado
-│   └── ...
-├── dist/                 # Build del frontend
-├── vercel.json          # Configuración Vercel
-└── package.json         # Workspaces config
-```
-
-## Características Implementadas
-
-✅ **Monodominio**: Frontend y API en el mismo dominio  
-✅ **Sin CORS**: No hay problemas de CORS  
-✅ **Cookies HttpOnly**: Autenticación segura  
-✅ **SPA Routing**: Rutas del frontend funcionan al refrescar  
-✅ **Serverless**: Backend como función serverless  
-✅ **Estáticos**: Frontend servido como archivos estáticos  
-
-## Troubleshooting
-
-### Error: "No Output Directory named 'dist' found"
-**Solución**: 
-1. El `vercel.json` está configurado correctamente con `@vercel/static-build`
-2. En la configuración de Vercel, asegúrate de que:
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-3. Verifica que el build funcione localmente: `npm run build`
-4. Asegúrate de que el directorio `dist/` se cree después del build
-5. El `vercel.json` usa `@vercel/static-build` con `"distDir": "dist"`
-
-### Error 404 en el frontend (pantalla en blanco)
-**Solución**:
-1. Verifica que el meta tag en `web/index.html` tenga `content="/api"` (no URL absoluta)
-2. Asegúrate de que el build genere el archivo `dist/index.html`
-3. Verifica que las rutas en `vercel.json` estén correctas
-4. Revisa la consola del navegador para errores de JavaScript
-
-### Error: "Failed to load module script: Expected a JavaScript module script but the server responded with a MIME type of 'text/html'"
-**Solución**:
-1. El problema es que las rutas en `vercel.json` están capturando los archivos estáticos
-2. Asegúrate de que `vercel.json` tenga la ruta para assets:
-   ```json
-   { "src": "/assets/(.*)", "dest": "/assets/$1" }
-   ```
-3. Verifica que el build genere los archivos en `dist/assets/`
-4. Las rutas deben estar en este orden: API → Assets → SPA fallback
-
-### Error: "Function Runtimes must have a valid version"
-**Solución**: 
-1. El `vercel.json` está configurado correctamente con `@vercel/node`
-2. Asegúrate de que `api/package.json` existe y tiene las dependencias necesarias
-3. Verifica que `serverless-http` esté instalado
-
-### Error: "SyntaxError: Unexpected reserved word"
-**Solución**:
-1. El problema es que se usa `await` en una función que no es `async`
-2. Asegúrate de que `createApp()` sea una función `async`
-3. Verifica que `server/index.js` use `await createApp()`
-4. Instala `cookie-parser` en el servidor: `npm install cookie-parser`
-
-### Loading infinito en registro/login
-**Solución**:
-1. El problema es que el frontend espera `{ token, user }` pero el backend devuelve `{ ok: true, user: {...} }`
-2. El token se envía como cookie HttpOnly, no en la respuesta JSON
-3. Corregir la función `doAuth` en `web/main.js` para manejar la respuesta correctamente
-4. Usar `response.user` en lugar de `user` en el código
-
-### Error 404 en rutas del SPA
-- Verifica que `vercel.json` tenga el rewrite a `/index.html`
-
-### CORS errors
-- Asegúrate de usar rutas relativas: `fetch('/api/...')`
-- No uses URLs absolutas en el frontend
-
-### Cookies no funcionan
-- Verifica que uses `credentials: 'include'` en fetch
-- En local, usa `secure: false` en las cookies
-
-### Build falla
-- Verifica que `npm run build` funcione localmente
-- Revisa que todas las dependencias estén en `package.json`
-- Si hay errores de importación, verifica que `API_BASE` y `joinUrl` estén exportados en `web/api.js`
+Con esto tienes todo el pipeline de Firebase listo. Cualquier ajuste (nuevos secretos, cambiar modelo Gemini, etc.) se maneja con CLI + Firestore, sin depender de servicios externos.

@@ -1,4 +1,5 @@
 const functions = require('firebase-functions/v1');
+const { logger } = functions;
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const express = require('express');
@@ -16,137 +17,15 @@ function getGeminiApiKey() {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || GEMINI_API_KEY_SECRET.value() || '';
 }
 
-function stripLeadingMetaJson(text = '') {
-  let s = String(text || '').trim();
-  if (!s) return '';
-
-  for (let i = 0; i < 4; i++) {
-    const firstLineRaw = s.split('\n')[0] || '';
-    const firstLine = firstLineRaw.trim();
-
-    const looksLikeMetaLine =
-      firstLine.startsWith('{') &&
-      (/("|\\")?(roll|memo|engine|stage|hook|escena)("|\\")?\s*:/.test(firstLine) || firstLine.includes('"memo"'));
-
-    if (looksLikeMetaLine) {
-      s = s.slice(firstLineRaw.length).trim();
-      continue;
-    }
-
-    const m = s.match(/^\s*\{[\s\S]{1,1200}?\}\s*/);
-    if (m) {
-      const first = m[0].trim();
-      try {
-        const obj = JSON.parse(first);
-        const keys = Object.keys(obj || {}).map(k => String(k).toLowerCase());
-        const hasMetaKey = ['roll', 'memo', 'engine', 'stage', 'hook', 'escena', 'consecuencia', 'opciones'].some(k => keys.includes(k));
-        if (hasMetaKey) {
-          s = s.slice(m[0].length).trim();
-          continue;
-        }
-      } catch {}
-    }
-
-    if (firstLine.includes('\\"roll\\"') || firstLine.includes('"roll"') || firstLine.includes('\\"memo\\"') || firstLine.includes('"memo"')) {
-      const unescaped = firstLine.replace(/\\"/g, '"');
-      try {
-        const obj = JSON.parse(unescaped);
-        const keys = Object.keys(obj || {}).map(k => String(k).toLowerCase());
-        const hasMetaKey = ['roll', 'memo', 'engine', 'stage', 'hook', 'escena', 'consecuencia', 'opciones'].some(k => keys.includes(k));
-        if (hasMetaKey) {
-          s = s.slice(firstLineRaw.length).trim();
-          continue;
-        }
-      } catch {}
-    }
-
-    break;
-  }
-
-  return s.trim();
-}
-
-function sanitizeDmText(rawText = '') {
-  let text = String(rawText || '');
-  if (!text) return '';
-
-  text = text.replace(/```(?:json)?\s*[\s\S]*?```/gi, (block) => {
-    const b = String(block || '');
-    return /(\"?roll\"?|\"?memo\"?|\"?hook\"?|\"?escena\"?|\"?consecuencia\"?|\"?opciones\"?)/i.test(b) ? '' : b;
-  });
-
-  text = text
-    .replace(/<<[\s\S]*?>>/g, '')
-    .replace(/^\s*\[(?:meta|system|debug)[^\]]*\]\s*:?\s*/gim, '')
-    .replace(/^\s*<(?:meta|system|debug)[^>]*>\s*/gim, '')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s*(?:\*\*|__)?\s*(hook|escena|consecuencia|opciones?|accion|acción|contexto|estado)\s*(?:\*\*|__)?\s*:[ \t]*/gim, '')
-    .replace(/^\s*[-*]\s*(hook|escena|consecuencia|opciones?|accion|acción|contexto|estado)\s*:[ \t]*/gim, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ');
-
-  text = stripLeadingMetaJson(text).trim();
-
-  return text;
-}
-
-function polishStageDoneText(rawText = '', { userAskedOptions = false } = {}) {
-  let text = sanitizeDmText(rawText);
-  if (!text) return '';
-
-  // Eliminar fugas de meta-discurso o formato interno
-  text = text
-    .replace(/\b(?:como\s+m[aá]ster|como\s+director\s+de\s+juego)\b[^.\n]*[.\n]/gi, '')
-    .replace(/\b(?:json|meta\s*json|roll\s*:\s*[A-Za-zÁÉÍÓÚáéíóúñÑ]+\s*:\s*\d+)\b/gi, '')
-    .replace(/^\s*(?:sistema|reglas\s+internas?)\s*:\s*.*$/gim, '')
-    .trim();
-
-  // Si no pidió opciones, evitar cierres en modo "menú" demasiado plantilla
-  if (!userAskedOptions) {
-    text = text
-      .replace(/\n?\s*opciones?\s*:\s*\n(?:\s*(?:[-*]|\d+[.)])\s+.+\n?){2,6}$/gim, '')
-      .replace(/\n(?:\s*(?:[-*]|\d+[.)])\s+.+\n?){3,6}$/gim, (m) => {
-        return /(?:sigilo|social|tecnic|retirada|opci[oó]n|elegir)/i.test(m) ? '' : m;
-      })
-      .trim();
-  }
-
-  return text;
-}
-
-function looksTruncatedNarrative(text = '') {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  if (t.length < 40) return false;
-
-  // Bad semantic endings even with punctuation (e.g. "... por toda tu.")
-  if (/\b(mi|tu|tus|su|sus|nuestro|nuestra|nuestros|nuestras)\s*[.!?…]?$/i.test(t)) return true;
-  if (/\b(de|del|de la|de los|de las|y|o|que|con|para|por|en|al|la|el)\s*[.!?…]?$/i.test(t)) return true;
-
-  if (/[.!?…]$/.test(t)) return false;
-  return t.length > 140;
-}
-
-function finalizeNarrative(text = '') {
-  let t = String(text || '').trim();
-  if (!t) return '';
-
-  // If it still looks cut, close it in a natural generic way.
-  if (looksTruncatedNarrative(t)) {
-    t = t.replace(/[,:;\-–—\s]+$/g, '').trim();
-    t += '. La situación sigue en movimiento a tu alrededor.';
-    return t;
-  }
-
-  // If complete enough but missing punctuation, close softly.
-  if (!/[.!?…]$/.test(t)) t += '.';
-  return t;
-}
 
 admin.initializeApp();
 const db = admin.firestore();
 
 const dmRouter = require('./dm');
+const { createDmConversationMemory } = require('./lib/dm-memory');
+const { createDmGeminiMiddleware } = require('./middleware/dm-gemini');
+
+const { updateConversationMemory, saveLastDmReply } = createDmConversationMemory();
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -158,6 +37,7 @@ const VERTEX_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PR
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
 const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-3.1-pro-preview';
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image-preview';
+const FORCE_GEMINI_DM = String(process.env.FORCE_GEMINI_DM || '1') === '1';
 
 function readGuidance(fileName) {
   try {
@@ -185,57 +65,6 @@ function stripMetaContractSection(md = '') {
 const GUIDANCE_MASTER_NATURAL = stripMetaContractSection(GUIDANCE_MASTER);
 const GUIDANCE_DICE_NATURAL = stripMetaContractSection(GUIDANCE_DICE);
 
-const dmConversationMemory = new Map(); // key: user id -> lightweight conversational hints
-
-function inferTone(message = '') {
-  const m = String(message || '');
-  if (/\b(jaja|jajaja|xd|jeje|😂|🤣)\b/i.test(m)) return 'ligero';
-  if (/\?|ayuda|no entiendo|explica|como|cómo|que hago|qué hago/i.test(m)) return 'apoyo';
-  if (/!{2,}|\b(rapido|rápido|ya|vamos|urgente)\b/i.test(m)) return 'directo';
-  return 'neutral';
-}
-
-function buildRecentIntent(history = [], currentMessage = '') {
-  const recentUser = [...history].reverse().find(h => h?.kind === 'user' && String(h?.text || '').trim());
-  const prev = String(recentUser?.text || '').trim();
-  const now = String(currentMessage || '').trim();
-  const basis = now || prev;
-  if (!basis) return 'continuar la escena';
-
-  const n = basis.toLowerCase();
-  if (/inventario|que tengo|qué tengo|bolsillo|llevo/i.test(n)) return 'revisar inventario';
-  if (/credit|dinero|pagar|cuanto tengo|cuánto tengo/i.test(n)) return 'gestionar créditos';
-  if (/hablo|pregunto|convencer|negoci|guardia|npc/i.test(n)) return 'interacción social';
-  if (/observo|miro|inspeccion|alrededor|que hay|qué hay/i.test(n)) return 'observar entorno';
-  if (/voy|entro|camino|muevo|b12|cantina|panel/i.test(n)) return 'desplazarse';
-  return 'acción libre';
-}
-
-function updateConversationMemory(userId, message, history) {
-  const key = String(userId || 'anon');
-  const prev = dmConversationMemory.get(key) || {};
-  const tone = inferTone(message);
-  const recentIntent = buildRecentIntent(history, message);
-  const mem = {
-    tone,
-    recentIntent,
-    lastUserMessage: String(message || '').slice(0, 220),
-    lastDmReply: prev.lastDmReply || '',
-    updatedAt: Date.now()
-  };
-  dmConversationMemory.set(key, mem);
-  return mem;
-}
-
-function saveLastDmReply(userId, replyText = '') {
-  const key = String(userId || 'anon');
-  const prev = dmConversationMemory.get(key) || {};
-  dmConversationMemory.set(key, {
-    ...prev,
-    lastDmReply: String(replyText || '').slice(0, 280),
-    updatedAt: Date.now()
-  });
-}
 
 function hashPin(pin) {
   return crypto.createHash('sha256').update(String(pin)).digest('hex');
@@ -290,7 +119,11 @@ async function askGemini(prompt) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: p }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
+        generationConfig: {
+          temperature: 0.6,
+          topP: 0.9,
+          maxOutputTokens: 768
+        }
       })
     });
     let j = null;
@@ -303,8 +136,10 @@ async function askGemini(prompt) {
     if (!r.ok) {
       throw new Error(j?.error?.message || raw || `Gemini API HTTP ${r.status}`);
     }
-    const text = j?.candidates?.[0]?.content?.parts?.map(x => x?.text || '').join(' ').trim() || raw || '';
-    return { text, model: GEMINI_CHAT_MODEL, transport: 'api_key' };
+    const candidate = j?.candidates?.[0] || null;
+    const finishReason = candidate?.finishReason || null;
+    const text = candidate?.content?.parts?.map(x => x?.text || '').join(' ').trim() || raw || '';
+    return { text, model: GEMINI_CHAT_MODEL, transport: 'api_key', finishReason };
   }
 
   // Fallback: Vertex path
@@ -312,11 +147,17 @@ async function askGemini(prompt) {
   const model = vertexAI.getGenerativeModel({ model: GEMINI_CHAT_MODEL });
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: p }] }],
-    generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
+    generationConfig: {
+      temperature: 0.6,
+      topP: 0.9,
+      maxOutputTokens: 768
+    }
   });
 
-  const text = result?.response?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(' ').trim() || '';
-  return { text, model: GEMINI_CHAT_MODEL, transport: 'vertex' };
+  const candidate = result?.response?.candidates?.[0] || null;
+  const finishReason = candidate?.finishReason || null;
+  const text = candidate?.content?.parts?.map(part => part.text || '').join(' ').trim() || '';
+  return { text, model: GEMINI_CHAT_MODEL, transport: 'vertex', finishReason };
 }
 
 function auth(req, res, next) {
@@ -363,7 +204,7 @@ app.post('/ai/test', auth, async (req, res) => {
     const out = await withTimeout(askGemini(prompt), 15000, 'gemini_timeout');
     return res.json({ ok: true, model: out.model, location: VERTEX_LOCATION, text: out.text });
   } catch (e) {
-    console.error('[AI test]', e);
+    logger.error('[AI test]', e);
     const payload = normalizeAiError(e, GEMINI_CHAT_MODEL);
     return res.status(500).json(payload);
   }
@@ -458,7 +299,7 @@ app.post('/ai/image', auth, async (req, res) => {
       text: textPart?.text || ''
     });
   } catch (e) {
-    console.error('[AI image]', e);
+    logger.error('[AI image]', e);
     const payload = normalizeAiError(e, GEMINI_IMAGE_MODEL);
     payload.error = 'AI_IMAGE_ERROR';
     return res.status(500).json(payload);
@@ -495,7 +336,7 @@ app.post('/auth/register', async (req, res) => {
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 7 * 24 * 60 * 60 * 1000 });
     return res.json({ ok: true, user: { id: user.id, username: user.username }, token, message: 'Usuario registrado' });
   } catch (e) {
-    console.error('[AUTH register]', e);
+    logger.error('[AUTH register]', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR', message: 'Error del servidor' });
   }
 });
@@ -526,7 +367,7 @@ app.post('/auth/login', async (req, res) => {
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 7 * 24 * 60 * 60 * 1000 });
     return res.json({ ok: true, user: { id: uid, username: user.username }, token, message: 'Login exitoso' });
   } catch (e) {
-    console.error('[AUTH login]', e);
+    logger.error('[AUTH login]', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR', message: 'Error del servidor' });
   }
 });
@@ -546,7 +387,7 @@ app.get('/world/characters/me', auth, async (req, res) => {
     if (!snap.exists) return res.json({ ok: true, character: null });
     return res.json({ ok: true, character: snap.data() });
   } catch (e) {
-    console.error('[WORLD me]', e);
+    logger.error('[WORLD me]', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR', message: 'Error del servidor' });
   }
 });
@@ -570,7 +411,7 @@ app.post('/world/characters', auth, async (req, res) => {
     await db.collection('characters').doc(req.user.id).set(character, { merge: true });
     return res.json({ ok: true, character, message: 'Personaje guardado' });
   } catch (e) {
-    console.error('[WORLD save]', e);
+    logger.error('[WORLD save]', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR', message: 'Error del servidor' });
   }
 });
@@ -581,7 +422,7 @@ app.get('/chat/history', auth, async (req, res) => {
     const messages = q.docs.map(d => d.data());
     return res.json({ ok: true, messages });
   } catch (e) {
-    console.error('[CHAT history]', e);
+    logger.error('[CHAT history]', e);
     return res.status(500).json({ ok: false, error: 'SERVER_ERROR', message: 'Error del servidor' });
   }
 });
@@ -602,139 +443,28 @@ app.post('/roll', auth, async (req, res) => {
 });
 
 // Persist minimal chat transcript around DM responses
-app.use('/dm', auth, async (req, res, next) => {
-  try {
-    if (req.method === 'POST' && req.path === '/respond') {
-      const msg = String(req.body?.message || '');
-      const stage = String(req.body?.stage || '').toLowerCase();
-      const mode = String(req.body?.config?.mode || 'rich').toLowerCase();
-      const forceGemini = String(process.env.FORCE_GEMINI_DM || '1') === '1';
-      const userAskedOptions = /\b(opciones?|alternativas|que puedo hacer|qué puedo hacer|dame opciones|sugerencias)\b/i.test(msg);
-
-      if (msg && !msg.startsWith('<<')) {
-        await db.collection('users').doc(req.user.id).collection('messages').add({
-          role: 'user',
-          text: msg,
-          ts: new Date().toISOString()
-        });
-      }
-
-      const originalJson = res.json.bind(res);
-      res.json = async (payload) => {
-        try {
-          const cleanText = (stage === 'done'
-            ? polishStageDoneText(payload?.text || '', { userAskedOptions })
-            : sanitizeDmText(payload?.text || '')
-          ).slice(0, 4000);
-          if (payload && typeof payload === 'object' && cleanText) {
-            payload.text = cleanText;
-          }
-
-          if (cleanText) {
-            saveLastDmReply(req.user.id, cleanText);
-            await db.collection('users').doc(req.user.id).collection('messages').add({
-              role: 'dm',
-              text: cleanText,
-              ts: new Date().toISOString(),
-              meta: {
-                stage,
-                engine: payload?.engine || 'rules',
-                model: payload?.model || null,
-                mode,
-                forceGemini
-              }
-            });
-          }
-        } catch (e) {
-          console.error('[DM persist]', e);
-        }
-
-        // observability: tag engine internally without contaminating text UX
-        if (stage === 'done' && payload && !payload.engine) {
-          payload.engine = 'rules';
-          payload.mode = mode;
-        }
-
-        return originalJson(payload);
-      };
-
-      // Gemini for open conversation after onboarding + dice outcome narration
-      const isProtocolMsg = msg.startsWith('<<');
-      const diceOutcomeMatch = msg.match(/<<DICE_OUTCOME\s+SKILL="([^"]+)"\s+OUTCOME="([^"]+)"\s*>>/i);
-      const isDiceOutcomeProtocol = !!diceOutcomeMatch;
-      const allowGemini = forceGemini || mode === 'rich';
-      // Keep onboarding deterministic, but allow dice outcome protocol to narrate via Gemini.
-      const shouldUseGemini = stage === 'done' && allowGemini && (!isProtocolMsg || isDiceOutcomeProtocol);
-      if (shouldUseGemini) {
-        try {
-          const state = req.body?.clientState || {};
-          const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
-          const effectiveMessage = isDiceOutcomeProtocol
-            ? `Resultado de tirada: habilidad ${diceOutcomeMatch[1]}, outcome ${diceOutcomeMatch[2]}. Narra consecuencias naturales y continuidad de escena.`
-            : msg;
-          const convMem = updateConversationMemory(req.user.id, effectiveMessage, history);
-
-          const prompt = [
-            'Eres el máster narrativo de una aventura sci-fi estilo Star Wars.',
-            'Conversación abierta y natural: sigue la intención reciente del jugador sin forzarlo a estructura rígida.',
-            'Mantén continuidad explícita con lo último que hizo o preguntó el jugador.',
-            'Evita repetir frases o cierres idénticos al turno anterior del máster.',
-            'Adapta el tono a la energía del jugador: directo si va al grano, cálido si pide ayuda, ligero si usa humor.',
-            'Responde en español natural, corto-medio, con avance narrativo concreto y útil.',
-            'Aplica la guidance internamente, pero NO muestres su formato, reglas ni estructura al usuario.',
-            'SAFETY DE FORMATO: no headings markdown, no etiquetas Hook/Escena/Consecuencia/Opciones, no bloques JSON, no meta-comentarios, no tokens <<...>>.',
-            userAskedOptions
-              ? 'El jugador pidió opciones: puedes dar 2-3 alternativas breves dentro del flujo natural (sin encabezados).'
-              : 'Evita listas o menús salvo que el jugador pida explícitamente opciones.',
-            GUIDANCE_MASTER_NATURAL ? `\n[GUIDANCE_MASTER_NATURAL]\n${GUIDANCE_MASTER_NATURAL}` : '',
-            GUIDANCE_GAME ? `\n[GUIDANCE_GAME]\n${GUIDANCE_GAME}` : '',
-            GUIDANCE_DICE_NATURAL ? `\n[GUIDANCE_DICE_NATURAL]\n${GUIDANCE_DICE_NATURAL}` : '',
-            `Jugador: ${state?.name || 'Jugador'} | Especie: ${state?.species || 'N/D'} | Rol: ${state?.role || 'N/D'}`,
-            `Memoria conversacional: tono=${convMem.tone}; intención reciente=${convMem.recentIntent}; última respuesta del máster="${String(convMem.lastDmReply || '').slice(0, 180)}"`,
-            'Contexto reciente:',
-            ...history.map(h => `- ${(h?.kind || 'dm')}: ${String(h?.text || '').slice(0, 240)}`),
-            `Mensaje actual del jugador: ${effectiveMessage}`
-          ].filter(Boolean).join('\n');
-
-          let out = await withTimeout(askGemini(prompt), 12000, 'gemini_timeout');
-          let clean = sanitizeDmText(out?.text || '').slice(0, 4000);
-
-          if (looksTruncatedNarrative(clean)) {
-            const repairPrompt = [
-              'Reescribe de forma completa y natural la respuesta del máster para que NO quede cortada.',
-              'No uses etiquetas, ni JSON, ni listas rígidas.',
-              `Respuesta cortada: ${clean}`,
-              `Intención del jugador: ${effectiveMessage}`
-            ].join('\n');
-            const repaired = await withTimeout(askGemini(repairPrompt), 9000, 'gemini_repair_timeout');
-            const repairedClean = sanitizeDmText(repaired?.text || '').slice(0, 4000);
-            if (repairedClean && !looksTruncatedNarrative(repairedClean)) {
-              out = repaired;
-              clean = repairedClean;
-            }
-          }
-
-          if (clean) {
-            clean = finalizeNarrative(clean).slice(0, 5000);
-            return res.json({ ok: true, text: clean, engine: 'gemini', model: out.model, mode, forceGemini });
-          }
-        } catch (e) {
-          console.error('[DM gemini fallback]', {
-            message: e?.message,
-            code: e?.code,
-            status: e?.status,
-            model: GEMINI_CHAT_MODEL,
-            location: VERTEX_LOCATION
-          });
-        }
-      }
-    }
-    next();
-  } catch (e) {
-    console.error('[DM middleware]', e);
-    next();
-  }
 }, dmRouter);
+
+const dmMiddleware = createDmGeminiMiddleware({
+  db,
+  logger,
+  askGemini,
+  withTimeout,
+  updateConversationMemory,
+  saveLastDmReply,
+  guidance: {
+    masterNatural: GUIDANCE_MASTER_NATURAL,
+    diceNatural: GUIDANCE_DICE_NATURAL,
+    game: GUIDANCE_GAME
+  },
+  config: {
+    forceGeminiDefault: FORCE_GEMINI_DM,
+    geminiChatModel: GEMINI_CHAT_MODEL,
+    vertexLocation: VERTEX_LOCATION
+  }
+});
+
+app.use('/dm', auth, dmMiddleware, dmRouter);
 
 app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found', path: req.path, method: req.method }));
 
