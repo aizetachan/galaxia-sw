@@ -465,39 +465,6 @@ const dmMiddleware = createDmGeminiMiddleware({
 
 app.use('/dm', auth, dmMiddleware, dmRouter);
 
-// News persistence endpoints for cron jobs
-app.post('/news/record', async (req, res) => {
-  try {
-    const date = String(req.body?.date || '').trim();
-    const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    if (!date || !items.length) return res.status(400).json({ ok: false, error: 'INVALID_PAYLOAD' });
-    const batch = db.batch();
-    const base = db.collection('news_sent').doc(date).collection('items');
-    items.forEach(it => {
-      const id = encodeURIComponent(it.url || it.link || it.href || it).slice(0,200);
-      batch.set(base.doc(id), { url: it.url || it.link || it.href || it, title: it.title||null, ts: Date.now(), meta: it.meta||null }, { merge: true });
-    });
-    await batch.commit();
-    return res.json({ ok: true, saved: items.length });
-  } catch (e) {
-    console.error('[NEWS record]', e);
-    return res.status(500).json({ ok: false, error: 'SERVER_ERROR' });
-  }
-});
-
-app.get('/news/sent', async (req, res) => {
-  try {
-    const date = String(req.query?.date || '').trim();
-    if (!date) return res.status(400).json({ ok: false, error: 'MISSING_DATE' });
-    const q = await db.collection('news_sent').doc(date).collection('items').get();
-    const urls = q.docs.map(d => d.data().url).filter(Boolean);
-    return res.json({ ok: true, urls });
-  } catch (e) {
-    console.error('[NEWS read]', e);
-    return res.status(500).json({ ok: false, error: 'SERVER_ERROR' });
-  }
-});
-
 app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found', path: req.path, method: req.method }));
 
 exports.api = functions
